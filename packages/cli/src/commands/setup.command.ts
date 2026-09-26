@@ -13,8 +13,8 @@ import { confirmOnTerminal, type Confirm } from '../confirm';
 import { describeCount } from '../plural';
 import { defaultScanSeams, scanMachine, type ScanSeams } from '../machine-scan';
 import { connectMachine, type ConnectSeams } from '../sync/connect';
-import { manageable, offboardAgent } from '../agents/onboard';
-import { onboardedInto, readRecord } from '../agents/onboarding';
+import { manageable, OFFBOARD, offboardAgent } from '../agents/onboard';
+import { onboardedInto, readRecord, sponsoredBy } from '../agents/onboarding';
 import { displayName, readNames, type AgentNames } from '../agents/names';
 import { askOnTerminal, type NameAsker } from '../agents/name-prompt';
 import { runPathLine } from '../protect/seam-install';
@@ -248,21 +248,44 @@ interface AgentOffer {
   names: AgentNames;
 }
 
+/**
+ * The row for an agent whose record already answers the question, or null where it should
+ * be offered: never onboarded, or minted under an earlier enrolment and now handed back.
+ */
+async function settledEarlier(
+  deps: SetupDeps,
+  agentId: string,
+  account: Account,
+  name: string,
+): Promise<Result | null> {
+  const already = await readRecord(deps.home(), agentId);
+  if (already === null) return null;
+  if (sponsoredBy(already, account)) {
+    return { name, status: STATUS.ALREADY, because: 'onboarded earlier' };
+  }
+  if (!onboardedInto(already, account)) {
+    // Onboarded into another workspace: rewriting would back up a config already
+    // pointing at the other plane, so it is said rather than onboarded over.
+    return { name, status: STATUS.ELSEWHERE, because: describePlane(already) };
+  }
+  // Minted under an earlier enrolment of this machine, so its credential left with that
+  // machine: the config goes back first, so the offer backs up the agent's own.
+  const back = await deps.offboard(deps.home(), account, agentId);
+  if (back.outcome !== OFFBOARD.FAILED) return null;
+  return {
+    name,
+    status: STATUS.FAILED,
+    because: back.because ?? 'could not put its config back',
+  };
+}
+
 /** One agent: already done, done elsewhere, ungovernable, or offered. */
 async function offerAgent(deps: SetupDeps, offer: AgentOffer): Promise<Result> {
   const { context, home } = deps;
   const { account, scanned, agent, names } = offer;
   const name = displayName(names, agent);
-  const already = await readRecord(home(), agent.id);
-
-  if (already !== null && onboardedInto(already, account)) {
-    return { name, status: STATUS.ALREADY, because: 'onboarded earlier' };
-  }
-  if (already !== null) {
-    // Onboarded into another workspace: rewriting would back up a config already
-    // pointing at the other plane, so it is said rather than onboarded over.
-    return { name, status: STATUS.ELSEWHERE, because: describePlane(already) };
-  }
+  const settled = await settledEarlier(deps, agent.id, account, name);
+  if (settled !== null) return settled;
 
   // Checked before anybody is asked, so nobody answers two questions for nothing.
   const config = await manageable(home(), deps.project(), agent.kind);

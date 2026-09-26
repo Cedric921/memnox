@@ -17,6 +17,7 @@ import {
   MEMNOX_HOME,
   pauseDirFor,
   pendingDirFor,
+  readAccount,
   taskDirFor,
 } from '@memnox/core';
 import {
@@ -25,6 +26,8 @@ import {
   removeInterceptors,
 } from '@memnox/interceptors';
 import type { CliContext } from '../cli-context';
+import { OFFBOARD, offboardAgent } from '../agents/onboard';
+import { listRecords } from '../agents/onboarding';
 import { removeClaudeHook } from '../protect/claude-hook';
 import { forgetKept } from '../keeper/kept';
 import { forgetKeeperState } from '../keeper/keeper-state';
@@ -127,6 +130,8 @@ async function runUninstall(
   await forgetKept(home);
   await forgetKeeperState(home);
   const taken: string[] = [
+    // Before the session tools, because a restored backup is the config as it was before any of ours.
+    ...(await handBackTheAgents(context, home)),
     ...(await removeTheInterceptors(context, home)),
     ...(await removeTheEditorHooks(context, home)),
     ...(await removeTheSessionTools(context, home)),
@@ -141,6 +146,32 @@ async function runUninstall(
 
   if (options.purge !== true) return reportKept(context, home, taken);
   return reportPurged(context, home, dir);
+}
+
+/**
+ * Every onboarded agent's config put back and its credential revoked, because a record
+ * left behind reads as governed to the next setup while the workspace has forgotten it.
+ */
+async function handBackTheAgents(context: CliContext, home: string): Promise<string[]> {
+  const records = await listRecords(home);
+  if (records.length === 0) {
+    context.flow.step('Agents', 'none was onboarded');
+    return [];
+  }
+  const account = await readAccount(home);
+  const back: string[] = [];
+  const stuck: string[] = [];
+  for (const record of records) {
+    const result = await offboardAgent(home, account, record.agentId);
+    (result.outcome === OFFBOARD.FAILED ? stuck : back).push(record.product);
+  }
+  context.flow.step(
+    'Agents',
+    stuck.length === 0
+      ? `handed back ${back.join(', ')}`
+      : `handed back ${back.length}; could not put ${stuck.join(', ')} back, the backups are in ${join(home, MEMNOX_HOME, 'agents', 'backups')}`,
+  );
+  return back.length > 0 ? ['the onboarded agents'] : [];
 }
 
 /** The PATH wrappers, which are the seam in front of every shell command. */

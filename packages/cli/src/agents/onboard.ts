@@ -229,6 +229,7 @@ async function backUpAndRecord(
     // Which control plane minted it, so a move between planes cannot read this as done there.
     workspaceId: input.account.workspaceId,
     baseUrl: input.account.baseUrl,
+    sponsorId: input.account.machineId,
     serverName: MANAGED_SERVER,
     onboardedAt: at,
   };
@@ -257,7 +258,7 @@ interface OffboardResult {
  */
 export async function offboardAgent(
   home: string,
-  account: Account,
+  account: Account | null,
   agentId: string,
   now: () => string = () => new Date().toISOString(),
 ): Promise<OffboardResult> {
@@ -278,7 +279,8 @@ export async function offboardAgent(
     };
   }
 
-  const revoked = await revokeAgent(account, record.machineId);
+  // No account is an uninstall after a logout: the config still comes back, nothing is revoked.
+  const revoked = account !== null && (await revokeAgent(account, record.machineId));
   await retireRecord(home, agentId, now());
   return { outcome: OFFBOARD.DONE, record, revoked, restoredFromBackup };
 }

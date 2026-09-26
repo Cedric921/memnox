@@ -37,7 +37,7 @@ import {
 } from '@memnox/core';
 
 import { CLI_VERSION } from '../defaults';
-import { kindOf, listRecords, onboardedInto } from '../agents/onboarding';
+import { kindOf, listRecords, sponsoredBy } from '../agents/onboarding';
 import { orgPolicyPath, PULL_OUTCOME, pullBundle, type PullResult } from './bundle';
 import { callCloud, CloudUnreachable } from './client';
 import { pullMemory, type MemoryPull } from './memory';
@@ -349,14 +349,14 @@ async function heartbeatBody(
 
 /**
  * Which agent each enrolled principal is for, so the control plane can join a typed
- * name to its id. This workspace's own records only, since a moved machine keeps the old.
+ * name to its id. This enrolment's own records only, since a moved or re-enrolled machine keeps the old.
  */
 async function enrolledAgents(
   home: string,
   account: Account,
 ): Promise<Record<string, unknown>[]> {
   return (await listRecords(home))
-    .filter((record) => onboardedInto(record, account))
+    .filter((record) => sponsoredBy(record, account))
     .map((record) => ({
       machineId: record.machineId,
       agentId: record.agentId,

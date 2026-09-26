@@ -34,6 +34,11 @@ export interface OnboardRecord {
    */
   workspaceId?: string;
   baseUrl?: string;
+  /**
+   * The enrolment of this machine that minted it. Absent on older records, which are
+   * dated against the enrolment instead.
+   */
+  sponsorId?: string;
   /** The server entry that was added, so offboard removes exactly that one. */
   serverName: string;
   onboardedAt: string;
@@ -130,6 +135,26 @@ export function onboardedInto(
     // The URL too, because two deployments can each hold a workspace called `acme`.
     (record.baseUrl === undefined || sameControlPlane(record.baseUrl, account.baseUrl))
   );
+}
+
+/**
+ * Whether the enrolment now in hand is the one this record was minted under, because
+ * logging in again is a new machine, and an agent sponsored by the old one went with it
+ * when that machine was removed from the workspace.
+ */
+export function sponsoredBy(
+  record: OnboardRecord,
+  account: {
+    baseUrl: string;
+    workspaceId: string;
+    machineId: string;
+    enrolledAt: string;
+  },
+): boolean {
+  if (!onboardedInto(record, account)) return false;
+  if (record.sponsorId !== undefined) return record.sponsorId === account.machineId;
+  // No sponsor written: an agent onboarded before this enrolment was minted under an earlier one.
+  return Date.parse(record.onboardedAt) >= Date.parse(account.enrolledAt);
 }
 
 /**

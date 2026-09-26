@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readdir, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Command } from 'commander';
@@ -10,6 +10,7 @@ import { plainStyle } from '../src/style';
 import { registerUninstallCommand } from '../src/commands/uninstall.command';
 import { existsSync } from 'node:fs';
 import { pauseDirFor, pendingDirFor } from '@memnox/core';
+import { listRecords, writeRecord } from '../src/agents/onboarding';
 
 async function machine(): Promise<{ home: string; repo: string }> {
   const home = await mkdtemp(join(tmpdir(), 'memnox-uninst-'));
@@ -70,6 +71,33 @@ describe('memnox uninstall', () => {
     expect(out.text).toContain('Nothing of Memnox is left');
     expect(out.text).toContain('PATH');
     await expect(readdir(join(home, '.memnox'))).rejects.toThrow();
+  });
+
+  it('hands every onboarded agent back, so a later setup offers it again', async () => {
+    /* A record left behind read as onboarded to the next setup, while the
+       workspace had forgotten the agent and its config still held a dead token. */
+    const { home, repo } = await machine();
+    const config = join(home, '.cursor', 'mcp.json');
+    const backup = join(home, '.memnox', 'agents', 'backups', 'cursor.json');
+    await mkdir(join(home, '.memnox', 'agents', 'backups'), { recursive: true });
+    await mkdir(join(home, '.cursor'), { recursive: true });
+    await writeFile(backup, '{"mcpServers":{}}', 'utf8');
+    await writeFile(config, '{"mcpServers":{"memnox":{"url":"x"}}}', 'utf8');
+    await writeRecord(home, {
+      agentId: 'agt_cursor',
+      product: 'Cursor',
+      configPath: config,
+      backupPath: backup,
+      machineId: 'mch_agent_1',
+      serverName: 'memnox',
+      onboardedAt: '2026-09-05T10:00:00.000Z',
+    });
+
+    const out = await run(['uninstall'], home, repo);
+
+    expect(out.text).toContain('handed back Cursor');
+    expect(await readFile(config, 'utf8')).toBe('{"mcpServers":{}}');
+    expect(await listRecords(home)).toEqual([]);
   });
 
   it('unwraps the MCP servers when it can, and otherwise says how', async () => {

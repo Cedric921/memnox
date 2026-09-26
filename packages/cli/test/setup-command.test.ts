@@ -51,7 +51,7 @@ const MACHINE = {
  * flow behind it is what enrolling the machine itself still uses.
  */
 const deviceFlow = (url: string): Response => {
-  if (url.endsWith(`/machines/${account.machineId}/agents`)) {
+  if (url.endsWith('/agents')) {
     return json({
       id: 'mch_agent_1',
       token: 'mch_agent_secret',
@@ -155,6 +155,8 @@ describe('memnox setup', () => {
     wired?: string[];
     /** What the account on disk was enrolled against, for the move between planes. */
     enrolledAt?: string;
+    /** A later login on the same plane, which is a new machine with none of the old agents. */
+    reenrolled?: boolean;
     /** The answer to the one question that is not about an agent: whether to move. */
     move?: boolean;
     /** A control plane that cannot be reached, for what a half-finished move says. */
@@ -174,7 +176,13 @@ describe('memnox setup', () => {
       await mkdir(join(home, '.memnox'), { recursive: true });
       await writeFile(
         join(home, '.memnox', 'account.json'),
-        JSON.stringify({ ...account, baseUrl: driven.enrolledAt ?? BASE }),
+        JSON.stringify({
+          ...account,
+          baseUrl: driven.enrolledAt ?? BASE,
+          ...(driven.reenrolled === true
+            ? { machineId: 'mch_host_again', enrolledAt: new Date().toISOString() }
+            : {}),
+        }),
         'utf8',
       );
     }
@@ -600,6 +608,18 @@ describe('memnox setup', () => {
     const { out } = await run({});
 
     expect(out.text).toContain('Authority is unchanged');
+  });
+
+  it('offers the agents again after a new login, handing back what the old one minted', async () => {
+    /* Uninstalled, removed from the workspace, logged in again: the records on
+       disk named agents the workspace no longer had, and setup called them
+       onboarded earlier and offered nothing. */
+    await run({ yes: true });
+    const { handedBack, out } = await run({ reenrolled: true, yes: true });
+
+    expect(handedBack.sort()).toEqual(['agt_claude-code', 'agt_cursor']);
+    expect(out.text).not.toContain('onboarded earlier');
+    expect(out.text).toContain('2 agents are under Memnox');
   });
 
   it('leaves an agent that is already onboarded alone rather than asking twice', async () => {

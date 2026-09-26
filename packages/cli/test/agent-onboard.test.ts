@@ -9,6 +9,7 @@ import {
   listRecords,
   onboardedInto,
   readRecord,
+  sponsoredBy,
   type OnboardRecord,
 } from '../src/agents/onboarding';
 import type { EnrolReporter } from '../src/agents/enrol-agent';
@@ -276,6 +277,37 @@ describe('onboarding an agent', () => {
     expect(onboardedInto(record, { ...account, workspaceId: 'other' })).toBe(false);
   });
 
+  it('belongs to the enrolment that minted it, and not to a later login', async () => {
+    /* Logging in again is a new machine, and removing the old one from the
+       workspace took its agents with it. Reading the record as done left
+       those agents offered to nobody and governed by nothing. */
+    await onboardAgent({
+      home,
+      project: home,
+      account,
+      agentId: AGENT,
+      agentKind: 'cursor',
+      report: out(),
+    });
+    const record = (await readRecord(home, AGENT)) as OnboardRecord;
+
+    expect(record.sponsorId).toBe(account.machineId);
+    expect(sponsoredBy(record, account)).toBe(true);
+    expect(sponsoredBy(record, { ...account, machineId: 'mch_again' })).toBe(false);
+  });
+
+  it('dates a record written without a sponsor against the enrolment instead', () => {
+    const written = { agentId: AGENT, onboardedAt: '2026-09-06T00:00:00.000Z' };
+
+    expect(sponsoredBy(written as OnboardRecord, account)).toBe(true);
+    expect(
+      sponsoredBy(written as OnboardRecord, {
+        ...account,
+        enrolledAt: '2026-09-07T00:00:00.000Z',
+      }),
+    ).toBe(false);
+  });
+
   it('reads a record that names no plane as belonging to whichever is asking', () => {
     /* Every record written before the field existed. Guessing the other way
        would re-onboard every agent on every laptop that upgrades. */
@@ -535,6 +567,24 @@ describe('offboarding an agent', () => {
     await offboardAgent(home, account, AGENT);
 
     expect(await readRecord(home, AGENT)).toBeNull();
+  });
+
+  it('still puts the config back with no account to revoke through', async () => {
+    /* An uninstall after a logout: the credential is not this machine's to take
+       back any more, and that is no reason to leave the agent pointed at it. */
+    await onboardAgent({
+      home,
+      project: home,
+      account,
+      agentId: AGENT,
+      agentKind: 'cursor',
+      report: out(),
+    });
+    const result = await offboardAgent(home, null, AGENT);
+
+    expect(result.outcome).toBe(OFFBOARD.DONE);
+    expect(result.revoked).toBe(false);
+    expect(JSON.parse(await config())).toEqual(ORIGINAL);
   });
 
   it('removes only the Memnox entry where the backup has gone', async () => {
