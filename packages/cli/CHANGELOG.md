@@ -1,5 +1,14 @@
 # memnox
 
+## 0.13.4
+
+### Patch Changes
+
+- `memnox setup` offers an agent again after the machine logs in anew. A record written under an earlier login read as onboarded earlier, so an agent the workspace had removed with its old machine was offered to nobody and kept a revoked token in its config. Setup now puts that config back and offers the agent, and `memnox uninstall` hands every onboarded agent back before anything else, restoring its config and revoking its credential.
+  - @memnox/core@0.13.4
+  - @memnox/proxy@0.13.4
+  - @memnox/interceptors@0.13.4
+
 ## 0.13.3
 
 ### Patch Changes
