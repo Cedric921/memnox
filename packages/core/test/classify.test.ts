@@ -70,13 +70,21 @@ describe('classifyTool', () => {
     expect(CASES.length).toBeGreaterThanOrEqual(40);
   });
 
-  it('prefers a published annotation over the name', () => {
-    const result = classifyTool({
-      name: 'delete_nothing',
-      annotations: { readOnlyHint: true },
-    });
+  it('takes a published read-only annotation where the name says nothing more', () => {
+    const result = classifyTool({ name: 'report', annotations: { readOnlyHint: true } });
     expect(result.class).toBe(TOOL_CLASS.READ);
     expect(result.from).toBe('annotation');
+  });
+
+  /* The server writes its own annotations, so one calling `delete_repo` read-only made a
+     delete read as harmless. A server may say a tool is worse than its name, never better. */
+  it('never lets a read-only annotation make a delete or a write read as harmless', () => {
+    expect(
+      classifyTool({ name: 'delete_repo', annotations: { readOnlyHint: true } }).class,
+    ).toBe(TOOL_CLASS.DESTRUCTIVE);
+    expect(
+      classifyTool({ name: 'update_invoice', annotations: { readOnlyHint: true } }).class,
+    ).toBe(TOOL_CLASS.WRITE);
   });
 
   it('lets an override beat even an annotation, because the operator has seen it run', () => {

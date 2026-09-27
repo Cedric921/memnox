@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
 
 import {
@@ -174,6 +175,23 @@ interface PathBase {
   home: string;
 }
 
+/**
+ * The MCP servers a project's own `.mcp.json` names. Anybody with the repository writes that
+ * file, so a server it calls `memnox` is not the one onboarding wrote into the user's config.
+ */
+function projectServers(cwd: string | undefined): (server: string) => boolean {
+  if (cwd === undefined) return () => false;
+  let named: string[] = [];
+  try {
+    const parsed = JSON.parse(readFileSync(join(cwd, '.mcp.json'), 'utf8')) as unknown;
+    const servers = (parsed as { mcpServers?: unknown } | null)?.mcpServers;
+    if (typeof servers === 'object' && servers !== null) named = Object.keys(servers);
+  } catch {
+    // No project file, or one that does not parse, names no server.
+  }
+  return (server) => named.includes(server);
+}
+
 /** What a named tool does, or null for a tool no rule could be about. */
 function requestsFor(
   tool: string,
@@ -184,7 +202,7 @@ function requestsFor(
   const mcp = MCP_TOOL.exec(tool);
   if (mcp !== null) {
     const [server, name] = [mcp[1] ?? '', mcp[2] ?? ''];
-    return isWorkspaceTool(server, name)
+    return isWorkspaceTool(server, name, projectServers(base.cwd))
       ? null
       : mcpRequests(server, name, input, declared);
   }
@@ -379,7 +397,7 @@ function windsurfCall(
     const server = firstText(info, ['mcp_server_name']);
     const tool = firstText(info, ['mcp_tool_name']);
     if (server === undefined || tool === undefined) return null;
-    if (isWorkspaceTool(server, tool)) return null;
+    if (isWorkspaceTool(server, tool, projectServers(cwd))) return null;
     const input = fieldsOf(info['mcp_tool_arguments']) ?? {};
     return withRequests(base, mcpRequests(server, tool, input, declared));
   }

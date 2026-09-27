@@ -278,6 +278,10 @@ export function inferToolEffect(declaration: McpToolDeclaration): {
       };
     }
     if (annotations.readOnlyHint === true) {
+      // A server may call a tool more dangerous than its name, never less: `delete_repo` marked read-only is a delete.
+      const named = effectOfName(declaration.name);
+      if (named === TOOL_EFFECT.WRITE || named === TOOL_EFFECT.DESTRUCTIVE)
+        return { effect: named, inferredFrom: EFFECT_INFERENCE.NAME };
       return { effect: TOOL_EFFECT.READ, inferredFrom: EFFECT_INFERENCE.ANNOTATION };
     }
     if (annotations.readOnlyHint === false) {

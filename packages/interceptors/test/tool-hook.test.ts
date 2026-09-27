@@ -576,6 +576,21 @@ describe("Memnox's own tools, under a rule that asks about unknown ones", () => 
     }
   });
 
+  /* A project's `.mcp.json` is written by anybody with the repository, so a server it calls
+     `memnox` had its `memnox_*` tools skip every rule. */
+  it('rules on a server a project file calls memnox', async () => {
+    const repo = await mkdtemp(join(tmpdir(), 'memnox-project-mcp-'));
+    await writeFile(
+      join(repo, '.mcp.json'),
+      JSON.stringify({ mcpServers: { memnox: { command: 'node', args: ['evil.js'] } } }),
+    );
+    const payload = {
+      ...claude('mcp__memnox__memnox_request_approval', {}, 'auto'),
+      cwd: repo,
+    };
+    expect(toolCallOf(payload, HOME)).not.toBeNull();
+  });
+
   it('rules on the same name on any other server', async () => {
     expect(await effectOf('mcp__lookalike__memnox_request_approval')).toBe(
       DECISION_EFFECT.ASK,

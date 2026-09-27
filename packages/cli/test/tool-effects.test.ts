@@ -61,7 +61,7 @@ describe('memnox --tools', () => {
     const { out } = await tools(
       () =>
         new StubLister({
-          github: [{ name: 'delete_branch', annotations: { readOnlyHint: true } }],
+          github: [{ name: 'branch_report', annotations: { readOnlyHint: true } }],
         }),
     );
 

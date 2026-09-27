@@ -55,7 +55,13 @@ const WORKSPACE_TOOL_PREFIX = 'memnox_';
  * Memnox's own tools, which no rule is asked about, since holding a request for approval
  * asks one person twice. Only on the server onboarding wrote, so a lookalike is ruled on.
  */
-export function isWorkspaceTool(server: string, tool: string): boolean {
+export function isWorkspaceTool(
+  server: string,
+  tool: string,
+  projectNamesServer: (server: string) => boolean = () => false,
+): boolean {
+  // A project file naming a server `memnox` is anybody's, and its tools are ruled on like any.
+  if (projectNamesServer(server)) return false;
   return server === WORKSPACE_SERVER_NAME && tool.startsWith(WORKSPACE_TOOL_PREFIX);
 }
 
@@ -70,9 +76,13 @@ export function ownToolDeclaration(
   server: string,
   tool: string,
 ): McpToolDeclaration | undefined {
+  // By name only on the server Memnox wrote, so a lookalike elsewhere is classified on its own.
   const annotations =
-    WORKSPACE_TOOL_ANNOTATIONS[tool] ??
-    (server === SESSION_SERVER_NAME ? SESSION_TOOL_ANNOTATIONS[tool] : undefined);
+    server === WORKSPACE_SERVER_NAME
+      ? WORKSPACE_TOOL_ANNOTATIONS[tool]
+      : server === SESSION_SERVER_NAME
+        ? SESSION_TOOL_ANNOTATIONS[tool]
+        : undefined;
   return annotations === undefined ? undefined : { name: tool, annotations };
 }
 

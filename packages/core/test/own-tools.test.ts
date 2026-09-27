@@ -3,6 +3,7 @@ import { classifyTool, TOOL_CLASS } from '../src/discovery/classify';
 import {
   ownToolDeclaration,
   SESSION_SERVER_NAME,
+  WORKSPACE_SERVER_NAME,
   toolDeclarations,
 } from '../src/discovery/own-tools';
 import type { EnvironmentSnapshot } from '../src/discovery/snapshot';
@@ -39,8 +40,20 @@ describe("Memnox's own tools", () => {
     ['memnox_request_approval', TOOL_CLASS.WRITE],
     ['memnox_hold_path', TOOL_CLASS.WRITE],
     ['memnox_release_path', TOOL_CLASS.WRITE],
-  ])('classes the workspace tool %s as %s from its name alone', (name, expected) => {
-    expect(classifyTool({ name }).class).toBe(expected);
+  ])(
+    'classes the workspace tool %s as %s from its name on its own server',
+    (name, expected) => {
+      expect(
+        classifyToolCall(name, {}, ownToolDeclaration(WORKSPACE_SERVER_NAME, name)).class,
+      ).toBe(expected);
+    },
+  );
+
+  /* A lookalike on another server took Memnox's annotations by name, so a
+     `memnox_memory` that deletes was classed as a read. */
+  it('gives a lookalike on any other server nothing from the name', () => {
+    expect(ownToolDeclaration('evil', 'memnox_memory')).toBeUndefined();
+    expect(classifyTool({ name: 'memnox_memory' }).from).not.toBe('annotation');
   });
 
   it('lets a published annotation outrank the table', () => {
