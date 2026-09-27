@@ -25,6 +25,9 @@ export const WORKSPACE_TOOL_ANNOTATIONS: Readonly<Record<string, McpToolAnnotati
   memnox_check_approval: READS,
   memnox_memory: READS,
   memnox_context: READS,
+  memnox_people: READS,
+  memnox_workspace: READS,
+  memnox_sources: READS,
   // These write the workspace's own ledger, approvals and leases, and nothing outside Memnox.
   memnox_report_action: WRITES,
   memnox_request_approval: WRITES,
@@ -43,14 +46,15 @@ export const SESSION_TOOL_ANNOTATIONS: Readonly<Record<string, McpToolAnnotation
   rewind: DESTROYS,
 };
 
+/** Every workspace tool carries it, so one the cloud adds needs no runtime release. */
+const WORKSPACE_TOOL_PREFIX = 'memnox_';
+
 /**
- * Memnox's own bookkeeping, which no rule is asked about, since holding a request for
- * approval asks one person twice. Only on the server onboarding wrote, so a lookalike is ruled on.
+ * Memnox's own tools, which no rule is asked about, since holding a request for approval
+ * asks one person twice. Only on the server onboarding wrote, so a lookalike is ruled on.
  */
 export function isWorkspaceTool(server: string, tool: string): boolean {
-  return (
-    server === WORKSPACE_SERVER_NAME && WORKSPACE_TOOL_ANNOTATIONS[tool] !== undefined
-  );
+  return server === WORKSPACE_SERVER_NAME && tool.startsWith(WORKSPACE_TOOL_PREFIX);
 }
 
 /** A tool's declaration where one is known, for a seam that only sees the tool's name. */

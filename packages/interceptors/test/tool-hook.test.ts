@@ -548,6 +548,8 @@ describe("Memnox's own tools, under a rule that asks about unknown ones", () => 
       'mcp__memnox__memnox_hold_path',
       'mcp__memnox__memnox_release_path',
       'mcp__memnox__memnox_report_action',
+      'mcp__memnox__memnox_people',
+      'mcp__memnox__memnox_added_after_this_release',
     ]) {
       expect(toolCallOf(claude(tool, {}), HOME), tool).toBeNull();
       expect(await effectOf(tool), tool).toBe(DECISION_EFFECT.ALLOW);
