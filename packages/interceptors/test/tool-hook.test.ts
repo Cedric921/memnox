@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -381,6 +381,26 @@ describe("the machine's mode, read and never written", () => {
     await mkdir(join(home, '.memnox'));
     await writeFile(join(home, '.memnox', 'config.toml'), 'mode = "enforce"\n');
     expect(await readMachineMode(home)).toBe(ENFORCEMENT_MODE.ENFORCE);
+  });
+
+  /* An unreadable or emptied config used to read as a first run, which observes, so
+     one `chmod` or one truncation was a quiet way to switch enforcement off. */
+  it('enforces when settings exist but cannot be read, or carry no mode', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'memnox-tool-mode-'));
+    await mkdir(join(home, '.memnox'));
+    const config = join(home, '.memnox', 'config.toml');
+
+    await writeFile(config, '');
+    expect(await readMachineMode(home)).toBe(ENFORCEMENT_MODE.ENFORCE);
+
+    await writeFile(config, 'retentionDays = 30\n');
+    expect(await readMachineMode(home)).toBe(ENFORCEMENT_MODE.ENFORCE);
+
+    await writeFile(config, 'mode = "observe"\n');
+    await chmod(config, 0o000);
+    expect(await readMachineMode(home)).toBe(ENFORCEMENT_MODE.ENFORCE);
+    await chmod(config, 0o600);
+    expect(await readMachineMode(home)).toBe(ENFORCEMENT_MODE.OBSERVE);
   });
 });
 

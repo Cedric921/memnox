@@ -42,12 +42,16 @@ import type { ToolReply } from './tool-policy';
 /** The exit code Windsurf reads as "blocked", with the reason on stderr. */
 const WINDSURF_BLOCK = 2;
 
+/** The payload being answered, kept so a failure can still refuse the call it was about. */
+let received: unknown = null;
+
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const context = contextFrom(args, process.env);
   let payload: unknown;
   try {
     payload = JSON.parse(await readStdin());
+    received = payload;
   } catch {
     // Not a payload this hook was written for, so it says nothing about it.
     return;
@@ -217,9 +221,11 @@ async function keepBeforeFirstWrite(
   });
 }
 
-main().catch((err: unknown) => {
-  // A hook that throws must not read as a refusal; it ruled on nothing and says so.
-  log(`edit hook failed, ruling on nothing: ${String(err)}`);
+main().catch(async (err: unknown) => {
+  log(`edit hook failed: ${String(err)}`);
+  // In enforce a broken hook refuses a tool call, since saying nothing lets it through.
+  const refused = await failedToolAnswer(received, homedir()).catch(() => null);
+  emit(refused?.reply ?? null);
 });
 
 function personName(): string {

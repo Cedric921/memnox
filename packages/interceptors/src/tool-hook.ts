@@ -92,12 +92,24 @@ export interface ToolAnswer {
  */
 export async function readMachineMode(home: string): Promise<EnforcementMode> {
   if (await protectionStopped(home)) return ENFORCEMENT_MODE.OFF;
+  let raw: string;
   try {
-    return parseConfig(await readFile(configPathFor(home), 'utf8')).mode;
-  } catch {
+    raw = await readFile(configPathFor(home), 'utf8');
+  } catch (err) {
     // No settings yet is the first run, which observes before it enforces.
-    return FIRST_RUN_MODE;
+    if (isMissing(err)) return FIRST_RUN_MODE;
+    // There and unreadable is not a first run, and a firewall that cannot read its rules fails closed.
+    return ENFORCEMENT_MODE.ENFORCE;
   }
+  // The first run writes the mode, so settings without one were emptied or mangled after it.
+  if (!MODE_LINE.test(raw)) return ENFORCEMENT_MODE.ENFORCE;
+  return parseConfig(raw).mode;
+}
+
+const MODE_LINE = /^\s*mode\s*=/m;
+
+function isMissing(err: unknown): boolean {
+  return (err as NodeJS.ErrnoException | null)?.code === 'ENOENT';
 }
 
 /** What the last scan heard each MCP server say about its tools, since a hook sees only names. */
