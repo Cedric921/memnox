@@ -18,14 +18,16 @@ const HOLDER: LeaseHolder = { agent: 'codex-cli', sessionId: 'ses_laptop', pid: 
    work, and the two surfaces used to never meet. */
 describe('the outward action a command line takes', () => {
   it('names a pull request the way the proxy names it', () => {
-    const close = shellAction('gh', ['pr', 'close', '12'], UNKNOWN, ACME);
+    const close = shellAction('gh', ['pr', 'close', '12'], UNKNOWN, {
+      repositoryOf: ACME,
+    });
     expect(close?.resource).toBe('github:acme/api#pull/12');
 
     const byFlag = shellAction(
       'gh',
       ['pr', 'comment', '12', '-b', 'hi', '-R', 'Acme/API'],
       UNKNOWN,
-      NOWHERE,
+      { repositoryOf: NOWHERE },
     );
     expect(byFlag?.resource).toBe('github:acme/api#pull/12');
 
@@ -33,7 +35,7 @@ describe('the outward action a command line takes', () => {
       'gh',
       ['issue', 'close', 'https://github.com/acme/api/issues/9'],
       UNKNOWN,
-      NOWHERE,
+      { repositoryOf: NOWHERE },
     );
     expect(byUrl?.resource).toBe('github:acme/api#issue/9');
   });
@@ -44,15 +46,19 @@ describe('the outward action a command line takes', () => {
         'gh',
         ['pr', 'view', '12'],
         { action: 'gh.pr-view', class: 'read' },
-        ACME,
+        { repositoryOf: ACME },
       ),
     ).toBeNull();
-    expect(shellAction('gh', ['pr', 'diff', '12'], UNKNOWN, ACME)).toBeNull();
+    expect(
+      shellAction('gh', ['pr', 'diff', '12'], UNKNOWN, { repositoryOf: ACME }),
+    ).toBeNull();
   });
 
   /* A pull request number without its repository is not one thing. */
   it('names nothing where the repository cannot be told', () => {
-    expect(shellAction('gh', ['pr', 'close', '12'], UNKNOWN, NOWHERE)).toBeNull();
+    expect(
+      shellAction('gh', ['pr', 'close', '12'], UNKNOWN, { repositoryOf: NOWHERE }),
+    ).toBeNull();
   });
 
   it('claims a request that sends something and never one that only fetches', () => {
@@ -61,7 +67,7 @@ describe('the outward action a command line takes', () => {
       'curl',
       ['-X', 'POST', 'https://slack.com/api/chat.postMessage', '-d', 'text=hi'],
       network,
-      NOWHERE,
+      { repositoryOf: NOWHERE },
     );
     expect(post).not.toBeNull();
     expect(post?.resource).toBeUndefined();
@@ -79,9 +85,15 @@ describe('the outward action a command line takes', () => {
 
   it('claims a command that writes, and matches it only against the same line', () => {
     const write = { action: 'kubectl.apply', class: 'write', target: 'x.yaml' };
-    const one = shellAction('kubectl', ['apply', '-f', 'x.yaml'], write, NOWHERE);
-    const same = shellAction('kubectl', ['apply', '-f', 'x.yaml'], write, NOWHERE);
-    const other = shellAction('kubectl', ['apply', '-f', 'y.yaml'], write, NOWHERE);
+    const one = shellAction('kubectl', ['apply', '-f', 'x.yaml'], write, {
+      repositoryOf: NOWHERE,
+    });
+    const same = shellAction('kubectl', ['apply', '-f', 'x.yaml'], write, {
+      repositoryOf: NOWHERE,
+    });
+    const other = shellAction('kubectl', ['apply', '-f', 'y.yaml'], write, {
+      repositoryOf: NOWHERE,
+    });
     if (one === null || same === null || other === null) throw new Error('not claimed');
 
     expect(actionFingerprint(one)).toBe(actionFingerprint(same));
@@ -157,5 +169,31 @@ describe('asking before the command runs', () => {
     if ('release' in held) await held.release();
 
     expect(finished).toEqual([action]);
+  });
+});
+
+/* Two agents pushing one branch from two checkouts meet here, before either lands, rather
+   than the second finding out from a rejected push or overwriting the first. */
+describe('a push to a branch', () => {
+  const checkout = {
+    currentBranch: () => 'feature/billing',
+    remoteUrl: () => 'git@github.com:acme/api.git',
+  };
+  const PUSH = { action: 'git.push', class: 'write' };
+
+  it('is claimed under the branch it writes, the way a GitHub tool call would be', () => {
+    const push = shellAction('git', ['push'], PUSH, { repositoryOf: ACME, checkout });
+    expect(push?.resource).toBe('github:acme/api#branch/feature/billing');
+  });
+
+  it('is never claimed for a read like fetch or log', () => {
+    expect(
+      shellAction(
+        'git',
+        ['log'],
+        { action: 'git.log', class: 'read' },
+        { repositoryOf: ACME, checkout },
+      ),
+    ).toBeNull();
   });
 });

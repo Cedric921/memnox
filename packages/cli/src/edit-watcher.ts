@@ -5,6 +5,7 @@ import { join, sep } from 'node:path';
 import {
   CloudLeases,
   conflicts,
+  sameRepository,
   desktopNotice,
   GitRegionReader,
   LeaseRegistry,
@@ -17,6 +18,7 @@ import {
   minutesToMs,
   secondsToMs,
 } from '@memnox/core';
+import { remoteIdentityOf } from '@memnox/interceptors';
 
 /**
  * Edits nothing hooked, claimed from the files themselves a moment after they are saved.
@@ -52,7 +54,7 @@ export interface WatcherSeams {
   heldHere: (root: string, path: string) => Promise<boolean>;
   /** What changed in this file against the last commit, or null where nothing did. */
   changed: (root: string, path: string) => Promise<WrittenRegion | null>;
-  take: (path: string, region: WrittenRegion) => Promise<SharedTake>;
+  take: (root: string, path: string, region: WrittenRegion) => Promise<SharedTake>;
   notify: (message: string) => void;
   now: () => number;
 }
@@ -129,7 +131,7 @@ export class EditWatcher {
     if (this.claims.length >= MOST_CLAIMS_PER_MINUTE) return WATCH_OUTCOME.DEFERRED;
     this.claims.push(now);
 
-    const taken = await this.seams.take(path, region);
+    const taken = await this.seams.take(root, path, region);
     if (taken.outcome !== SHARED_OUTCOME.HELD_BY_ANOTHER) return WATCH_OUTCOME.CLAIMED;
     this.noticeCollision(path, taken, now);
     return WATCH_OUTCOME.COLLIDED;
@@ -201,14 +203,33 @@ function runGitQuestion(args: readonly string[], cwd: string): Promise<number> {
   });
 }
 
+/** One register per checkout, each naming its repository, since the watcher covers several. */
+function leasesPerRepository(home: string): (root: string) => CloudLeases {
+  const perRepository = new Map<string, CloudLeases>();
+  return (root) => {
+    const known = perRepository.get(root);
+    if (known !== undefined) return known;
+    const made = new CloudLeases(
+      home,
+      globalThis.fetch,
+      undefined,
+      remoteIdentityOf(root),
+    );
+    perRepository.set(root, made);
+    return made;
+  };
+}
+
 function defaultSeams(home: string): WatcherSeams {
-  const leases = new CloudLeases(home);
+  const leasesFor = leasesPerRepository(home);
   const holder = { agent: 'someone', sessionId: `watch:${hostname()}`, pid: process.pid };
   return {
     exists: (root, path) => existsSync(join(root, path)),
-    heldHere: async (_root, path) => {
+    heldHere: async (root, path) => {
       const held = await new LeaseRegistry(home).held(new Date().toISOString());
-      return held.some((lease) => conflicts(lease.path, path));
+      return held.some(
+        (lease) => sameRepository(lease.repository, root) && conflicts(lease.path, path),
+      );
     },
     changed: async (root, path) => {
       // Ignored by git is never somebody's source.
@@ -222,7 +243,8 @@ function defaultSeams(home: string): WatcherSeams {
         return null;
       return new GitRegionReader(root).read(path);
     },
-    take: (path, region) => leases.take(path, holder, WATCH_MINUTES, region),
+    take: (root, path, region) =>
+      leasesFor(root).take(path, holder, WATCH_MINUTES, region),
     notify: (message) => desktopNotice(message),
     now: () => Date.now(),
   };

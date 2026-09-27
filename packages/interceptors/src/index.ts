@@ -15,6 +15,7 @@ export * from './record';
 export * from './breaker-seam';
 export * from './seam-runtime';
 export * from './shell-action';
+export * from './git-branch';
 export * from './edit-hook';
 export * from './hook-payload';
 export * from './codex-patch';

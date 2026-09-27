@@ -14,6 +14,7 @@ import {
   type SharedActions,
   type ToolClass,
 } from '@memnox/core';
+import { pushedBranches, type Checkout } from './git-branch';
 
 /**
  * The outward action a command line takes, in the shape the MCP
@@ -22,7 +23,7 @@ import {
  */
 
 /** The binaries whose lines are read for what they act on. */
-const BINARY = { GH: 'gh', CURL: 'curl' } as const;
+const BINARY = { GH: 'gh', CURL: 'curl', GIT: 'git' } as const;
 
 /** The provider a `gh` resource is filed under, as the proxy names the GitHub server. */
 const GITHUB_PROVIDER = 'github';
@@ -50,6 +51,12 @@ export interface GitHubRepository {
 /** Where the repository comes from when the line does not say: the checkout's remote. */
 export type RepositoryOf = () => GitHubRepository | null;
 
+/** Where a line's repository and branch are read from, seams so a test needs no checkout. */
+export interface ActionSeams {
+  repositoryOf?: RepositoryOf;
+  checkout?: Checkout;
+}
+
 /** What the ruling on a command said, as far as a claim needs it. */
 export interface RuledCommand {
   action: string;
@@ -65,9 +72,14 @@ export function shellAction(
   binary: string,
   args: readonly string[],
   ruled: RuledCommand,
-  repositoryOf: RepositoryOf = originRepository,
+  seams: ActionSeams = {},
 ): IntendedAction | null {
-  const resource = binary === BINARY.GH ? ghResource(args, repositoryOf) : undefined;
+  const resource = resourceOf(
+    binary,
+    args,
+    seams.repositoryOf ?? originRepository,
+    seams.checkout,
+  );
   if (!isWorthClaiming(binary, args, ruled.class, resource)) return null;
   return {
     operation: ruled.action,
@@ -77,6 +89,22 @@ export function shellAction(
     arguments: Object.fromEntries(args.map((arg, index) => [String(index), arg])),
     ...(resource === undefined ? {} : { resource }),
   };
+}
+
+/**
+ * What one thing a line acts on: a pull request or issue for `gh`, the branch for a
+ * `git push`, so two agents pushing one branch from two machines meet before either lands.
+ */
+function resourceOf(
+  binary: string,
+  args: readonly string[],
+  repositoryOf: RepositoryOf,
+  checkout: Checkout | undefined,
+): string | undefined {
+  if (binary === BINARY.GH) return ghResource(args, repositoryOf);
+  // A push naming several branches is filed under the first; the others rarely race.
+  if (binary === BINARY.GIT) return pushedBranches(args, checkout)[0];
+  return undefined;
 }
 
 function isWorthClaiming(

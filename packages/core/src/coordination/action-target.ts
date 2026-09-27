@@ -26,6 +26,8 @@ const PROVIDERS: readonly ProviderShapes[] = [
       { fields: ['owner', 'repo', 'pull_number'], ref: 'github:$1/$2#pull/$3' },
       { fields: ['owner', 'repo', 'issue_number'], ref: 'github:$1/$2#issue/$3' },
       { fields: ['owner', 'repo', 'path'], ref: 'github:$1/$2#file/$3' },
+      // After the file, so writing one file on a branch is filed under the file.
+      { fields: ['owner', 'repo', 'branch'], ref: 'github:$1/$2#branch/$3' },
     ],
   },
   {

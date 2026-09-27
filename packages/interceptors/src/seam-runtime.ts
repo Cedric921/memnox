@@ -21,6 +21,7 @@ import {
   type LeaseHolder,
   type WrittenRegion,
 } from '@memnox/core';
+import { remoteIdentityOf } from './git-branch';
 import { HookAuthorizer } from './hook-authorizer';
 import { readHookConfig } from './hook-config';
 import { loadHookGate } from './hook-gate-loader';
@@ -105,14 +106,16 @@ export function buildLeases(
   return {
     gate: new LeaseGate({
       registry: new LeaseRegistry(homedir()),
-      // The workspace's register too; it makes no call
-      // without an account and never stops a write.
+      // The workspace's register too, which calls nothing without an account and never stops a write.
       shared: new CloudLeases(
         homedir(),
         globalThis.fetch,
         SHARED_LEASE_TIMEOUT_MS,
-        basename(root),
+        // Named by its remote, so two clones of one project meet and two projects named alike do not.
+        remoteIdentityOf(root),
       ),
+      // This machine's register serves every checkout on it, so each lease says which.
+      repository: root,
       ...(unattended === undefined
         ? { prompt: new TtyLeasePrompt() }
         : { ceilingMs: unattended.waitMs }),

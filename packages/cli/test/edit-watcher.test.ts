@@ -21,7 +21,7 @@ function seams(over: Partial<WatcherSeams> = {}): WatcherSeams & {
     exists: () => true,
     heldHere: async () => false,
     changed: async () => RETRY,
-    take: async (path): Promise<SharedTake> => {
+    take: async (_root, path): Promise<SharedTake> => {
       taken.push(path);
       return { outcome: SHARED_OUTCOME.TAKEN, lease: {} as never };
     },
