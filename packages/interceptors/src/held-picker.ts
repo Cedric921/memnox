@@ -13,9 +13,12 @@ import {
   MEMNOX_HOME,
   openInSession,
   PendingApprovals,
-  replyOf,
+  pickedAnswer,
+  pickerOptions,
+  pickerQuestion,
   UNNAMED_SESSION,
   type PendingApproval,
+  type PickerOption,
 } from '@memnox/core';
 
 import { EDIT_HOOK_EVENT } from './edit-hook';
@@ -44,11 +47,16 @@ interface PickerAnswer {
   stdout?: string;
 }
 
+const REWORDED =
+  'Memnox: a held question goes to your person exactly as Memnox worded it, one held id per question, with exactly its three options and no other descriptions. Ask again word for word as Memnox told you.';
+
 const REFUSED =
   'Memnox: a held question is answered by your person, so it goes to them with no answer filled in. Ask again with the same question and options and leave answers empty.';
 
 interface PickerQuestion {
   question: string;
+  options: PickerOption[];
+  multiSelect: boolean;
 }
 
 function questionsOf(input: unknown): PickerQuestion[] {
@@ -58,9 +66,55 @@ function questionsOf(input: unknown): PickerQuestion[] {
   for (const each of questions) {
     const fields = fieldsOf(each);
     const question = fields?.['question'];
-    if (typeof question === 'string') found.push({ question });
+    if (typeof question !== 'string') continue;
+    found.push({
+      question,
+      options: optionsOf(fields?.['options']),
+      multiSelect: fields?.['multiSelect'] === true,
+    });
   }
   return found;
+}
+
+function optionsOf(value: unknown): PickerOption[] {
+  if (!Array.isArray(value)) return [];
+  const found: PickerOption[] = [];
+  for (const each of value) {
+    const fields = fieldsOf(each);
+    const label = fields?.['label'];
+    const description = fields?.['description'];
+    if (typeof label !== 'string') continue;
+    found.push(
+      typeof description === 'string' && description !== ''
+        ? { label, description }
+        : { label },
+    );
+  }
+  return found;
+}
+
+/**
+ * The held call a question asks about, where it is worded exactly as Memnox wrote it for
+ * one call and offers exactly Memnox's options. The agent types both, so anything else,
+ * a reworded question, a second id, a relabelled option, answers nothing.
+ */
+function heldCallAsked(
+  question: PickerQuestion,
+  open: readonly PendingApproval[],
+): PendingApproval | null {
+  const ids = heldIdsIn(question.question);
+  if (ids.length !== 1 || question.multiSelect) return null;
+  const held = open.find((each) => each.id.toLowerCase() === ids[0]);
+  if (held === undefined || question.question !== pickerQuestion(held)) return null;
+  const wanted = pickerOptions(held);
+  const same =
+    question.options.length === wanted.length &&
+    question.options.every(
+      (option, at) =>
+        option.label === wanted[at]?.label &&
+        option.description === wanted[at]?.description,
+    );
+  return same ? held : null;
 }
 
 /** Answers keyed by question text, the way the host records a pick. */
@@ -201,41 +255,47 @@ async function recordPicks(
   const picked = answersOf(asking.hook['tool_response']);
   const told: string[] = [];
   for (const each of asking.questions) {
+    const held = heldCallAsked(each, asking.open);
     const label = picked[each.question];
-    if (label === undefined || heldIdsIn(each.question).length === 0) continue;
-    for (const id of heldIdsIn(each.question)) {
-      if (!opened.heldIds.includes(id)) continue;
-      const reply = replyOf(`${label} ${id}`, asking.open);
-      if (reply === null) continue;
-      const { approvals, moment } = asking;
-      const outcome = await approvals.answer(reply.id, reply.answer, person, moment);
-      if (outcome === null || !('answered' in outcome)) continue;
-      await markTold(approvals, [outcome.answered], moment);
-      told.push(answeredText(outcome.answered));
+    if (held === null || label === undefined) continue;
+    if (!opened.heldIds.includes(held.id.toLowerCase())) continue;
+    const answer = pickedAnswer(label);
+    if (answer === null) {
+      told.push(
+        `Memnox: they did not pick one of the three choices for ${held.id}, so nothing was answered. If they said what they want instead, do that; otherwise ask again.`,
+      );
+      continue;
     }
+    const { approvals, moment } = asking;
+    const outcome = await approvals.answer(held.id, answer, person, moment);
+    if (outcome === null || !('answered' in outcome)) continue;
+    await markTold(approvals, [outcome.answered], moment);
+    told.push(answeredText(outcome.answered));
   }
   return told;
 }
 
+function refusing(reason: string): PickerAnswer {
+  return {
+    stdout: JSON.stringify({
+      hookSpecificOutput: {
+        hookEventName: EDIT_HOOK_EVENT.PRE_TOOL_USE,
+        permissionDecision: 'deny',
+        permissionDecisionReason: reason,
+      },
+    }),
+  };
+}
+
 async function opening(asking: Asking, home: string): Promise<PickerAnswer> {
-  if (Object.keys(answersOf(asking.hook['tool_input'])).length > 0) {
-    return {
-      stdout: JSON.stringify({
-        hookSpecificOutput: {
-          hookEventName: EDIT_HOOK_EVENT.PRE_TOOL_USE,
-          permissionDecision: 'deny',
-          permissionDecisionReason: REFUSED,
-        },
-      }),
-    };
-  }
+  if (Object.keys(answersOf(asking.hook['tool_input'])).length > 0)
+    return refusing(REFUSED);
+  const asked = asking.questions.filter((each) => heldIdsIn(each.question).length > 0);
+  const held = asked.map((each) => heldCallAsked(each, asking.open));
+  if (held.some((each) => each === null)) return refusing(REWORDED);
   await pickersFor(home).write(recordId(asking.toolUseId), {
     sessionId: asking.sessionId,
-    heldIds: asking.open
-      .map((each) => each.id.toLowerCase())
-      .filter((id) =>
-        asking.questions.some((each) => heldIdsIn(each.question).includes(id)),
-      ),
+    heldIds: held.flatMap((each) => (each === null ? [] : [each.id.toLowerCase()])),
     openedAt: asking.moment,
   });
   return {};

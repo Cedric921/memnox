@@ -266,6 +266,40 @@ function hasPicker(held: PendingApproval): boolean {
   return held.request.agent === 'claude-code' && held.route !== APPROVAL_ROUTE.BOTH;
 }
 
+/** The only question a picker may put for this held call, word for word. */
+export function pickerQuestion(held: PendingApproval): string {
+  return `${plainOf(held).summary} Allow it? (${held.id})`;
+}
+
+/** One option a held question's picker offers, as Memnox wrote it. */
+export interface PickerOption {
+  label: string;
+  description?: string;
+}
+
+/**
+ * The only options a picker may offer, in order. The agent types them, so the hook holds
+ * them to this, and a label reworded to mislead is a refused picker rather than an answer.
+ */
+export function pickerOptions(held: PendingApproval): PickerOption[] {
+  const note = sessionNote(held);
+  return [
+    { label: PICKER_LABEL.ONCE },
+    note === undefined
+      ? { label: PICKER_LABEL.SESSION }
+      : { label: PICKER_LABEL.SESSION, description: note },
+    { label: PICKER_LABEL.DENY },
+  ];
+}
+
+/** The answer a picked label stands for, only on an exact match with Memnox's own labels. */
+export function pickedAnswer(label: string): HoldAnswer | null {
+  if (label === PICKER_LABEL.ONCE) return HOLD_ANSWER.ONCE;
+  if (label === PICKER_LABEL.SESSION) return HOLD_ANSWER.SESSION;
+  if (label === PICKER_LABEL.DENY) return HOLD_ANSWER.DENY;
+  return null;
+}
+
 function pickerAsk(held: PendingApproval): string {
   const note = sessionNote(held);
   const session =
@@ -273,7 +307,7 @@ function pickerAsk(held: PendingApproval): string {
       ? `"${PICKER_LABEL.SESSION}"`
       : `"${PICKER_LABEL.SESSION}" (description: "${note}")`;
   return [
-    `Ask them now with your AskUserQuestion tool: header "${PICKER_HEADER}", question "${plainOf(held).summary} Allow it? (${held.id})", and exactly these options: "${PICKER_LABEL.ONCE}", ${session}, "${PICKER_LABEL.DENY}".`,
+    `Ask them now with your AskUserQuestion tool: header "${PICKER_HEADER}", question "${pickerQuestion(held)}", and exactly these options with no other description: "${PICKER_LABEL.ONCE}", ${session}, "${PICKER_LABEL.DENY}". A picker worded any other way is refused.`,
     'Leave its answers empty. Only their own pick counts, and a question sent with an answer already filled in is refused.',
   ].join('\n');
 }

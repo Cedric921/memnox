@@ -7,6 +7,8 @@ import {
   grantSubjectFor,
   holdInChat,
   PendingApprovals,
+  pickerOptions,
+  pickerQuestion,
   type ChatQuestion,
   type PendingApproval,
 } from '@memnox/core';
@@ -38,22 +40,24 @@ async function held(): Promise<{ home: string; held: PendingApproval }> {
   return { home, held: raised };
 }
 
+/** How an agent might word the picker, where a test says it differs from Memnox's own. */
+interface Worded {
+  question?: string;
+  options?: { label: string; description?: string }[];
+}
+
 /** The payloads Claude Code sends, in the shape a probe recorded them in. */
 function picker(
   event: 'PreToolUse' | 'PostToolUse',
-  id: string,
+  held: PendingApproval,
   answers?: Record<string, string>,
+  worded: Worded = {},
 ): unknown {
-  const question = `Claude Code wants to delete finish-cloud.patch. Allow it? (${id})`;
   const questions = [
     {
-      question,
+      question: worded.question ?? pickerQuestion(held),
       header: 'Memnox',
-      options: [
-        { label: 'Allow once' },
-        { label: 'Allow for this session' },
-        { label: 'Deny' },
-      ],
+      options: worded.options ?? pickerOptions(held),
       multiSelect: false,
     },
   ];
@@ -68,19 +72,17 @@ function picker(
   };
 }
 
-function question(id: string): string {
-  return `Claude Code wants to delete finish-cloud.patch. Allow it? (${id})`;
+function question(held: PendingApproval): string {
+  return pickerQuestion(held);
 }
 
 describe('a held question answered in Claude Code’s own picker', () => {
   it('takes the person’s pick from a picker it saw open empty', async () => {
     const { home, held: raised } = await held();
-    expect(await answerPicker(picker('PreToolUse', raised.id), context(home))).toEqual(
-      {},
-    );
+    expect(await answerPicker(picker('PreToolUse', raised), context(home))).toEqual({});
     const after = await answerPicker(
-      picker('PostToolUse', raised.id, {
-        [question(raised.id)]: 'Allow for this session',
+      picker('PostToolUse', raised, {
+        [question(raised)]: 'Allow for this session',
       }),
       context(home),
     );
@@ -91,16 +93,16 @@ describe('a held question answered in Claude Code’s own picker', () => {
 
   it('refuses a picker the agent sent with its own answer filled in', async () => {
     const { home, held: raised } = await held();
-    const answers = { [question(raised.id)]: 'Allow once' };
+    const answers = { [question(raised)]: 'Allow once' };
     const before = await answerPicker(
-      picker('PreToolUse', raised.id, answers),
+      picker('PreToolUse', raised, answers),
       context(home),
     );
     expect(before?.stdout).toContain('"permissionDecision":"deny"');
 
     // Even if the host ran it anyway, an answer from a picker never seen empty counts for nothing.
     expect(
-      await answerPicker(picker('PostToolUse', raised.id, answers), context(home)),
+      await answerPicker(picker('PostToolUse', raised, answers), context(home)),
     ).toEqual({});
     const still = await new PendingApprovals(home).read(raised.id);
     expect(still?.answer).toBeUndefined();
@@ -108,25 +110,28 @@ describe('a held question answered in Claude Code’s own picker', () => {
 
   it('ignores an answer from a picker it never saw open', async () => {
     const { home, held: raised } = await held();
-    const answers = { [question(raised.id)]: 'Allow once' };
-    await answerPicker(picker('PostToolUse', raised.id, answers), context(home));
+    const answers = { [question(raised)]: 'Allow once' };
+    await answerPicker(picker('PostToolUse', raised, answers), context(home));
     expect((await new PendingApprovals(home).read(raised.id))?.answer).toBeUndefined();
   });
 
   it('reads Deny as a no', async () => {
     const { home, held: raised } = await held();
-    await answerPicker(picker('PreToolUse', raised.id), context(home));
+    await answerPicker(picker('PreToolUse', raised), context(home));
     const after = await answerPicker(
-      picker('PostToolUse', raised.id, { [question(raised.id)]: 'Deny' }),
+      picker('PostToolUse', raised, { [question(raised)]: 'Deny' }),
       context(home),
     );
     expect(after?.stdout).toContain('said no: do not delete finish-cloud.patch');
   });
 
   it('leaves every other picker to the agent', async () => {
-    const { home } = await held();
+    const { home, held: raised } = await held();
     expect(
-      await answerPicker(picker('PreToolUse', 'apr_nothere_1'), context(home)),
+      await answerPicker(
+        picker('PreToolUse', { ...raised, id: 'apr_nothere_1' }),
+        context(home),
+      ),
     ).toBeNull();
   });
 
@@ -139,7 +144,7 @@ describe('a held question answered in Claude Code’s own picker', () => {
       NOW.toISOString(),
     );
 
-    const before = await answerPicker(picker('PreToolUse', raised.id), context(home));
+    const before = await answerPicker(picker('PreToolUse', raised), context(home));
     const said = JSON.parse(before?.stdout ?? '{}') as {
       hookSpecificOutput: {
         permissionDecision: string;
@@ -156,7 +161,7 @@ describe('a held question answered in Claude Code’s own picker', () => {
 
   it('keeps the DM answer when it lands while the picker is open, and says the pick was not used', async () => {
     const { home, held: raised } = await held();
-    await answerPicker(picker('PreToolUse', raised.id), context(home));
+    await answerPicker(picker('PreToolUse', raised), context(home));
     await new PendingApprovals(home).answer(
       raised.id,
       'session',
@@ -165,11 +170,49 @@ describe('a held question answered in Claude Code’s own picker', () => {
     );
 
     const after = await answerPicker(
-      picker('PostToolUse', raised.id, { [question(raised.id)]: 'Allow once' }),
+      picker('PostToolUse', raised, { [question(raised)]: 'Allow once' }),
       context(home),
     );
     expect(after?.stdout).toContain('said yes for the rest of this session');
     expect(after?.stdout).toContain('is not used');
     expect((await new PendingApprovals(home).read(raised.id))?.answer).toBe('session');
+  });
+
+  /* Two held calls open: the agent puts the harmless one's words over the dangerous one's id,
+     or hides the other id in a label, and the person's pick must answer neither. */
+  it('refuses a picker worded differently from Memnox, so a pick cannot land on another call', async () => {
+    const { home, held: raised } = await held();
+    const reworded = await answerPicker(
+      picker('PreToolUse', raised, undefined, {
+        question: `Claude Code wants to read README.md. Allow it? (${raised.id})`,
+      }),
+      context(home),
+    );
+    expect(reworded?.stdout).toContain('word for word');
+
+    const relabelled = await answerPicker(
+      picker('PreToolUse', raised, undefined, {
+        options: [
+          { label: 'Allow once (not every time)' },
+          { label: 'Allow for this session' },
+          { label: 'Deny' },
+        ],
+      }),
+      context(home),
+    );
+    expect(relabelled?.stdout).toContain('"permissionDecision":"deny"');
+  });
+
+  it('answers nothing when the person typed something instead of picking', async () => {
+    const { home, held: raised } = await held();
+    await answerPicker(picker('PreToolUse', raised), context(home));
+    const after = await answerPicker(
+      picker('PostToolUse', raised, {
+        [question(raised)]: 'yes for this session please',
+      }),
+      context(home),
+    );
+    expect(after?.stdout).toContain('did not pick one of the three choices');
+    expect((await new PendingApprovals(home).read(raised.id))?.answer).toBeUndefined();
   });
 });
