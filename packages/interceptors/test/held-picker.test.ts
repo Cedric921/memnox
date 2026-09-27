@@ -129,4 +129,47 @@ describe('a held question answered in Claude Code’s own picker', () => {
       await answerPicker(picker('PreToolUse', 'apr_nothere_1'), context(home)),
     ).toBeNull();
   });
+
+  it('refuses to open a picker for a question already answered in the DM, and says who answered', async () => {
+    const { home, held: raised } = await held();
+    await new PendingApprovals(home).answer(
+      raised.id,
+      'session',
+      'Moise in Discord',
+      NOW.toISOString(),
+    );
+
+    const before = await answerPicker(picker('PreToolUse', raised.id), context(home));
+    const said = JSON.parse(before?.stdout ?? '{}') as {
+      hookSpecificOutput: {
+        permissionDecision: string;
+        permissionDecisionReason: string;
+      };
+      systemMessage: string;
+    };
+    expect(said.hookSpecificOutput.permissionDecision).toBe('deny');
+    expect(said.hookSpecificOutput.permissionDecisionReason).toContain(
+      'said yes for the rest of this session',
+    );
+    expect(said.systemMessage).toContain('Moise in Discord already answered this');
+  });
+
+  it('keeps the DM answer when it lands while the picker is open, and says the pick was not used', async () => {
+    const { home, held: raised } = await held();
+    await answerPicker(picker('PreToolUse', raised.id), context(home));
+    await new PendingApprovals(home).answer(
+      raised.id,
+      'session',
+      'Moise in Discord',
+      NOW.toISOString(),
+    );
+
+    const after = await answerPicker(
+      picker('PostToolUse', raised.id, { [question(raised.id)]: 'Allow once' }),
+      context(home),
+    );
+    expect(after?.stdout).toContain('said yes for the rest of this session');
+    expect(after?.stdout).toContain('is not used');
+    expect((await new PendingApprovals(home).read(raised.id))?.answer).toBe('session');
+  });
 });

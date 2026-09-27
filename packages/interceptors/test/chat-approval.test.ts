@@ -152,7 +152,9 @@ describe('a person who also takes questions in their DM', () => {
   it('is still answered by a yes typed in the session', async () => {
     const machine = await home();
     const first = await ask(machine, APPROVAL_ROUTE.BOTH);
-    expect(first?.reply?.stdout).toContain('If they answer in their DM instead');
+    // Nothing outside can close a picker, so with the DM on the agent waits rather than opening one.
+    expect(first?.reply?.stdout).toContain('end your turn');
+    expect(first?.reply?.stdout).not.toContain('AskUserQuestion');
     expect(await answerInChat(machine, 's1', 'yes', NOW, person)).toContain('said yes');
     // Told in the session, so the turn end has nothing more to say.
     expect(

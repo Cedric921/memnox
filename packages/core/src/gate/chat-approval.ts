@@ -247,9 +247,12 @@ export function heldIdsIn(text: string): string[] {
   );
 }
 
-/** Only Claude Code has the picker; every other agent shows the numbered list. */
+/**
+ * Only Claude Code has the picker, and only while the question is not also in a DM: nothing
+ * outside can close a picker, so a DM answer would leave it on screen asking for nothing.
+ */
 function hasPicker(held: PendingApproval): boolean {
-  return held.request.agent === 'claude-code';
+  return held.request.agent === 'claude-code' && held.route !== APPROVAL_ROUTE.BOTH;
 }
 
 function pickerAsk(held: PendingApproval): string {
@@ -288,7 +291,7 @@ export function heldNotice(held: PendingApproval): string {
   const plain = plainOf(held);
   const dm =
     held.route === APPROVAL_ROUTE.BOTH
-      ? ' It was also sent to your Slack or Discord.'
+      ? ' It was also sent to your Slack or Discord: answer there and the agent carries on by itself.'
       : '';
   return [
     `Memnox needs your OK (${held.id})`,
@@ -306,17 +309,21 @@ export function heldText(held: PendingApproval): string {
   const dm = held.route === APPROVAL_ROUTE.BOTH;
   const ask = hasPicker(held)
     ? [pickerAsk(held)]
-    : [
-        'Show them these choices, in these words, and wait for their reply:',
-        ...choices(held),
-        `They answer by typing 1, 2 or 3, or the words, in this session${dm ? ' or in their Slack or Discord DM' : ''}. Only their own reply counts, so never answer for them.`,
-      ];
+    : dm
+      ? [
+          'Tell them in one line that you are waiting on their answer, here or in their Slack or Discord DM, and end your turn. Do not open a picker or ask them any other way.',
+        ]
+      : [
+          'Show them these choices, in these words, and wait for their reply:',
+          ...choices(held),
+          `They answer by typing 1, 2 or 3, or the words, in this session${dm ? ' or in their Slack or Discord DM' : ''}. Only their own reply counts, so never answer for them.`,
+        ];
   return [
     `Memnox is holding this until your person answers (${held.id}): ${plain.summary}`,
     `Why: ${plain.why}`,
     ...ask,
     dm
-      ? 'If they answer in their DM instead, Memnox tells you when this turn ends, so say you are waiting and end your turn.'
+      ? 'Memnox tells you their answer when it arrives, and you carry on from there.'
       : 'Try the same call again once they have answered.',
     'Doing it another way is the same action.',
   ].join('\n');

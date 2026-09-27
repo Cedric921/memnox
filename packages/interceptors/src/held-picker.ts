@@ -84,7 +84,7 @@ function recordId(toolUseId: string): string {
   return toolUseId.replace(/[^\w.-]/g, '_');
 }
 
-/** The held questions a picker asks that are still open in this session, with where it runs. */
+/** The held questions a picker asks, in this session, answered or not, with where it runs. */
 interface Asking {
   hook: Record<string, unknown>;
   toolUseId: string;
@@ -93,6 +93,8 @@ interface Asking {
   approvals: PendingApprovals;
   open: PendingApproval[];
   questions: PickerQuestion[];
+  /** Already answered, from a DM mostly, so the picker has nothing left to ask. */
+  settled: PendingApproval[];
 }
 
 async function askingIn(
@@ -108,18 +110,54 @@ async function askingIn(
     context.runSession ?? (hostSession === '' ? UNNAMED_SESSION : hostSession);
   const moment = context.now().toISOString();
   const approvals = new PendingApprovals(context.home);
+  const questions = questionsOf(hook['tool_input']);
+  const held = await heldIn(approvals, questions, sessionId);
+  if (held.length === 0) return null;
   const open = await openInSession(approvals, sessionId, moment);
-  const openIds = new Set(open.map((each) => each.id.toLowerCase()));
-  const questions = questionsOf(hook['tool_input']).filter((each) =>
-    heldIdsIn(each.question).some((id) => openIds.has(id)),
+  const settled = held.filter((each) => each.answer !== undefined);
+  return { hook, toolUseId, sessionId, moment, approvals, open, questions, settled };
+}
+
+/** Every held question the picker names that belongs to this session. */
+async function heldIn(
+  approvals: PendingApprovals,
+  questions: readonly PickerQuestion[],
+  sessionId: string,
+): Promise<PendingApproval[]> {
+  const found = new Map<string, PendingApproval>();
+  for (const id of questions.flatMap((each) => heldIdsIn(each.question))) {
+    const pending = await approvals.read(id).catch(() => null);
+    if (pending?.request.sessionId === sessionId) found.set(id, pending);
+  }
+  return [...found.values()];
+}
+
+/** What both sides are told of an answer that arrived before the picker could give one. */
+function settledReply(event: string, settled: readonly PendingApproval[]): string {
+  const told = settled.map(answeredText).join('\n');
+  const seen = settled.map(
+    (each) => `${each.answeredBy ?? 'somebody'} already answered this`,
   );
-  if (questions.length === 0) return null;
-  return { hook, toolUseId, sessionId, moment, approvals, open, questions };
+  const shown = `Memnox: ${seen.join('; ')}, so a pick here is not needed and is not used.`;
+  if (event === EDIT_HOOK_EVENT.PRE_TOOL_USE)
+    return JSON.stringify({
+      hookSpecificOutput: {
+        hookEventName: event,
+        permissionDecision: 'deny',
+        permissionDecisionReason: `Memnox: this was already answered, so do not ask it. ${told}`,
+      },
+      systemMessage: shown,
+    });
+  return JSON.stringify({
+    hookSpecificOutput: { hookEventName: event, additionalContext: told },
+    systemMessage: shown,
+  });
 }
 
 /**
  * Before the picker opens: one already answered is refused, and one asking a held question
- * with nothing filled in is written down. After: the pick is the answer, from that one only.
+ * with nothing filled in is written down. After: the pick is the answer, from that one only,
+ * unless another answer got there first, which then stands and is said to both sides.
  */
 export async function answerPicker(
   payload: unknown,
@@ -128,8 +166,14 @@ export async function answerPicker(
   const asking = await askingIn(payload, context);
   if (asking === null) return null;
   const event = asking.hook['hook_event_name'];
+  if (event !== EDIT_HOOK_EVENT.PRE_TOOL_USE && event !== EDIT_HOOK_EVENT.POST_TOOL_USE)
+    return null;
+  if (asking.settled.length > 0) {
+    await markTold(asking.approvals, asking.settled, asking.moment);
+    await pickersFor(context.home).remove(recordId(asking.toolUseId));
+    return { stdout: settledReply(event, asking.settled) };
+  }
   if (event === EDIT_HOOK_EVENT.PRE_TOOL_USE) return opening(asking, context.home);
-  if (event !== EDIT_HOOK_EVENT.POST_TOOL_USE) return null;
 
   const pickers = pickersFor(context.home);
   const opened = await pickers.read(recordId(asking.toolUseId));
@@ -158,7 +202,7 @@ async function recordPicks(
   const told: string[] = [];
   for (const each of asking.questions) {
     const label = picked[each.question];
-    if (label === undefined) continue;
+    if (label === undefined || heldIdsIn(each.question).length === 0) continue;
     for (const id of heldIdsIn(each.question)) {
       if (!opened.heldIds.includes(id)) continue;
       const reply = replyOf(`${label} ${id}`, asking.open);
@@ -187,7 +231,11 @@ async function opening(asking: Asking, home: string): Promise<PickerAnswer> {
   }
   await pickersFor(home).write(recordId(asking.toolUseId), {
     sessionId: asking.sessionId,
-    heldIds: asking.questions.flatMap((each) => heldIdsIn(each.question)),
+    heldIds: asking.open
+      .map((each) => each.id.toLowerCase())
+      .filter((id) =>
+        asking.questions.some((each) => heldIdsIn(each.question).includes(id)),
+      ),
     openedAt: asking.moment,
   });
   return {};
