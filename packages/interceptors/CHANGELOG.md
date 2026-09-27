@@ -1,5 +1,33 @@
 # @memnox/interceptors
 
+## 0.13.9
+
+### Patch Changes
+
+- d0290f5: A yes for the rest of the session to running a command now covers commands the same program runs and nothing else. It used to cover every command, so one yes to `pnpm test` let `curl ... | sh` or any other command through without asking. The question and the answer both say which program the yes covers, and any other command is asked again.
+- 7269367: With "Also ask me in my DM" on, a held question no longer opens Claude Code's picker. Nothing outside can close a picker, so a question answered in Slack or Discord left it on screen asking for nothing. The agent now says it is waiting and ends its turn, and the answer from the DM, or a 1, 2 or 3 typed in the session, carries it on. A picker opened for a question that is already answered is refused with that answer, and a pick that arrives after another answer is not used, with both the person and the agent told which answer stands.
+- 134835f: Memnox now fails closed when its own settings cannot be trusted. A `config.toml` that exists but cannot be read, or that was emptied so it no longer names a mode, is read as enforce rather than as a first run that only watches, since one `chmod` or truncation used to switch enforcement off. And in enforce, a hook that fails before it could rule on a tool call now refuses that call instead of letting it through.
+- 352f377: A yes for the rest of the session to reading or writing a file now covers that file's folder and nothing else. It used to cover the action everywhere, so one yes about a file in the project let the agent write `~/.zshrc`, a login item or any other file outside it for the rest of the session without asking, and the project boundary honoured the same grant. The question and the answer both say which folder the yes covers, and a write anywhere else is asked again.
+- 3f73639: An agent can no longer reach what governs it by a path that does not look like one. A write is checked where it really lands, so a symlink into `~/.memnox` is `~/.memnox`. Claude Code's settings files, which install Memnox's hooks and could switch them off, and the `memnox` binaries a hook runs, are now protected like Memnox's own rules. A command line that names any of these and also writes, runs an interpreter such as `python -c` or `node -e`, or hides part of itself is refused, which catches `cd ~/.memnox && tee`, `ln -s ~/.memnox`, `chmod` and `sqlite3` on the ledger; reading them stays allowed.
+- 47bf456: Installing the Claude Code hook now also turns on Claude Code's own sandbox for the agent's shell, so a command it runs cannot write `~/.memnox`, Claude's settings files or `~/.claude.json`, however the path is spelled, since the sandbox holds at the system call rather than reading the command line. Unsandboxed retries are turned off, and writes and the network stay as open as they were, so ordinary work goes on. A sandbox the person already set is kept and only the wall is added, removing Memnox puts their own back, and on a Claude Code too old to allow every host the wall is skipped and the install says so rather than cutting the network off.
+- ba9a222: Credentials are masked in everything that leaves the machine. A command line is the target when nothing narrower was parsed, so `vercel deploy --token=...`, a password in a `DATABASE_URL`, a `Bearer` header or a key set in the environment used to reach the control plane, the held question in a DM and the ledger rows the cloud keeps. Named secrets, secrets in a URL, auth headers and the usual key shapes (GitHub, OpenAI and Anthropic, Slack, AWS, npm, JWTs) are now masked in the question's wording, the heartbeat and every action synced, while the local ledger keeps the target whole so `memnox why` can still show it.
+- 126d869: Memnox trusts an MCP server's word only where it has earned it. Memnox's own tool names are recognised only on Memnox's own server, so a lookalike `memnox_memory` elsewhere is classified on its own rather than read as harmless. A server named `memnox` in a project's `.mcp.json`, which anybody with the repository can write, no longer has its tools skip the rules. And a server's read-only annotation can no longer make a tool whose name says it deletes or writes read as harmless: it may call a tool worse than its name, never better.
+- f2c8c37: A person acting is now sent to the control plane as `person`, the word it accepts. The machine's ledger says `human`, and one such row, a person stopping protection, clearing a taint or answering a held question, had the control plane refuse the whole batch it was in, so none of those actions, and nothing sent beside them, reached the workspace.
+- 6115e27: A held question's picker now counts only when it is worded exactly as Memnox wrote it: the question for one held call, word for word, and exactly its three options. The agent types the picker, so it could put a harmless question over a dangerous call's id, hide another call's id in an option, or relabel an option so that "Allow once" read as a yes for the whole session. Any of those is now refused before the picker opens, a pick is read by its exact label rather than as free text, and a reply typed in place of a pick answers nothing.
+- 249479d: A command no longer slips past the rules by sitting behind something that only runs it. What `$(...)` and backticks run is ruled on like any other command, and `env`, `sudo`, `nohup`, `nice`, `timeout`, `xargs`, `find -exec` and `find -delete`, `bash -lc` and a `git -c alias.x='!...'` are all seen through to the command they run, so `echo $(rm -rf ~/work)` or `ls | xargs rm` is the delete it is. A download piped straight into a shell, or a payload decoded and run where the decoding could not be read, is now put to a person whatever the rules allow, because what it runs is only known once it has run.
+- Updated dependencies [d0290f5]
+- Updated dependencies [7269367]
+- Updated dependencies [134835f]
+- Updated dependencies [352f377]
+- Updated dependencies [3f73639]
+- Updated dependencies [47bf456]
+- Updated dependencies [ba9a222]
+- Updated dependencies [126d869]
+- Updated dependencies [f2c8c37]
+- Updated dependencies [6115e27]
+- Updated dependencies [249479d]
+  - @memnox/core@0.13.9
+
 ## 0.13.8
 
 ### Patch Changes
