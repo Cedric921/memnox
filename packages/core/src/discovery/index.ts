@@ -24,6 +24,7 @@ export * from './trace';
 export * from './network';
 export * from './risk';
 export * from './classify';
+export * from './own-tools';
 export * from './inventory';
 export * from './fail-on';
 export * from './wrap';

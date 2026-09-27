@@ -10,6 +10,8 @@ import {
   LocalGate,
   policiesFrom,
   recommendedAnswers,
+  toolDeclarations,
+  type ToolDeclarations,
   type EventQuery,
   type EventSink,
   type MemnoxEvent,
@@ -499,6 +501,87 @@ describe('reading the web while changing nothing', () => {
     const postAnswer = await answerToolCall(post, context(false), seams);
     expect(postAnswer?.ruling.effect).toBe(DECISION_EFFECT.ASK);
     expect(postAnswer?.reply?.stdout).toContain('"permissionDecision":"deny"');
+  });
+});
+
+/* A rule that asks about every unknown MCP tool held the reads Memnox itself tells an
+   agent to make first, so nothing it asked for could be read without a person. */
+describe("Memnox's own tools, under a rule that asks about unknown ones", () => {
+  const askUnknown: Policy[] = [
+    {
+      name: 'mcp-ask',
+      match: {
+        actions: ['mcp.*'],
+        classes: ['write', 'destructive', 'communication', 'unknown'],
+      },
+      decision: { effect: DECISION_EFFECT.ASK, reason: 'somebody else sees these' },
+    },
+  ];
+  const effectOf = async (
+    tool: string,
+    seams: { declared?: ToolDeclarations } = {},
+  ): Promise<string> =>
+    (
+      await answerToolCall(claude(tool, {}, 'auto'), context(false), {
+        authorizer: authorizer(askUnknown),
+        mode: ENFORCEMENT_MODE.ENFORCE,
+        sink: null,
+        ...seams,
+      })
+    )?.ruling.effect ?? DECISION_EFFECT.ALLOW;
+
+  it('lets the workspace reads and the session reads through', async () => {
+    for (const tool of [
+      'mcp__memnox__memnox_memory',
+      'mcp__memnox__memnox_context',
+      'mcp__memnox__memnox_rules_in_force',
+      'mcp__memnox-session__status',
+      'mcp__memnox-session__memory',
+    ]) {
+      expect(await effectOf(tool), tool).toBe(DECISION_EFFECT.ALLOW);
+    }
+  });
+
+  it("rules on none of the workspace's bookkeeping, so asking is never held for asking", async () => {
+    for (const tool of [
+      'mcp__memnox__memnox_request_approval',
+      'mcp__memnox__memnox_hold_path',
+      'mcp__memnox__memnox_release_path',
+      'mcp__memnox__memnox_report_action',
+    ]) {
+      expect(toolCallOf(claude(tool, {}), HOME), tool).toBeNull();
+      expect(await effectOf(tool), tool).toBe(DECISION_EFFECT.ALLOW);
+    }
+  });
+
+  it('rules on the same name on any other server', async () => {
+    expect(await effectOf('mcp__lookalike__memnox_request_approval')).toBe(
+      DECISION_EFFECT.ASK,
+    );
+  });
+
+  it('still asks about a rewind, and about a tool nobody declared', async () => {
+    expect(await effectOf('mcp__memnox-session__rewind')).toBe(DECISION_EFFECT.ASK);
+    expect(await effectOf('mcp__other__status')).toBe(DECISION_EFFECT.ASK);
+  });
+
+  it('rules on another server by what the last scan heard it declare', async () => {
+    const declared = toolDeclarations({
+      takenAt: '2026-09-27T00:00:00.000Z',
+      agents: [],
+      servers: [
+        {
+          name: 'other',
+          grantedBy: '/tmp/.claude.json',
+          agentIds: [],
+          tools: [{ name: 'status', effect: 'read' }],
+        },
+      ],
+      resources: [],
+    });
+    expect(await effectOf('mcp__other__status', { declared })).toBe(
+      DECISION_EFFECT.ALLOW,
+    );
   });
 });
 

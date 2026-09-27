@@ -1,10 +1,13 @@
 import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 
 import {
   configPathFor,
   DECISION_EFFECT,
   ENFORCEMENT_MODE,
   FIRST_RUN_MODE,
+  MEMNOX_HOME,
+  NodeSnapshotStore,
   openLedger,
   overlaysInForce,
   parseConfig,
@@ -24,6 +27,8 @@ import {
   type ApprovalRoute,
   type ChatQuestion,
   type PendingApproval,
+  toolDeclarations,
+  type ToolDeclarations,
 } from '@memnox/core';
 
 import { HookAuthorizer } from './hook-authorizer';
@@ -68,6 +73,7 @@ export interface ToolHookSeams {
   /** Null records nothing. */
   sink?: EventSink | null;
   route?: ApprovalRoute;
+  declared?: ToolDeclarations;
 }
 
 /** What the hook decided, and what it says to the host, or null for no reply. */
@@ -93,13 +99,20 @@ export async function readMachineMode(home: string): Promise<EnforcementMode> {
   }
 }
 
+/** What the last scan heard each MCP server say about its tools, since a hook sees only names. */
+export async function declaredTools(home: string): Promise<ToolDeclarations> {
+  const snapshot = await new NodeSnapshotStore(join(home, MEMNOX_HOME)).latest();
+  return toolDeclarations(snapshot);
+}
+
 /** Rules on the tool call in this payload, and records it. Null where there is none. */
 export async function answerToolCall(
   payload: unknown,
   context: ToolHookContext,
   seams: ToolHookSeams = {},
 ): Promise<ToolAnswer | null> {
-  const call = toolCallOf(payload, context.home);
+  const declared = seams.declared ?? (await declaredTools(context.home));
+  const call = toolCallOf(payload, context.home, declared);
   if (call === null) return null;
   const mode = seams.mode ?? (await readMachineMode(context.home));
   // Off means nothing is ruled on or recorded, which is what somebody turning it off wants.

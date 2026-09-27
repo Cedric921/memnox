@@ -2,8 +2,9 @@
  * What the Memnox entry says, in whichever format the agent keeps its config. One name,
  * so onboarding twice replaces its own entry and offboarding removes exactly its own.
  */
+import { WORKSPACE_SERVER_NAME } from '@memnox/core';
 
-export const MANAGED_SERVER = 'memnox';
+export const MANAGED_SERVER = WORKSPACE_SERVER_NAME;
 
 /** What the entry claims, so a person reading their own config knows why it is there. */
 export interface ManagedServer {

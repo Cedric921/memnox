@@ -22,6 +22,7 @@ import {
   renameEffectsIn,
   resolveShellLine,
   classifyToolCall,
+  ownToolDeclaration,
   HTTP_METHOD_ARGUMENT,
   verbForAction,
   verbTableFor,
@@ -108,9 +109,12 @@ function requestsFor(
 function classOfAction(action: string): string | undefined {
   const verb = verbForAction(action, verbTableFor);
   if (verb !== null) return verb.class;
-  if (action.startsWith('mcp.'))
-    return classifyToolCall(action.split('.').pop() ?? '').class;
-  return undefined;
+  if (!action.startsWith('mcp.')) return undefined;
+  const parts = action.split('.');
+  const tool = parts.pop() ?? '';
+  // `mcp.<server>.<tool>` names its server, which the hook reads Memnox's own tools by.
+  const server = parts.length === 2 ? (parts[1] ?? '') : '*';
+  return classifyToolCall(tool, {}, ownToolDeclaration(server, tool)).class;
 }
 
 export function registerPolicyCommand(

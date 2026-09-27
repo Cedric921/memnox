@@ -11,6 +11,7 @@ import {
   DEFAULT_SERVER_KEY,
   DISCOVERED_AGENT_KIND,
   SESSION_BINARY,
+  SESSION_SERVER_NAME,
 } from '@memnox/core';
 
 import {
@@ -36,7 +37,7 @@ import { onPath } from '../on-path';
  * Its own name, never the cloud's `memnox`: onboarding rewrites and offboarding deletes
  * exactly that one entry, so two names means neither can ever take the other's place.
  */
-export const SESSION_SERVER = 'memnox-session';
+export const SESSION_SERVER = SESSION_SERVER_NAME;
 
 /** Kept apart from the proxy's backup of the same file, so neither overwrites the other. */
 const SESSION_BACKUP_SUFFIX = '.before-session';

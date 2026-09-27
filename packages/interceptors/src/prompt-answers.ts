@@ -34,7 +34,12 @@ import { EDIT_HOOK_EVENT } from './edit-hook';
 import type { HookAuthorizer } from './hook-authorizer';
 import { fieldsOf, sessionOf } from './hook-payload';
 import { toolCallOf } from './tool-calls';
-import { authorizerFor, readMachineMode, type ToolAnswer } from './tool-hook';
+import {
+  authorizerFor,
+  declaredTools,
+  readMachineMode,
+  type ToolAnswer,
+} from './tool-hook';
 import { ruleOnTool, surfaceOf } from './tool-policy';
 
 /** Who the hook speaks for, and the seams a test replaces. */
@@ -139,7 +144,7 @@ async function teachNotice(
   deps: PromptAnswerDeps,
 ): Promise<void> {
   const before = { ...hook, hook_event_name: EDIT_HOOK_EVENT.PRE_TOOL_USE };
-  const call = toolCallOf(before, deps.home);
+  const call = toolCallOf(before, deps.home, await declaredTools(deps.home));
   if (call === null) return;
   const authorizer =
     deps.authorizer ?? (await authorizerFor({ ...deps, personThere: true }));

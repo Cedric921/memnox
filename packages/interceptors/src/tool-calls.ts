@@ -6,8 +6,11 @@ import {
   environmentOfArguments,
   HTTP_METHOD,
   HTTP_METHOD_ARGUMENT,
+  isWorkspaceTool,
+  ownToolDeclaration,
   TOOL_CLASS,
   type ToolClass,
+  type ToolDeclarations,
 } from '@memnox/core';
 
 import {
@@ -109,25 +112,41 @@ const URL_IN_TEXT = /https?:\/\/[^\s"'<>]+/;
 /** Cursor reads an empty object as "no objection", and anything that is not JSON as a block. */
 const CURSOR_NO_OBJECTION = '{}';
 
-/** The tool call in this payload, or null where it is not one before a tool runs. */
-export function toolCallOf(payload: unknown, home: string): ToolCall | null {
+/**
+ * The tool call in this payload, or null where it is not one before a tool runs.
+ * `declared` is what is known of an MCP tool beyond its name, since a hook sees no listing.
+ */
+export function toolCallOf(
+  payload: unknown,
+  home: string,
+  declared: ToolDeclarations = ownToolDeclaration,
+): ToolCall | null {
   const hook = fieldsOf(payload);
   if (hook === null) return null;
   const windsurf = hook['agent_action_name'];
-  if (typeof windsurf === 'string') return windsurfCall(hook, windsurf, home);
+  if (typeof windsurf === 'string') return windsurfCall(hook, windsurf, home, declared);
   const event = hook['hook_event_name'];
   if (event === EDIT_HOOK_EVENT.PRE_TOOL_USE) {
-    return namedCall(hook, EDIT_HOST.PRE_TOOL_USE, home);
+    return namedCall(hook, EDIT_HOST.PRE_TOOL_USE, home, declared);
   }
-  if (event === GEMINI_EVENT.BEFORE_TOOL) return namedCall(hook, EDIT_HOST.GEMINI, home);
+  if (event === GEMINI_EVENT.BEFORE_TOOL) {
+    return namedCall(hook, EDIT_HOST.GEMINI, home, declared);
+  }
   // Cursor's `preToolUse` carries only its writes, whose go-ahead the lease answers.
-  if (event === CURSOR_EVENT.PRE_TOOL_USE) return namedCall(hook, EDIT_HOST.CURSOR, home);
-  if (typeof event === 'string') return cursorCall(hook, event, home);
+  if (event === CURSOR_EVENT.PRE_TOOL_USE) {
+    return namedCall(hook, EDIT_HOST.CURSOR, home, declared);
+  }
+  if (typeof event === 'string') return cursorCall(hook, event, home, declared);
   return null;
 }
 
 /** A tool named by `tool_name` with its input under `tool_input`. */
-function namedCall(hook: HookFields, host: EditHost, home: string): ToolCall | null {
+function namedCall(
+  hook: HookFields,
+  host: EditHost,
+  home: string,
+  declared: ToolDeclarations,
+): ToolCall | null {
   const tool = hook['tool_name'];
   if (typeof tool !== 'string' || tool === '') return null;
   const input = fieldsOf(hook['tool_input']) ?? {};
@@ -145,7 +164,7 @@ function namedCall(hook: HookFields, host: EditHost, home: string): ToolCall | n
       files.map((file) => fileRequest(ACTION.FILESYSTEM_WRITE, file.path, { cwd, home })),
     );
   }
-  const requests = requestsFor(tool, input, { cwd, home });
+  const requests = requestsFor(tool, input, { cwd, home }, declared);
   return requests === null ? null : withRequests(base, requests);
 }
 
@@ -160,9 +179,15 @@ function requestsFor(
   tool: string,
   input: HookFields,
   base: PathBase,
+  declared: ToolDeclarations,
 ): ToolRequest[] | null {
   const mcp = MCP_TOOL.exec(tool);
-  if (mcp !== null) return mcpRequests(mcp[1] ?? '', mcp[2] ?? '', input);
+  if (mcp !== null) {
+    const [server, name] = [mcp[1] ?? '', mcp[2] ?? ''];
+    return isWorkspaceTool(server, name)
+      ? null
+      : mcpRequests(server, name, input, declared);
+  }
   const path = firstText(input, PATH_KEYS);
   if (READ_TOOLS.includes(tool) && path !== undefined) {
     return [fileRequest(ACTION.FILESYSTEM_READ, path, base)];
@@ -199,13 +224,18 @@ function fileRequest(action: string, path: string, base: PathBase): ToolRequest 
  * Both spellings of one MCP call, the strictest winning: `mcp.<server>.<tool>` as native
  * rules write it, and `mcp.<tool>` of the server as the proxy asks, or one seam's rule missed.
  */
-function mcpRequests(server: string, tool: string, input: HookFields): ToolRequest[] {
+function mcpRequests(
+  server: string,
+  tool: string,
+  input: HookFields,
+  declared: ToolDeclarations,
+): ToolRequest[] {
   const environment = environmentOfArguments(input);
   const common = {
     ...(environment === undefined ? {} : { environment }),
     target: server,
     // As the proxy classifies it, so a rule about changes lets `list_issues` through.
-    class: classifyToolCall(tool, input).class,
+    class: classifyToolCall(tool, input, declared(server, tool)).class,
     arguments: flatArguments(input),
   };
   return [
@@ -293,7 +323,12 @@ function shellCall(base: ToolCall, line: string | undefined): ToolCall | null {
 }
 
 /** Cursor's own events before a command, an MCP call and a read, each with its own fields. */
-function cursorCall(hook: HookFields, event: string, home: string): ToolCall | null {
+function cursorCall(
+  hook: HookFields,
+  event: string,
+  home: string,
+  declared: ToolDeclarations,
+): ToolCall | null {
   const cwd = cwdOf(hook);
   if (event === CURSOR_EVENT.BEFORE_SHELL) {
     const call = shellCall(cursorBase(hook, 'shell', cwd), firstText(hook, ['command']));
@@ -303,7 +338,7 @@ function cursorCall(hook: HookFields, event: string, home: string): ToolCall | n
     const tool = firstText(hook, ['tool_name']);
     if (tool === undefined) return null;
     // Cursor names the server by its address rather than its name, so every server is `*`.
-    const requests = mcpRequests('*', tool, fieldsOf(hook['tool_input']) ?? {});
+    const requests = mcpRequests('*', tool, fieldsOf(hook['tool_input']) ?? {}, declared);
     return { ...cursorBase(hook, tool, cwd), requests, nativeAsk: true };
   }
   if (event === CURSOR_EVENT.BEFORE_READ) {
@@ -323,7 +358,12 @@ function cursorBase(hook: HookFields, tool: string, cwd: string | undefined): To
 }
 
 /** Windsurf's events before a read, a write, a command and an MCP call. */
-function windsurfCall(hook: HookFields, action: string, home: string): ToolCall | null {
+function windsurfCall(
+  hook: HookFields,
+  action: string,
+  home: string,
+  declared: ToolDeclarations,
+): ToolCall | null {
   const info = fieldsOf(hook['tool_info']) ?? {};
   const path = firstText(info, ['file_path']);
   const cwd =
@@ -339,8 +379,9 @@ function windsurfCall(hook: HookFields, action: string, home: string): ToolCall 
     const server = firstText(info, ['mcp_server_name']);
     const tool = firstText(info, ['mcp_tool_name']);
     if (server === undefined || tool === undefined) return null;
+    if (isWorkspaceTool(server, tool)) return null;
     const input = fieldsOf(info['mcp_tool_arguments']) ?? {};
-    return withRequests(base, mcpRequests(server, tool, input));
+    return withRequests(base, mcpRequests(server, tool, input, declared));
   }
   if (path === undefined) return null;
   if (action === WINDSURF_EVENT.PRE_READ) {

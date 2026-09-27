@@ -14,6 +14,7 @@ import {
   type CheckpointMark,
   writeWorkspaceMemory,
   type MemnoxEvent,
+  SESSION_TOOL_ANNOTATIONS,
 } from '@memnox/core';
 import {
   answerText,
@@ -208,6 +209,21 @@ describe('the session tools', () => {
     expect(isUnattended({ CI: 'true' })).toBe(true);
     expect(isUnattended({ CI: 'false' })).toBe(false);
     expect(isUnattended({})).toBe(false);
+  });
+});
+
+describe('what core knows of the session tools', () => {
+  it('matches what the server lists, so a hook rules on them as the listing would', () => {
+    const listed = Object.fromEntries(
+      SESSION_TOOLS.map((tool) => [
+        tool.name,
+        {
+          readOnlyHint: tool.annotations.readOnlyHint,
+          destructiveHint: tool.annotations.destructiveHint,
+        },
+      ]),
+    );
+    expect(SESSION_TOOL_ANNOTATIONS).toEqual(listed);
   });
 });
 

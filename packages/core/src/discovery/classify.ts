@@ -3,6 +3,7 @@ import {
   TOOL_EFFECT,
   type EffectInference,
 } from './discovery.constants';
+import { WORKSPACE_TOOL_ANNOTATIONS } from './own-tools';
 import { inferToolEffect, nameSegments, type McpToolDeclaration } from './surface';
 
 /**
@@ -118,7 +119,13 @@ export function classifyTool(
   const override = overrides[declaration.name];
   if (override !== undefined) return { class: override, from: 'override' };
 
-  const { effect, inferredFrom } = inferToolEffect(declaration);
+  // A name alone is enough for the workspace's tools, since Memnox wrote them.
+  const own = WORKSPACE_TOOL_ANNOTATIONS[declaration.name];
+  const declared =
+    declaration.annotations === undefined && own !== undefined
+      ? { ...declaration, annotations: own }
+      : declaration;
+  const { effect, inferredFrom } = inferToolEffect(declared);
   if (
     (effect === TOOL_EFFECT.WRITE || effect === TOOL_EFFECT.UNKNOWN) &&
     looksLikeCommunication(declaration.name)
