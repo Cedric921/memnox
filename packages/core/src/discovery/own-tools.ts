@@ -33,6 +33,8 @@ export const WORKSPACE_TOOL_ANNOTATIONS: Readonly<Record<string, McpToolAnnotati
   memnox_request_approval: WRITES,
   memnox_hold_path: WRITES,
   memnox_release_path: WRITES,
+  memnox_claim_action: WRITES,
+  memnox_finish_action: WRITES,
 };
 
 /** The session server's tools, trusted only on that server since `status` alone could be anybody's. */
