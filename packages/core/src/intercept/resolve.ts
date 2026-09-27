@@ -267,14 +267,70 @@ export function resolveShellLine(
   const all = [...actions, ...redirected, ...(printed === null ? [] : [printed])];
   const governing = governingChange(line, all, normalized);
   const hidden = hiddenCode(normalized.opaque);
+  const reached = placesReached(line, all, normalized, env);
   return {
     actions: [
       ...all,
       ...(governing === null ? [] : [governing]),
       ...(hidden === null ? [] : [hidden]),
+      ...reached,
     ],
     opaque: normalized.opaque,
   };
+}
+
+/** An absolute or home path written anywhere in a line, heredocs and quoted code included. */
+const PATH_IN_LINE = /(?:^|[\s"'`=(:,;])(~?\/[\w.@+-]+(?:\/[\w.@+-]+)+)/g;
+
+/** Where a line moves to before it acts: `cd X`, `pushd X`, and `git -C X`. */
+function movesTo(parsed: readonly { argv: readonly string[] }[]): string[] {
+  const found: string[] = [];
+  for (const { argv } of parsed) {
+    const [binary, ...args] = argv;
+    if ((binary === 'cd' || binary === 'pushd') && args[0] !== undefined)
+      found.push(args[0]);
+    if (binary === 'git') {
+      const at = args.indexOf('-C');
+      const dir = at === -1 ? undefined : args[at + 1];
+      if (dir !== undefined) found.push(dir);
+    }
+  }
+  return found;
+}
+
+/**
+ * Where a changing line reaches, as a write there, so the project boundary asks as it does
+ * for the file tools: `cd /other && sed -i x f` and `python3 - <<EOF` named no write target.
+ */
+function placesReached(
+  line: string,
+  actions: readonly ResolvedAction[],
+  normalized: ReturnType<typeof normalizeShellCommand>,
+  env: NodeJS.ProcessEnv,
+): ResolvedAction[] {
+  // Code nobody here can read: every path it names could be one it writes.
+  const unreadable = normalized.opaque.length > 0 || runsInterpreter(line);
+  const changes =
+    unreadable ||
+    actions.some(
+      (each) => each.class === TOOL_CLASS.WRITE || each.class === TOOL_CLASS.DESTRUCTIVE,
+    );
+  if (!changes) return [];
+  const places = new Set<string>();
+  for (const dir of movesTo(normalized.parsed)) places.add(`${absoluteFrom(dir, env)}/.`);
+  if (unreadable) {
+    for (const match of line.matchAll(PATH_IN_LINE)) {
+      const path = match[1];
+      if (path !== undefined && !path.startsWith('/dev/'))
+        places.add(absoluteFrom(path, env));
+    }
+  }
+  return [...places].map((target) => ({
+    action: ACTION.FILESYSTEM_WRITE,
+    class: TOOL_CLASS.WRITE,
+    because: 'the line changes something and reaches this place',
+    target,
+  }));
 }
 
 /** Code the line runs that nobody here could read first, which a person is asked about. */
