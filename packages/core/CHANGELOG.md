@@ -1,5 +1,13 @@
 # @memnox/core
 
+## 0.13.8
+
+### Patch Changes
+
+- d361982: `memnox_claim_action` and `memnox_finish_action` on the workspace's `memnox` server are known as Memnox's own tools that record something, so an agent claiming an outward action before it takes it is never held for approval as an unknown tool.
+- abd9106: The hooks and the edit watcher now name a repository by its remote when they take a lease in the workspace, so the same project cloned on two machines is one repository there. A `git push` is claimed by the branch it writes, filed the way a GitHub tool call that pushes to that branch is, so two agents pushing one branch from two machines meet before either lands.
+- e4b726c: A lease now holds the code a session is editing rather than the whole file: the lines it changes and the function, method or class they sit in, named like `PaymentService.retryCharge`. Two sessions in one file meet only when they touch the same code, names win over line numbers where both sides give them, and a second part of the same file grows the session's lease rather than adding one. Each lease also says which checkout it is in, so one machine's register keeps its repositories apart, and a repository is named by its remote, so two clones of one project meet and two projects that share a folder name do not.
+
 ## 0.13.7
 
 ### Patch Changes
