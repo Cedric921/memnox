@@ -1,6 +1,7 @@
 import { shortDigest } from '../domain/digest';
 import { minutesToMs, msToMinutes } from '../domain/time';
 import { describeSpan, IN_MINUTES } from '../domain/duration-text';
+import type { LineRange, WrittenRegion } from './written-region';
 /**
  * A lease on a path, so two agents in one repository stop being a coin flip. It locks
  * paths and never meaning, never blocks a read, always expires, and every wait is bounded.
@@ -45,6 +46,12 @@ export interface Lease {
   releasedAt?: string;
   /** Kept for the life of the record rather than deleted with the lease. */
   takenOver?: LeaseTakeover;
+  /** The checkout the path is relative to; absent from records written before it was kept. */
+  repository?: string;
+  /** The lines of a file it holds, where narrower than the file; absent is the whole path. */
+  lines?: LineRange[];
+  /** The declarations those lines sit in, which win over lines where both sides name them. */
+  symbols?: string[];
 }
 
 export const LEASE_STATE = {
@@ -142,6 +149,10 @@ export interface LeaseRequest {
   holder: LeaseHolder;
   minutes?: number;
   activity?: string;
+  /** Where in a file the write lands, so two sessions in one file meet only on the same code. */
+  region?: WrittenRegion;
+  /** The checkout the path is relative to, since this register serves every repository here. */
+  repository?: string;
 }
 
 // Clamped rather than refused, so an agent asking for a day gets the maximum instead of an error.
@@ -156,13 +167,29 @@ function expiryAfter(now: string, minutes: number): string {
 export function leaseFor(request: LeaseRequest, now: string): Lease {
   const { path, holder, activity } = request;
   return {
-    // The path too, or two paths one command writes in the same millisecond share a file.
-    id: `lse_${Date.parse(now).toString(36)}_${holder.pid.toString(36)}_${shortDigest(path).slice(0, 8)}`,
+    // Path, checkout and session too, or two leases taken in one millisecond share a file.
+    id: `lse_${Date.parse(now).toString(36)}_${holder.pid.toString(36)}_${shortDigest(
+      `${request.repository ?? ''}\u0000${holder.sessionId}\u0000${path}`,
+    ).slice(0, 8)}`,
     path,
     holder,
     takenAt: now,
     expiresAt: expiryAfter(now, request.minutes ?? DEFAULT_LEASE_MINUTES),
     activity: activity === undefined ? [] : [activity],
+    ...(request.repository === undefined ? {} : { repository: request.repository }),
+    ...regionFields(request.region),
+  };
+}
+
+/** A region as lease fields, left off entirely where it names nothing narrower than the path. */
+export function regionFields(region: WrittenRegion | undefined): {
+  lines?: LineRange[];
+  symbols?: string[];
+} {
+  if (region === undefined || region.lines.length === 0) return {};
+  return {
+    lines: region.lines,
+    ...(region.symbols.length === 0 ? {} : { symbols: region.symbols }),
   };
 }
 
@@ -187,5 +214,24 @@ export function describeLease(lease: Lease, moment: string): string {
   );
   const held = minutes < 1 ? 'just now' : describeSpan(minutesToMs(minutes), IN_MINUTES);
   const path = lease.path === '' ? 'the repository root' : lease.path;
-  return `${lease.holder.agent} has ${path} (${held}, session ${lease.holder.sessionId})`;
+  const since = `(${held}, session ${lease.holder.sessionId})`;
+  const part = partHeld(lease);
+  return part === null
+    ? `${lease.holder.agent} has ${path} ${since}`
+    : `${lease.holder.agent} is editing ${part} of ${path} ${since}. The rest of the file is free`;
+}
+
+/** `PaymentService.retryCharge (lines 6 to 12)`, or null where the lease holds the whole path. */
+export function partHeld(held: {
+  lines?: LineRange[];
+  symbols?: string[];
+}): string | null {
+  const spans = (held.lines ?? []).map((each) =>
+    each.from === each.to ? `line ${each.from}` : `lines ${each.from} to ${each.to}`,
+  );
+  const names = held.symbols ?? [];
+  if (spans.length === 0) return null;
+  return names.length === 0
+    ? spans.join(', ')
+    : `${names.join(', ')} (${spans.join(', ')})`;
 }

@@ -87,6 +87,8 @@ export interface LeaseGateDeps {
   prompt?: LeasePrompt;
   /** What in the file this write touches, absent for the whole file. Asked only after the local register agrees. */
   region?: (path: string) => Promise<WrittenRegion>;
+  /** The checkout this gate claims in, so one machine's register keeps its repositories apart. */
+  repository?: string;
   /** The clock, injected so a replay gives the same answer twice. */
   now: () => string;
   sleep?: (ms: number) => Promise<void>;
@@ -179,7 +181,16 @@ export class LeaseGate {
     activity: string,
     minutes?: number,
   ): Promise<LeaseVerdict> {
-    const request: LeaseRequest = { path, holder, activity, minutes };
+    // Read once, before either register, so this machine and the workspace compare the same code.
+    const region = await this.regionOf(path);
+    const request: LeaseRequest = {
+      path,
+      holder,
+      activity,
+      minutes,
+      ...(region === undefined ? {} : { region }),
+      ...(this.deps.repository === undefined ? {} : { repository: this.deps.repository }),
+    };
     const first = await this.deps.registry.take(request, this.deps.now());
     if (first.outcome === LEASE_OUTCOME.TAKEN)
       return this.confirmShared(request, first.lease);
@@ -220,7 +231,7 @@ export class LeaseGate {
   private async claimShared(request: LeaseRequest): Promise<LeaseVerdict | null> {
     const shared = this.deps.shared;
     if (shared === undefined) return null;
-    const region = await this.regionOf(request.path);
+    const region = request.region;
     const result = await shared.take(
       request.path,
       request.holder,

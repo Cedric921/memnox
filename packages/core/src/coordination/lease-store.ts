@@ -3,18 +3,19 @@ import { join } from 'node:path';
 import { MEMNOX_HOME } from '../config/config';
 import { JsonRecordDir } from '../store/json-records';
 import {
-  conflicts,
   DEFAULT_LEASE_MINUTES,
   extendedTo,
   leasesInForce,
   leaseFor,
   NO_OWNER_PID,
+  regionFields,
   sameHolder,
   withActivity,
   type Lease,
   type LeaseHolder,
   type LeaseRequest,
 } from './lease';
+import { mergedRegion, regionsMeet } from './region-overlap';
 
 /**
  * The register of who holds which path, on one machine. Nothing here waits: a collision
@@ -103,7 +104,12 @@ export class LeaseRegistry {
   async take(request: LeaseRequest, now: string): Promise<TakeResult> {
     return this.exclusively(async () => {
       const standing = leasesInForce(await this.all(), now, this.alive);
-      const overlapping = standing.filter((lease) => conflicts(lease.path, request.path));
+      const wanted = {
+        path: request.path,
+        ...(request.repository === undefined ? {} : { repository: request.repository }),
+        ...regionFields(request.region),
+      };
+      const overlapping = standing.filter((lease) => regionsMeet(lease, wanted));
       const blocking = overlapping.find(
         (lease) => !sameHolder(lease.holder, request.holder),
       );
@@ -111,7 +117,15 @@ export class LeaseRegistry {
         return { outcome: LEASE_OUTCOME.HELD_BY_ANOTHER, holding: blocking };
       }
       // The same session asking again renews, so ten files written make one lease.
-      const mine = overlapping.find((lease) => sameHolder(lease.holder, request.holder));
+      const mine =
+        overlapping.find((lease) => sameHolder(lease.holder, request.holder)) ??
+        // The same session's other part of this file grows that lease rather than adding one.
+        standing.find(
+          (lease) =>
+            sameHolder(lease.holder, request.holder) &&
+            lease.path === request.path &&
+            lease.repository === request.repository,
+        );
       const lease =
         mine === undefined ? leaseFor(request, now) : renewed(mine, request, now);
       await this.write(lease);
@@ -131,7 +145,14 @@ export class LeaseRegistry {
       if (held === null) return { outcome: LEASE_OUTCOME.NOT_FOUND };
       await this.write({ ...held, takenOver: { by, at: now, reason } });
 
-      const lease = leaseFor({ path: held.path, holder: by }, now);
+      const lease = leaseFor(
+        {
+          path: held.path,
+          holder: by,
+          ...(held.repository === undefined ? {} : { repository: held.repository }),
+        },
+        now,
+      );
       await this.write(lease);
       return { outcome: LEASE_OUTCOME.TAKEN, lease };
     });
@@ -239,5 +260,11 @@ export class LeaseRegistry {
 function renewed(lease: Lease, request: LeaseRequest, now: string): Lease {
   const noted =
     request.activity === undefined ? lease : withActivity(lease, request.activity);
-  return extendedTo(noted, now, request.minutes ?? DEFAULT_LEASE_MINUTES);
+  // A second part of one file joins the first, so the lease names everything the session touched.
+  const { lines: _lines, symbols: _symbols, ...rest } = noted;
+  const grown =
+    lease.path === request.path
+      ? { ...rest, ...regionFields(mergedRegion(lease, request.region)) }
+      : noted;
+  return extendedTo(grown, now, request.minutes ?? DEFAULT_LEASE_MINUTES);
 }

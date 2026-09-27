@@ -81,7 +81,7 @@ export class CloudLeases implements SharedLeases {
     private readonly home: string,
     private readonly fetcher: Fetcher = globalThis.fetch,
     private readonly timeoutMs: number = SHARED_LEASE_TIMEOUT_MS,
-    // The repository's name, so the console can say who else is working in it.
+    // The repository by its remote, so only clones of one project meet across machines.
     private readonly repository?: string,
   ) {}
 

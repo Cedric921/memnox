@@ -1,9 +1,9 @@
 import { execFile } from 'node:child_process';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { ownProcessEnv } from './own-path';
-import { WHOLE_FILE, filesIn, regionFrom, type WrittenRegion } from './written-region';
+import { WHOLE_FILE, filesIn, namedRegion, type WrittenRegion } from './written-region';
 
 /**
  * What a session is about to write, read off the working tree with a bounded git call.
@@ -48,7 +48,13 @@ export class GitRegionReader implements RegionReader {
       // Narrowing only ever happens within one file: a directory-wide diff claims the lot.
       const covered = filesIn(diff);
       if (covered.length !== 1 || covered[0] !== path) return WHOLE_FILE;
-      return regionFrom(diff);
+      // What was added is named in the file as it stands, what was removed in HEAD.
+      const [after, before] = await Promise.all([
+        readFile(join(this.root, path), 'utf8').catch(() => null),
+        this.run(['show', `HEAD:${path}`], this.root, this.timeoutMs),
+      ]);
+      if (after === null) return WHOLE_FILE;
+      return namedRegion(diff, before === null ? { after } : { before, after });
     } catch {
       // Not a repository, no git, or it ran long. All of them are the file.
       return WHOLE_FILE;
@@ -98,7 +104,8 @@ function runGitAccepting(args: readonly string[], run: GitRun): Promise<string |
 
 /**
  * What an edit is about to touch, diffed before it is written, since `GitRegionReader`
- * sees only changes already made. Both sides keep the file's name, so git's context matches.
+ * sees only changes already made. The names come from both sides of the file, never git's
+ * hunk context, which names the line above a hunk and so a method's class.
  */
 export async function upcomingRegion(
   fileName: string,
@@ -121,7 +128,7 @@ export async function upcomingRegion(
       { cwd: scratch, timeoutMs, acceptsDiffExit: true },
     );
     if (diff === null) return WHOLE_FILE;
-    const region = regionFrom(diff);
+    const region = namedRegion(diff, { before, after });
     return region.lines.length === 0 ? WHOLE_FILE : region;
   } catch {
     // No git, no temporary directory, or it ran long. All of them are the file.

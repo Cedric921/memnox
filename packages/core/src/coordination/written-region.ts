@@ -1,3 +1,5 @@
+import { symbolsOfLines } from './code-symbols';
+
 /**
  * What a session is about to write, narrower than the file, read off git's hunk headers
  * (`@@ -6 +6,2 @@ function retryCharge(`), which carry the lines and the enclosing function.
@@ -19,6 +21,9 @@ export const WHOLE_FILE: WrittenRegion = { lines: [], symbols: [] };
 
 /** `@@ -old,n +new,n @@ context`, where the context is optional and often absent. */
 const HUNK = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@ ?(.*)$/;
+
+/** Both sides of a hunk header, the old side first. */
+const BOTH_SIDES = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
 
 /** `+++ b/src/billing/invoice.ts`, the new-file side of one file's header. */
 const NEW_FILE = /^\+\+\+ b\/(.+)$/;
@@ -114,4 +119,36 @@ export function symbolIn(context: string): string | null {
     .filter((word) => !NOT_A_NAME.has(word));
   const last = words[words.length - 1];
   return last === undefined ? null : last;
+}
+
+/**
+ * The lines a diff touches, named in the file before for what it removes and after for what
+ * it adds. A side unknown, or a line outside every declaration, leaves it to its lines alone.
+ */
+export function namedRegion(
+  diff: string,
+  sides: { before?: string; after: string },
+): WrittenRegion {
+  const lines: LineRange[] = [];
+  const removed: LineRange[] = [];
+  const added: LineRange[] = [];
+  for (const line of diff.split('\n')) {
+    const hunk = BOTH_SIDES.exec(line);
+    if (hunk === null) continue;
+    const oldStart = Number(hunk[1]);
+    const oldCount = hunk[2] === undefined ? 1 : Number(hunk[2]);
+    const newStart = Number(hunk[3]);
+    const newCount = hunk[4] === undefined ? 1 : Number(hunk[4]);
+    if (!Number.isInteger(newStart) || newStart < 0) continue;
+    // A pure deletion is still claimed at its row, so two adjacent deletions meet.
+    const at = Math.max(1, newStart);
+    lines.push({ from: at, to: at + Math.max(1, newCount) - 1 });
+    if (newCount > 0) added.push({ from: newStart, to: newStart + newCount - 1 });
+    if (oldCount > 0) removed.push({ from: oldStart, to: oldStart + oldCount - 1 });
+  }
+  if (removed.length > 0 && sides.before === undefined) return { lines, symbols: [] };
+  const after = symbolsOfLines(sides.after, added);
+  const before = sides.before === undefined ? [] : symbolsOfLines(sides.before, removed);
+  if (after === null || before === null) return { lines, symbols: [] };
+  return { lines, symbols: [...new Set([...after, ...before])] };
 }
