@@ -3,7 +3,7 @@
  * every shell wrapper is its own process, and a grant held in memory ended with the one
  * that received it.
  */
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 import { TOOL_CLASS } from '../discovery/classify';
 import { MEMNOX_HOME } from '../config/config';
@@ -90,12 +90,25 @@ function withApproval(
     : { record: counted, learned: false };
 }
 
+/** The actions whose yes covers one folder, since a yes to one file is not a yes to the disk. */
+const FOLDER_SCOPED = /^filesystem\./;
+
 /**
- * What a yes covers: the action, except for a web request, where it is the action on that
- * host, since a yes to one site is not a yes to the internet.
+ * What a yes covers: the action, except where the target decides what was agreed to. A web
+ * request is the action on that host, and a file read or write is the action in that file's
+ * folder, so one yes about a file never reaches `~/.zshrc` or `~/.ssh`.
  */
 export function grantKeyFor(action: string, target?: string): string {
-  return action.startsWith('http.') ? `${action} ${target ?? ''}` : action;
+  if (action.startsWith('http.')) return `${action} ${target ?? ''}`;
+  if (FOLDER_SCOPED.test(action) && target !== undefined && target !== '')
+    return `${action} ${grantFolderOf(target)}`;
+  return action;
+}
+
+/** The folder a file target's grant covers: the file's own, never anything above it. */
+export function grantFolderOf(target: string): string {
+  const folder = dirname(target.replace(/\\/g, '/'));
+  return folder === '' ? '.' : folder;
 }
 
 /** In memory, for a test or a process that lives as long as its session. */

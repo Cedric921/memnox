@@ -95,6 +95,15 @@ describe('a hooked agent writing outside its repository', () => {
     expect(
       await containedEdit(edits('/etc/hosts'), false, context(await home()), () => REPO),
     ).not.toBeNull();
+    // The yes was about a file in /etc, so a write to a dotfile at home still asks.
+    expect(
+      await containedEdit(
+        edits('/Users/moise/.zshrc'),
+        false,
+        context(machine),
+        () => REPO,
+      ),
+    ).not.toBeNull();
   });
 
   /* Auto mode shows no prompt, and an agent told to ask in chat took the yes and wrote

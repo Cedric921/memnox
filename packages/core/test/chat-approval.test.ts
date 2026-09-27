@@ -127,4 +127,36 @@ describe('an answer given for the rest of the session', () => {
     );
     expect(heldNotice(held)).toContain('also sent to your Slack or Discord');
   });
+
+  /* One yes about a file used to cover every write for the rest of the session, including
+     shell profiles and login items, which nobody was asked about. */
+  it('covers writes in the folder the person was asked about and nowhere else', async () => {
+    const dir = await home();
+    const approvals = new PendingApprovals(dir);
+    const write = {
+      ...question('/work/cloud/src/notifications/plain-words.ts', 'write'),
+      action: 'filesystem.write',
+    };
+    const held = await holdInChat(approvals, write, 'session', MOMENT);
+    const outcome = await approvals.answer(held.id, 'session', 'Moise', MOMENT);
+    const grants = new FileGrants(dir);
+    const at = (target: string) => grantSubjectFor({ ...write, target });
+
+    expect(
+      await grants.covers(at('/work/cloud/src/notifications/held-answer-text.ts')),
+    ).toBe(true);
+    expect(await grants.covers(at('/work/cloud/src/machines/held-call.ts'))).toBe(false);
+    expect(await grants.covers(at('/Users/moise/.zshrc'))).toBe(false);
+    expect(await grants.covers(at('/Users/moise/Library/LaunchAgents/run.plist'))).toBe(
+      false,
+    );
+
+    const answered = outcome !== null && 'answered' in outcome ? outcome.answered : held;
+    expect(answeredText(answered)).toContain(
+      'That covers /work/cloud/src/notifications only',
+    );
+    expect(heldNotice(held)).toContain(
+      '2. Allow for this session (only in /work/cloud/src/notifications; anywhere else still asks)',
+    );
+  });
 });

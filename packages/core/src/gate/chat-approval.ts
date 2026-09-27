@@ -7,7 +7,7 @@ import { digest } from '../domain/digest';
 import { HOLD_ANSWER, type HoldAnswer, type HoldRequest } from './hold';
 import { PendingApprovals, type PendingApproval } from './pending';
 import { plainAsk, type PlainAsk } from './plain-ask';
-import { grantKeyFor, type GrantSubject } from './session-grants';
+import { grantFolderOf, grantKeyFor, type GrantSubject } from './session-grants';
 import { TOOL_CLASS } from '../discovery/classify';
 import {
   APPROVAL_ROUTE,
@@ -225,11 +225,22 @@ export const PICKER_LABEL = {
 /** The header a held question's picker carries, so the hook knows it is ours. */
 export const PICKER_HEADER = 'Memnox';
 
+/** The folder a file yes covers, where the grant is narrower than the action. */
+function coveredFolder(held: PendingApproval): string | undefined {
+  const { operation, target } = held.request;
+  if (coversOneTarget(held) || target === undefined) return undefined;
+  const key = grantKeyFor(operation, target);
+  return key.startsWith(`${operation} `) && !operation.startsWith('http.')
+    ? grantFolderOf(target)
+    : undefined;
+}
+
 /** What "for this session" leaves out, where it leaves anything out. */
 function sessionNote(held: PendingApproval): string | undefined {
-  return coversOneTarget(held)
-    ? `this ${held.request.target ?? 'target'} only; any other ${actionWord(held)} still asks`
-    : undefined;
+  if (coversOneTarget(held))
+    return `this ${held.request.target ?? 'target'} only; any other ${actionWord(held)} still asks`;
+  const folder = coveredFolder(held);
+  return folder === undefined ? undefined : `only in ${folder}; anywhere else still asks`;
 }
 
 /** The three answers, numbered the same wherever they are shown, so "2" means one thing. */
@@ -275,9 +286,12 @@ export function answeredText(held: PendingApproval): string {
   if (held.answer === HOLD_ANSWER.ONCE)
     return `Memnox: ${by} said yes, once: you may ${what} (${held.id}). Try the same call again now and carry on.`;
   if (held.answer === HOLD_ANSWER.SESSION) {
+    const folder = coveredFolder(held);
     const scope = coversOneTarget(held)
       ? ` Any other ${actionWord(held)} still needs their OK.`
-      : '';
+      : folder === undefined
+        ? ''
+        : ` That covers ${folder} only; anywhere else still needs their OK.`;
     return `Memnox: ${by} said yes for the rest of this session: you may ${what} (${held.id}).${scope} Try the same call again now and carry on.`;
   }
   return `Memnox: ${by} said no: do not ${what}, and do not get the same result another way (${held.id}). Carry on without it, or tell them what you need instead.`;
