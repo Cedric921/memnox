@@ -1,0 +1,114 @@
+version = 1
+
+[[policies]]
+name = "shell-ask"
+description = "Destructive shell commands: rm -rf, dd, truncate"
+
+[policies.match]
+actions = [ "filesystem.delete" ]
+
+[policies.decision]
+effect = "ask"
+reason = "you chose to be asked about this: sometimes it really is the build directory, so a person should look"
+
+[policies.decision.alternative]
+action = "filesystem.delete"
+note = "Ask somebody, or change this rule if it is wrong for your work."
+
+[[policies]]
+name = "git-deny"
+description = "Force-pushing, and hard resets"
+
+[policies.match]
+actions = [ "git.push-force", "git.push-f", "git.reset-hard", "git.branch-d", "git.clean-fd", "git.clean-f", "git.reset", "git.clean" ]
+
+[policies.decision]
+effect = "deny"
+reason = "you chose to deny this: it rewrites history somebody else may already have pulled"
+
+[policies.decision.alternative]
+action = "git.push-force"
+note = "Ask somebody, or change this rule if it is wrong for your work."
+
+[[policies]]
+name = "mcp-ask"
+description = "MCP tools that change something outside this machine"
+
+[policies.match]
+actions = [ "mcp.*" ]
+classes = [ "write", "destructive", "communication", "unknown" ]
+
+[policies.decision]
+effect = "ask"
+reason = "you chose to be asked about this: these are the calls whose consequences other people see, while a tool that only lists or reads is how an agent finds its way"
+
+[policies.decision.alternative]
+action = "mcp.*"
+note = "Ask somebody, or change this rule if it is wrong for your work."
+
+[[policies]]
+name = "network-ask"
+description = "Requests that change something on a host no rule names"
+
+[policies.match]
+actions = [ "http.request" ]
+
+[policies.match.arguments]
+method = [ "POST", "PUT", "PATCH", "DELETE", "UNKNOWN" ]
+
+[policies.decision]
+effect = "ask"
+reason = "you chose to be asked about this: a POST, PUT, PATCH or DELETE changes somebody else’s state, while reading documentation or fetching a resource is ordinary work"
+
+[policies.decision.alternative]
+action = "http.request"
+note = "Ask somebody, or change this rule if it is wrong for your work."
+
+[[policies]]
+name = "cli-ask"
+description = "CLIs changing your cloud, repositories, deployments and databases"
+
+[policies.match]
+actions = [ "aws.*", "gcloud.*", "az.*", "gh.*", "kubectl.*", "terraform.*", "vercel.*", "railway.*", "fly.*", "heroku.*", "netlify.*", "stripe.*", "psql.*", "mysql.*", "mongosh.*", "docker.push", "npm.publish", "npm.unpublish" ]
+classes = [ "write", "destructive", "communication" ]
+
+[policies.decision]
+effect = "ask"
+reason = "you chose to be asked about this: a deploy, a merge or a delete lands on somebody else’s system, while listing and reading are how an agent finds its way"
+
+[policies.decision.alternative]
+action = "aws.*"
+note = "Ask somebody, or change this rule if it is wrong for your work."
+
+[[policies]]
+name = "consequential-ask"
+description = "Moving money, deploying, or handing out authority, through any tool"
+
+[policies.match]
+actions = [ "*", "!filesystem.*", "!file.*", "!fs.*", "!shell.*", "!process.*", "!git.*", "!editor.*", "!test.*", "!build.*", "!package.*" ]
+capabilities = [ "transfer", "deploy", "admin" ]
+
+[policies.decision]
+effect = "ask"
+reason = "you chose to be asked about this: a refund, a deploy or a new admin is the kind of change that should be a person’s, however the agent reached it"
+
+[policies.decision.alternative]
+action = "*"
+note = "Ask somebody, or change this rule if it is wrong for your work."
+
+[[policies]]
+name = "production-ask"
+description = "Any change in an environment named like production"
+
+[policies.match]
+actions = [ "*", "!filesystem.*", "!file.*", "!fs.*", "!shell.*", "!process.*", "!git.*", "!editor.*", "!test.*", "!build.*", "!package.*" ]
+classes = [ "write", "destructive", "communication" ]
+environments = [ "prod*", "production", "live" ]
+
+[policies.decision]
+effect = "ask"
+reason = "you chose to be asked about this: reading production is how an incident gets understood, and changing it is where one gets made"
+
+[policies.decision.alternative]
+action = "*"
+note = "Ask somebody, or change this rule if it is wrong for your work."
