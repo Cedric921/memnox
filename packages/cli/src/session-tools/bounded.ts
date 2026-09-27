@@ -44,13 +44,20 @@ function clippedText(text: string): string {
   return `${safe.slice(0, MOST_FIELD_CHARS)}... (cut)`;
 }
 
+/** What stands first in a list that lost its oldest rows, and how many it lost. */
+function leftOutNote(count: number): string {
+  return `${count} earlier row(s) left out`;
+}
+
+const LEFT_OUT = /^(\d+) earlier row\(s\) left out$/;
+
 /** Every string masked and clipped and every list capped, all the way down. */
 export function bounded(value: unknown): unknown {
   if (typeof value === 'string') return clippedText(value);
   if (Array.isArray(value)) {
     const kept = value.slice(-MOST_ROWS).map(bounded);
     return value.length > MOST_ROWS
-      ? [`${value.length - MOST_ROWS} earlier row(s) left out`, ...kept]
+      ? [leftOutNote(value.length - MOST_ROWS), ...kept]
       : kept;
   }
   if (value === null || typeof value !== 'object') return value;
@@ -59,9 +66,63 @@ export function bounded(value: unknown): unknown {
   return out;
 }
 
-/** The answer as the agent reads it, never longer than the cap however much there was. */
+/**
+ * The answer as the agent reads it: compact, because every space is paid for, and over
+ * the cap it loses the oldest rows of its longest list, so it is still JSON when it arrives.
+ */
 export function answerText(value: unknown): string {
-  const text = JSON.stringify(bounded(value), null, 2);
+  const shaped = bounded(value);
+  let text = JSON.stringify(shaped) ?? 'null';
+  while (text.length > MOST_ANSWER_CHARS && shortenLongestList(shaped)) {
+    text = JSON.stringify(shaped);
+  }
   if (text.length <= MOST_ANSWER_CHARS) return text;
-  return `${text.slice(0, MOST_ANSWER_CHARS)}\n... (cut to ${MOST_ANSWER_CHARS} characters)`;
+  // Nothing left to drop rows from, so as much as fits, still said as JSON.
+  const room = MOST_ANSWER_CHARS - CUT_NOTE_ROOM;
+  return JSON.stringify({
+    cut: `longer than ${MOST_ANSWER_CHARS} characters`,
+    start: text.slice(0, room),
+  });
+}
+
+/** Room kept for the wrapper an answer too wide to shorten by rows is put in. */
+const CUT_NOTE_ROOM = 200;
+
+/** A list and the rows in it, not counting the note that says rows were left out. */
+interface Shortenable {
+  list: unknown[];
+  dropped: number;
+  rows: number;
+  size: number;
+}
+
+/** Halves the longest list in the answer, oldest rows first. False when none has rows to lose. */
+function shortenLongestList(root: unknown): boolean {
+  let longest: Shortenable | null = null;
+  for (const list of listsIn(root)) {
+    const first = list[0];
+    const note = typeof first === 'string' ? LEFT_OUT.exec(first) : null;
+    const dropped = note === null ? 0 : Number(note[1]);
+    const rows = list.length - (note === null ? 0 : 1);
+    if (rows < 2) continue;
+    const size = (JSON.stringify(list) ?? '').length;
+    if (longest === null || size > longest.size) longest = { list, dropped, rows, size };
+  }
+  if (longest === null) return false;
+  const lose = Math.floor(longest.rows / 2);
+  const kept = longest.list.slice(longest.list.length - (longest.rows - lose));
+  longest.list.splice(
+    0,
+    longest.list.length,
+    leftOutNote(longest.dropped + lose),
+    ...kept,
+  );
+  return true;
+}
+
+/** Every list in a bounded answer, which is a fresh tree and so safe to shorten in place. */
+function listsIn(value: unknown): unknown[][] {
+  if (Array.isArray(value)) return [value, ...value.flatMap(listsIn)];
+  if (value === null || typeof value !== 'object') return [];
+  return Object.values(value).flatMap(listsIn);
 }

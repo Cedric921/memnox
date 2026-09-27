@@ -241,6 +241,39 @@ describe('what a session tool may say', () => {
     expect(huge.length).toBeLessThan(MOST_ANSWER_CHARS + 100);
   });
 
+  /* Sliced in the middle of a string, the answer an agent was handed would not parse. */
+  it('cuts an answer over the cap by its oldest rows, so it is still JSON', () => {
+    const long = 'x'.repeat(MOST_FIELD_CHARS);
+    const text = answerText({
+      steps: Array.from({ length: 40 }, (_, at) => `${at} ${long}`),
+    });
+    expect(text.length).toBeLessThanOrEqual(MOST_ANSWER_CHARS);
+    const read = JSON.parse(text) as { steps: string[] };
+    expect(read.steps[0]).toMatch(/^\d+ earlier row\(s\) left out$/);
+    const dropped = Number(/^(\d+)/.exec(read.steps[0] ?? '')?.[1]);
+    expect(dropped + read.steps.length - 1).toBe(40);
+    /* The newest row is the one kept. */
+    expect(read.steps[read.steps.length - 1]).toContain('39 ');
+  });
+
+  it('is compact, since every space of indentation is paid for', () => {
+    expect(answerText({ a: [1, 2], b: { c: 'd' } })).toBe('{"a":[1,2],"b":{"c":"d"}}');
+  });
+
+  it('says an answer too wide to lose rows from as JSON all the same', () => {
+    const wide = Object.fromEntries(
+      Array.from({ length: 200 }, (_, at) => [
+        `field${at}`,
+        'y'.repeat(MOST_FIELD_CHARS),
+      ]),
+    );
+    const text = answerText(wide);
+    expect(text.length).toBeLessThanOrEqual(MOST_ANSWER_CHARS);
+    expect(JSON.parse(text)).toMatchObject({
+      cut: expect.stringContaining('longer than'),
+    });
+  });
+
   it('masks anything shaped like a credential', () => {
     const said = masked(
       'curl -H "Authorization: Bearer abcdefghijklmnop" token=hunter22 ghp_abcdefghijklmnopqrstuvwx',
@@ -441,7 +474,7 @@ describe('status, replay and decisions', () => {
       action: 'git.push',
     });
     expect(answer.isError).toBe(false);
-    expect(answer.text).toContain('"action": "git.push"');
+    expect(answer.text).toContain('"action":"git.push"');
     expect(answer.text).toContain('Nothing was run');
   });
 
@@ -516,7 +549,7 @@ describe('rewind', () => {
       { deps: depsFor(home, root), seams: seamsFor({ terminal: () => false }) },
       'rewind',
     );
-    expect(answer.text).toContain('"rewound": false');
+    expect(answer.text).toContain('"rewound":false');
     expect(await readFile(join(root, 'a.txt'), 'utf8')).toBe('the agent was here\n');
   });
 
