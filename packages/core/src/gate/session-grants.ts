@@ -42,10 +42,20 @@ interface GrantRecord {
   fingerprints: string[];
   /** How many times a person said yes to each action. */
   approvals: Record<string, number>;
+  /**
+   * Single yeses not spent yet, each good for one call until the question would have
+   * expired. A second check on the same call, the project boundary, reads one, since the
+   * first check already took the answer off the question it was given on.
+   */
+  once: { key: string; until: string }[];
 }
 
 function emptyRecord(): GrantRecord {
-  return { operations: [], fingerprints: [], approvals: {} };
+  return { operations: [], fingerprints: [], approvals: {}, once: [] };
+}
+
+function onceKey(subject: GrantSubject): string {
+  return `${subject.operation}\u0000${subject.fingerprint}`;
 }
 
 /**
@@ -183,6 +193,30 @@ export class FileGrants implements SessionGrants {
     const { record, learned } = withApproval(await this.read(subject), subject);
     await this.write(subject, record);
     return learned;
+  }
+
+  /** "Once" was the answer: one call, before the question would have run out. */
+  async allowOnce(subject: GrantSubject, until: string): Promise<void> {
+    const record = await this.read(subject);
+    const once = [...record.once, { key: onceKey(subject), until }];
+    await this.write(subject, { ...record, once });
+  }
+
+  /** Spends a single yes for this call, true where there was one still good. */
+  async takeOnce(subject: GrantSubject, now: string): Promise<boolean> {
+    const record = await this.read(subject);
+    const live = record.once.filter((each) => each.until > now);
+    const at = live.findIndex((each) => each.key === onceKey(subject));
+    if (at === -1) {
+      if (live.length !== record.once.length)
+        await this.write(subject, { ...record, once: live });
+      return false;
+    }
+    await this.write(subject, {
+      ...record,
+      once: live.filter((_, index) => index !== at),
+    });
+    return true;
   }
 
   private pathFor(sessionId: string): string {

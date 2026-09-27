@@ -119,6 +119,12 @@ export class PendingApprovals {
     // Granted here, since an answer from a DM used to count only if the agent retried in time.
     if (answer === HOLD_ANSWER.SESSION)
       await new FileGrants(this.home).grant(holdGrantSubject(pending.request));
+    // A second check on the same call reads this, since the first takes the question away.
+    if (answer === HOLD_ANSWER.ONCE)
+      await new FileGrants(this.home).allowOnce(
+        holdGrantSubject(pending.request),
+        pending.expiresAt,
+      );
     return { answered };
   }
 

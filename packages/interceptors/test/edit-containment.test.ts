@@ -5,6 +5,8 @@ import { describe, expect, it } from 'vitest';
 import {
   FileGrants,
   grantSubjectFor,
+  holdInChat,
+  PendingApprovals,
   PROBATION_KIND,
   ProbationRegister,
   SessionContainments,
@@ -103,6 +105,34 @@ describe('a hooked agent writing outside its repository', () => {
         context(machine),
         () => REPO,
       ),
+    ).not.toBeNull();
+  });
+
+  /* "Allow once" was taken by the policy check, which consumed the question, so this
+     check on the same retry found no answer and refused what the person had allowed. */
+  it('lets one write through after "allow once", and asks again for the next', async () => {
+    const machine = await home();
+    const approvals = new PendingApprovals(machine);
+    const held = await holdInChat(
+      approvals,
+      {
+        sessionId: 's1',
+        agent: 'claude-code',
+        action: 'filesystem.write',
+        target: '/etc/hosts',
+        class: 'write',
+        reason: 'outside the repository',
+      },
+      'session',
+      NOW.toISOString(),
+    );
+    await approvals.answer(held.id, 'once', 'moise', NOW.toISOString());
+
+    expect(
+      await containedEdit(edits('/etc/hosts'), false, context(machine), () => REPO),
+    ).toBeNull();
+    expect(
+      await containedEdit(edits('/etc/hosts'), false, context(machine), () => REPO),
     ).not.toBeNull();
   });
 

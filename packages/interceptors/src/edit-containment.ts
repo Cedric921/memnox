@@ -82,7 +82,10 @@ async function grantedInSession(
     class: TOOL_CLASS.WRITE,
     reason: '',
   });
-  return new FileGrants(context.home).covers(subject).catch(() => false);
+  const grants = new FileGrants(context.home);
+  if (await grants.covers(subject).catch(() => false)) return true;
+  // "Allow once" was answered to the policy check on this same call, which took the question.
+  return grants.takeOnce(subject, context.now().toISOString()).catch(() => false);
 }
 
 /** Claude Code puts an ask to its person; every other host is refused with the reason. */
