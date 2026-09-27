@@ -23,6 +23,48 @@ const MOST_IGNORED_BYTES = 1024 * 1024;
 /** Enough for a repository's local config and keys, and a bound on a stray listing. */
 const MOST_IGNORED_FILES = 200;
 
+/**
+ * Never put into a milestone, ignored or not: a milestone is a git object, and git
+ * objects are copied, backed up and pushed with everything else in the repository.
+ */
+const SECRET_SHAPES: readonly string[] = [
+  '.env',
+  '.env.*',
+  '*.pem',
+  '*.key',
+  '*.p12',
+  '*.pfx',
+  '*.kdbx',
+  '*keyring*',
+  '*secret*',
+  '*credential*',
+  'id_rsa*',
+  'id_ecdsa*',
+  'id_ed25519*',
+  '.npmrc',
+  '.netrc',
+  '.pypirc',
+];
+
+/** The same shapes as git pathspecs, at any depth and in any case, for `git add -A`. */
+const SECRET_PATHSPECS: readonly string[] = SECRET_SHAPES.map(
+  (shape) => `:(exclude,glob,icase)**/${shape}`,
+);
+
+/** Whether a path's own name has a secret's shape. */
+export function looksSecret(path: string): boolean {
+  const name = (path.split('/').pop() ?? '').toLowerCase();
+  return SECRET_SHAPES.some((shape) => globRegex(shape).test(name));
+}
+
+function globRegex(shape: string): RegExp {
+  const body = shape
+    .split('*')
+    .map((part) => part.replace(/[.+?^${}()|[\]\\]/g, '\\$&'))
+    .join('.*');
+  return new RegExp(`^${body}$`);
+}
+
 /** A scratch index, so `git add -A` never touches the one the person is staging into. */
 const SCRATCH_INDEX = '.git/memnox-index';
 
@@ -102,7 +144,7 @@ export class Milestones {
   private async writeWorkingTree(root: string): Promise<{ tree: string; files: number }> {
     const env = scratchEnv(root);
     await this.seedIndex(root, env);
-    await this.git.run(['add', '-A', '--', '.'], env);
+    await this.git.run(['add', '-A', '--', '.', ...SECRET_PATHSPECS], env);
     const kept = await this.smallIgnored(root);
     // Forced, since they are ignored; only here, never into the person's own index.
     if (kept.length > 0) await this.git.run(['add', '-f', '--', ...kept], env);
@@ -112,8 +154,8 @@ export class Milestones {
   }
 
   /**
-   * Ignored files worth putting back: `.env` or local config the agent could wreck. A
-   * wholly ignored directory, `node_modules` or `dist`, comes back as one entry and is skipped.
+   * Ignored files worth putting back: local config the agent could wreck, but never a
+   * secret. A wholly ignored directory, `node_modules` or `dist`, is one entry and skipped.
    */
   private async smallIgnored(root: string): Promise<string[]> {
     const size = this.tree.size;
@@ -124,6 +166,7 @@ export class Milestones {
     const kept: string[] = [];
     for (const path of nonEmptyLines(listing)) {
       if (path.endsWith('/') || kept.length >= MOST_IGNORED_FILES) continue;
+      if (looksSecret(path)) continue;
       const bytes = await size.call(this.tree, `${root}/${path}`);
       if (bytes !== null && bytes <= MOST_IGNORED_BYTES) kept.push(path);
     }
