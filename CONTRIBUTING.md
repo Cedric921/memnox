@@ -208,10 +208,21 @@ A user-visible change also needs a changeset:
 pnpm changeset
 ```
 
-Changesets open a version PR; the release is cut by merging it, never by a push to
-`main` on its own. `pnpm version` bumps the manifests and syncs `CLI_VERSION` with
-them, so never edit that constant by hand, because `memnox --version` reading a number the
-package was not published under is a bug this project has already shipped once.
+A release is one command, run on `main` once the changes it carries are committed:
+
+```sh
+pnpm ship "what this release does"
+```
+
+It bumps the manifests from the pending changesets, commits the release, tags it
+`vX.Y.Z` and pushes both. The tag is what `release.yml` listens for: GitHub typechecks,
+builds and tests the tag, then publishes every package with the repository's npm token,
+so no passkey is asked for and nothing is published from a working tree that holds
+unfinished work. A push to `main` on its own never publishes anything.
+
+`pnpm version` syncs `CLI_VERSION` with the manifests, so never edit that constant by
+hand, because `memnox --version` reading a number the package was not published under
+is a bug this project has already shipped once.
 
 ## Reporting something that should not be public
 

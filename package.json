@@ -19,7 +19,8 @@
     "deadcode": "knip",
     "changeset": "changeset",
     "version": "changeset version && node scripts/sync-cli-version.mjs",
-    "release": "pnpm build && changeset publish"
+    "release": "pnpm build && changeset publish",
+    "ship": "node scripts/ship.mjs"
   },
   "devDependencies": {
     "@types/node": "^20.14.0",
