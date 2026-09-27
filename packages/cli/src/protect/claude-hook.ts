@@ -14,6 +14,15 @@ import type { CliContext } from '../cli-context';
 import { onPath } from '../on-path';
 import { isInPlace, REWRITE, rewriteJsonFile, writeBackedUp } from './json-config';
 import { markHook } from '../keeper/kept';
+import {
+  claudeVersion,
+  forgetBefore,
+  recalledBefore,
+  rememberBefore,
+  wallSupported,
+  withKernelWall,
+  withoutKernelWall,
+} from './claude-wall';
 
 /**
  * Claude Code's own settings, with the lease hook in them or taken back out. Only the
@@ -181,13 +190,33 @@ export async function runClaudeHook(
   const settings = parseSettings(path, raw);
 
   await mkdir(dirname(path), { recursive: true });
+  const walled = !reverting && wallSupported(claudeVersion());
   const next = reverting
-    ? withoutEditHook(settings)
-    : withEditHook(settings, claudeHookCommand(), claudeEvents(EVERY_TOOL));
+    ? await unwalled(home(), withoutEditHook(settings))
+    : await walledIf(home(), walled, settings);
   await writeBackedUp(path, raw, next);
   // A hook taken out on purpose stays out, rather than coming back on the daemon's next pass.
   await markHook(home(), 'Claude Code', !reverting);
-  renderClaudeHook(context, path, reverting);
+  renderClaudeHook(context, path, reverting, walled);
+}
+
+/** The hook, and the wall around the shell where this Claude Code can hold one. */
+async function walledIf(
+  home: string,
+  walled: boolean,
+  settings: Settings,
+): Promise<Settings> {
+  const hooked = withEditHook(settings, claudeHookCommand(), claudeEvents(EVERY_TOOL));
+  if (!walled) return hooked;
+  await rememberBefore(home, settings);
+  return withKernelWall(hooked);
+}
+
+/** The sandbox put back as it was before the wall, where the wall was ever put up. */
+async function unwalled(home: string, settings: Settings): Promise<Settings> {
+  const next = withoutKernelWall(settings, await recalledBefore(home));
+  if (next !== settings) await forgetBefore(home);
+  return next;
 }
 
 function parseSettings(path: string, raw: string): Settings {
@@ -201,11 +230,26 @@ function parseSettings(path: string, raw: string): Settings {
   }
 }
 
-function renderClaudeHook(context: CliContext, path: string, reverting: boolean): void {
+function renderClaudeHook(
+  context: CliContext,
+  path: string,
+  reverting: boolean,
+  walled = false,
+): void {
   const { flow } = context;
   flow.rows(reverting ? 'Removed' : 'Installed', [
     { label: 'where', value: path },
     { label: 'runs', value: `${EDIT_HOOK_BINARY} before every tool call` },
+    ...(reverting
+      ? []
+      : [
+          {
+            label: 'shell',
+            value: walled
+              ? "sandboxed: it cannot write Memnox's state or Claude's settings"
+              : 'not sandboxed: this Claude Code is too old to hold the wall without blocking the network',
+          },
+        ]),
   ]);
   if (reverting) {
     flow.close(
@@ -226,11 +270,19 @@ function renderClaudeHook(context: CliContext, path: string, reverting: boolean)
  * assume an editor nobody has. True when the hook is in place.
  */
 export async function installClaudeHook(home: string): Promise<boolean> {
-  return installSettingsHook(
+  const walled = wallSupported(claudeVersion());
+  const outcome = await rewriteJsonFile<Settings>(
     join(home, CLAUDE_SETTINGS),
-    claudeHookCommand(),
-    claudeEvents(EVERY_TOOL),
+    (settings) => {
+      const hooked = withEditHook(
+        settings,
+        claudeHookCommand(),
+        claudeEvents(EVERY_TOOL),
+      );
+      return walled ? withKernelWall(hooked) : hooked;
+    },
   );
+  return isInPlace(outcome);
 }
 
 /**
@@ -253,7 +305,13 @@ export async function installSettingsHook(
  * because an uninstall must not stop over somebody's editor settings.
  */
 export async function removeClaudeHook(home: string): Promise<boolean> {
-  return removeSettingsHook(join(home, CLAUDE_SETTINGS));
+  const before = await recalledBefore(home);
+  const outcome = await rewriteJsonFile<Settings>(
+    join(home, CLAUDE_SETTINGS),
+    (settings) => withoutKernelWall(withoutEditHook(settings), before),
+  );
+  await forgetBefore(home);
+  return outcome === REWRITE.WRITTEN;
 }
 
 /** Takes the hook back out of a settings file shaped like Claude Code's. */
