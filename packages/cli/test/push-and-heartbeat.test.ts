@@ -233,9 +233,10 @@ describe('the loop the daemon runs', () => {
     expect(slept).toEqual([2_000, 2_000]);
   });
 
-  /* A session as it works rather than a minute later: a hook that wrote a row
-     marks it, and the loop sends at once, as it does for a held question. */
-  it('comes back at once when an agent here just did something', async () => {
+  /* A session as it works rather than a minute later: a hook that wrote a row marks
+     it, and the loop sends within ten seconds. Not two, as a held question is: every
+     tool call marks activity, so an agent at work woke a full pass every two seconds. */
+  it('comes back within ten seconds when an agent here did something', async () => {
     const slept: number[] = [];
     let left = 1;
 
@@ -248,7 +249,45 @@ describe('the loop the daemon runs', () => {
       active: async () => true,
     });
 
-    expect(slept).toEqual([2_000]);
+    expect(slept.reduce((total, ms) => total + ms, 0)).toBe(10_000);
+  });
+
+  /* The rules and the memory are pulled on the minute, which is how soon a new rule
+     was promised to land anyway. A pass brought forward sends and pulls nothing. */
+  it('pulls on the minute, and not on a pass an agent brought forward', async () => {
+    const asked: boolean[] = [];
+    let left = 8;
+
+    await syncLoop('/home', () => left-- > 0, {
+      pass: async (_home, options) => {
+        asked.push(options.pull);
+        return {};
+      },
+      sleep: async () => {},
+      holding: async () => 0,
+      active: async () => true,
+    });
+
+    // One full pass, five brought forward ten seconds apart, then the minute is up.
+    expect(asked).toEqual([true, false, false, false, false, false, true, false]);
+  });
+
+  it('pulls again after waiting out a control plane it could not reach', async () => {
+    const asked: boolean[] = [];
+    const results: Pass[] = [{}, { unreachable: true }, {}];
+    let left = 3;
+
+    await syncLoop('/home', () => left-- > 0, {
+      pass: async (_home, options) => {
+        asked.push(options.pull);
+        return results[asked.length - 1] ?? {};
+      },
+      sleep: async () => {},
+      holding: async () => 0,
+      active: async () => true,
+    });
+
+    expect(asked).toEqual([true, false, true]);
   });
 
   it('waits a held call out whole when the control plane cannot be reached', async () => {

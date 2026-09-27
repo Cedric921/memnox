@@ -25,7 +25,6 @@ import {
   readJsonFile,
   reviewSkills,
   saveConfig,
-  secondsToMs,
   SqliteEventStore,
   windowHoursOf,
   writeFleetSpend,
@@ -43,6 +42,7 @@ import { kindOf, listRecords, sponsoredBy } from '../agents/onboarding';
 import { orgPolicyPath, PULL_OUTCOME, pullBundle, type PullResult } from './bundle';
 import { callCloud, CloudUnreachable } from './client';
 import { pullMemory, type MemoryPull } from './memory';
+import { BACKOFF_MS, HEARTBEAT_MS, waitUntilDue } from './pace';
 import {
   pushCensus,
   pushEvents,
@@ -58,18 +58,6 @@ import {
  * One pass: pull the rules, send what happened, say you are alive. Pull first, so a
  * machine given a stricter rule set is governed by it before it reports anything.
  */
-
-/** Often enough that a new rule lands in a minute; an unchanged bundle is a 304. */
-const HEARTBEAT_MS = secondsToMs(60);
-
-/** Where it backs off to while the control plane is unreachable. */
-const BACKOFF_MS = secondsToMs(15 * 60);
-
-/**
- * How often this looks while an agent is stopped on a question. The heartbeat carries a
- * held call both ways, so a minute between passes would spend the whole hold window.
- */
-const HELD_POLL_MS = secondsToMs(2);
 
 const ANSWERS: readonly string[] = Object.values(HOLD_ANSWER);
 
@@ -126,9 +114,17 @@ interface BeatState {
   asking: Budget[];
 }
 
+/** What one pass does. The daemon's early passes send, and leave the pulls to the minute. */
+interface PassOptions {
+  /** Pull the rules and the memory. Only a beat due on the minute needs to. */
+  pull: boolean;
+}
+
+const FULL_PASS: PassOptions = { pull: true };
+
 interface LoopSeams {
   sleep?: (ms: number) => Promise<void>;
-  pass?: (home: string) => Promise<Pass>;
+  pass?: (home: string, options: PassOptions) => Promise<Pass>;
   log?: (message: string) => void;
   /** Injected so a test states what is held rather than writing files to say it. */
   holding?: (home: string) => Promise<number>;
@@ -136,17 +132,10 @@ interface LoopSeams {
   active?: (home: string, since: number) => Promise<boolean>;
 }
 
-interface WaitInput {
-  home: string;
-  idleMs: number;
-  /** When the pass began, so activity after it wakes the loop. */
-  since: number;
-  sleep: (ms: number) => Promise<void>;
-  holding: (home: string) => Promise<number>;
-  active: (home: string, since: number) => Promise<boolean>;
-}
-
-export async function onePass(home: string): Promise<Pass> {
+export async function onePass(
+  home: string,
+  options: PassOptions = FULL_PASS,
+): Promise<Pass> {
   const account = await readAccount(home);
   // Not logged in: no call is made at all, which is the whole promise.
   if (account === null) return {};
@@ -154,7 +143,7 @@ export async function onePass(home: string): Promise<Pass> {
   if (account.revokedAt !== undefined) return { revoked: true };
 
   try {
-    const pass = await passFor(home, account);
+    const pass = await passFor(home, account, options);
     if (pass.revoked === true) await markRevoked(home, new Date());
     return pass;
   } catch (err) {
@@ -175,15 +164,21 @@ export async function syncLoop(
   const sleep = seams.sleep ?? sleepFor;
   const pass = seams.pass ?? onePass;
 
+  // Counted in the time this loop waited rather than off a clock, so the minute is the
+  // same minute however the waits are served.
+  let sincePull: number | undefined;
   while (running()) {
     const passStarted = Date.now();
+    const pulling = sincePull === undefined || sincePull >= HEARTBEAT_MS;
     let result: Pass;
     try {
-      result = await pass(home);
+      result = await pass(home, { pull: pulling });
     } catch (err) {
       // A pass that throws must not end the daemon; the gate is what matters.
       seams.log?.(err instanceof Error ? err.message : String(err));
       await sleep(BACKOFF_MS);
+      // A quarter of an hour away, so the pass after it pulls whatever changed meanwhile.
+      sincePull = undefined;
       continue;
     }
     if (result.revoked === true) {
@@ -193,31 +188,41 @@ export async function syncLoop(
     // Waited out whole, because polling fast for an answer with nowhere to come from changes nothing.
     if (result.unreachable === true) {
       await sleep(BACKOFF_MS);
+      sincePull = undefined;
       continue;
     }
-    await waitUntilDue({
+    if (pulling) sincePull = 0;
+    const waited = await waitUntilDue({
       home,
-      idleMs: HEARTBEAT_MS,
+      idleMs: HEARTBEAT_MS - (sincePull ?? 0),
       since: passStarted,
       sleep,
       holding: seams.holding ?? heldHere,
       active: seams.active ?? activitySince,
     });
+    sincePull = (sincePull ?? 0) + waited;
   }
 }
 
-async function passFor(home: string, account: Account): Promise<Pass> {
-  const pull = await pullBundle(home, account, await heldHash(home));
-  if (pull.outcome === PULL_OUTCOME.REVOKED) return { pull, revoked: true };
-
-  // After the rules, since a rule governs and a memory only informs.
-  const pass: Pass = { pull, memory: await pullMemory(home, account) };
+async function passFor(
+  home: string,
+  account: Account,
+  options: PassOptions,
+): Promise<Pass> {
+  const pass: Pass = {};
+  if (options.pull) {
+    const pull = await pullBundle(home, account, await heldHash(home));
+    if (pull.outcome === PULL_OUTCOME.REVOKED) return { pull, revoked: true };
+    pass.pull = pull;
+    // After the rules, since a rule governs and a memory only informs.
+    pass.memory = await pullMemory(home, account);
+  }
   for (const send of sendsFor(home, account)) {
     const result = await send.run();
     pass[send.key] = result;
     if (result.outcome === PUSH_OUTCOME.REVOKED) return { ...pass, revoked: true };
   }
-  await beat(home, account, pull);
+  await beat(home, account, pass.pull);
   return pass;
 }
 
@@ -278,7 +283,11 @@ async function skillReview(
  * What this machine runs, which bundle it applied, and the calls it is holding, with
  * whatever came back. The only per-machine round trip, so remote answers ride on it.
  */
-async function beat(home: string, account: Account, pull: PullResult): Promise<void> {
+async function beat(
+  home: string,
+  account: Account,
+  pull: PullResult | undefined,
+): Promise<void> {
   const approvals = new PendingApprovals(home);
   const moment = new Date().toISOString();
   const state = await readBeatState({ home, pull, approvals, moment });
@@ -312,14 +321,18 @@ async function runningMode(home: string): Promise<EnforcementMode> {
 
 async function readBeatState(input: {
   home: string;
-  pull: PullResult;
+  /** Absent on a pass that pulled nothing, which reports the bundle already held. */
+  pull: PullResult | undefined;
   approvals: PendingApprovals;
   moment: string;
 }): Promise<BeatState> {
   const { home, pull } = input;
   return {
     running: await runningMode(home),
-    applied: pull.outcome === PULL_OUTCOME.APPLIED ? pull.hash : await heldHash(home),
+    applied:
+      pull !== undefined && pull.outcome === PULL_OUTCOME.APPLIED
+        ? pull.hash
+        : await heldHash(home),
     // A question somebody asked to keep in the session never leaves the machine.
     holding: (await input.approvals.list(input.moment)).filter(goesToWorkspace),
     asking: fleetBudgets(await readBudgets(home)).filter(
@@ -464,18 +477,6 @@ async function heldHere(home: string): Promise<number> {
   } catch {
     // No queue is the same answer as an empty one, and neither is worth a fast loop.
     return 0;
-  }
-}
-
-/**
- * Waits until the next pass is due, leaving early when an agent here stops on a question
- * or does something, so the workspace sees it in seconds rather than at the next beat.
- */
-async function waitUntilDue(input: WaitInput): Promise<void> {
-  for (let left = input.idleMs; left > 0; left -= HELD_POLL_MS) {
-    await input.sleep(Math.min(HELD_POLL_MS, left));
-    if ((await input.holding(input.home)) > 0) return;
-    if (await input.active(input.home, input.since)) return;
   }
 }
 
