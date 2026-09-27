@@ -74,13 +74,11 @@ describe('a question the agent cannot show a prompt for', () => {
     expect(first?.reply?.stdout).toContain(
       'Memnox is holding this until your person answers (apr_',
     );
-    expect(first?.reply?.stdout).toContain('1. Allow once');
-    expect(first?.reply?.stdout).toContain('Only their own reply counts');
+    expect(first?.reply?.stdout).toContain('with your AskUserQuestion tool');
+    expect(first?.reply?.stdout).toContain('Leave its answers empty');
     expect(first?.reply?.stdout).not.toContain('Slack or Discord');
     // Shown to the person by the host, so it never waits on the agent passing it on.
-    const shown = JSON.parse(first?.reply?.stdout ?? '{}') as {
-      systemMessage?: string;
-    };
+    const shown = JSON.parse(first?.reply?.stdout ?? '{}') as { systemMessage?: string };
     expect(shown.systemMessage).toMatch(/^Memnox needs your OK \(apr_/);
     const held = await new PendingApprovals(machine).list(NOW.toISOString());
     expect(held).toHaveLength(1);
@@ -154,16 +152,11 @@ describe('a person who also takes questions in their DM', () => {
   it('is still answered by a yes typed in the session', async () => {
     const machine = await home();
     const first = await ask(machine, APPROVAL_ROUTE.BOTH);
-    expect(first?.reply?.stdout).toContain('or in their Slack or Discord DM');
+    expect(first?.reply?.stdout).toContain('If they answer in their DM instead');
     expect(await answerInChat(machine, 's1', 'yes', NOW, person)).toContain('said yes');
     // Told in the session, so the turn end has nothing more to say.
     expect(
-      await answersArrived({
-        home: machine,
-        sessionId: 's1',
-        now: () => NOW,
-        waitMs: 0,
-      }),
+      await answersArrived({ home: machine, sessionId: 's1', now: () => NOW, waitMs: 0 }),
     ).toBeNull();
   });
 
@@ -216,12 +209,7 @@ describe('a person who also takes questions in their DM', () => {
     });
     expect(said).toContain('moise in Discord said no');
     expect(
-      await answersArrived({
-        home: machine,
-        sessionId: 's1',
-        now: () => NOW,
-        waitMs: 0,
-      }),
+      await answersArrived({ home: machine, sessionId: 's1', now: () => NOW, waitMs: 0 }),
     ).toBeNull();
   });
 

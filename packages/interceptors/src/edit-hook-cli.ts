@@ -1,4 +1,4 @@
-import { homedir } from 'node:os';
+import { homedir, userInfo } from 'node:os';
 
 import {
   desktopNotice,
@@ -20,6 +20,7 @@ import {
   type AgentEdits,
 } from './agent-edits';
 import { claimAll, type EditHookContext } from './edit-claims';
+import { answerPicker } from './held-picker';
 import { checkpointBeforeFirstWrite } from './checkpoint-seam';
 import { canAskPerson } from './edit-hook';
 import { fieldsOf } from './hook-payload';
@@ -57,6 +58,7 @@ async function main(): Promise<void> {
   // Stopped on purpose: no rule, lease or pause stands in the way until `memnox start`.
   if (await protectionStopped(context.home)) return;
   if (await answeredSessionStart(payload, context, process.env)) return;
+  if (await answeredPicker(payload, context)) return;
 
   // The rules first, so nothing takes a lease on a write it was never allowed to make.
   const ruled = args.includes(TOOL_POLICY_FLAG)
@@ -219,3 +221,27 @@ main().catch((err: unknown) => {
   // A hook that throws must not read as a refusal; it ruled on nothing and says so.
   log(`edit hook failed, ruling on nothing: ${String(err)}`);
 });
+
+function personName(): string {
+  try {
+    return userInfo().username;
+  } catch {
+    return 'a person';
+  }
+}
+
+/** A held question asked in the host's own picker is answered here, and nowhere else. */
+async function answeredPicker(
+  payload: unknown,
+  context: EditHookContext,
+): Promise<boolean> {
+  const picked = await answerPicker(payload, { ...context, person: personName }).catch(
+    (err: unknown) => {
+      log(`held picker failed: ${String(err)}`);
+      return null;
+    },
+  );
+  if (picked === null) return false;
+  emit(picked.stdout === undefined ? null : { stdout: picked.stdout });
+  return true;
+}

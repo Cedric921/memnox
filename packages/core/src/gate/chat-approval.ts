@@ -215,12 +215,15 @@ function actionWord(held: PendingApproval): string {
   return (plainOf(held).doing ?? held.request.operation).split(' ')[0] ?? 'action';
 }
 
-/** The three answers, labelled the same wherever they are shown and read. */
+/** The three answers, labelled the same in the picker, the numbered list and the parser. */
 export const PICKER_LABEL = {
   ONCE: 'Allow once',
   SESSION: 'Allow for this session',
   DENY: 'Deny',
 } as const;
+
+/** The header a held question's picker carries, so the hook knows it is ours. */
+export const PICKER_HEADER = 'Memnox';
 
 /** What "for this session" leaves out, where it leaves anything out. */
 function sessionNote(held: PendingApproval): string | undefined {
@@ -235,6 +238,30 @@ function choices(held: PendingApproval): string[] {
   const session =
     note === undefined ? PICKER_LABEL.SESSION : `${PICKER_LABEL.SESSION} (${note})`;
   return [`  1. ${PICKER_LABEL.ONCE}`, `  2. ${session}`, `  3. ${PICKER_LABEL.DENY}`];
+}
+
+/** Every held id a text names, so a picker's question can be matched to what it asks. */
+export function heldIdsIn(text: string): string[] {
+  return [...text.matchAll(new RegExp(HELD_ID.source, 'gi'))].map((match) =>
+    match[0].toLowerCase(),
+  );
+}
+
+/** Only Claude Code has the picker; every other agent shows the numbered list. */
+function hasPicker(held: PendingApproval): boolean {
+  return held.request.agent === 'claude-code';
+}
+
+function pickerAsk(held: PendingApproval): string {
+  const note = sessionNote(held);
+  const session =
+    note === undefined
+      ? `"${PICKER_LABEL.SESSION}"`
+      : `"${PICKER_LABEL.SESSION}" (description: "${note}")`;
+  return [
+    `Ask them now with your AskUserQuestion tool: header "${PICKER_HEADER}", question "${plainOf(held).summary} Allow it? (${held.id})", and exactly these options: "${PICKER_LABEL.ONCE}", ${session}, "${PICKER_LABEL.DENY}".`,
+    'Leave its answers empty. Only their own pick counts, and a question sent with an answer already filled in is refused.',
+  ].join('\n');
 }
 
 /** What the agent is told once a person answered, so it carries on or stops. */
@@ -273,16 +300,21 @@ export function heldNotice(held: PendingApproval): string {
   ].join('\n');
 }
 
-/** What the agent is told when its question is held: the choices to show, and how to wait. */
+/** What the agent is told when its question is held: how to ask, and how to wait. */
 export function heldText(held: PendingApproval): string {
   const plain = plainOf(held);
   const dm = held.route === APPROVAL_ROUTE.BOTH;
+  const ask = hasPicker(held)
+    ? [pickerAsk(held)]
+    : [
+        'Show them these choices, in these words, and wait for their reply:',
+        ...choices(held),
+        `They answer by typing 1, 2 or 3, or the words, in this session${dm ? ' or in their Slack or Discord DM' : ''}. Only their own reply counts, so never answer for them.`,
+      ];
   return [
     `Memnox is holding this until your person answers (${held.id}): ${plain.summary}`,
     `Why: ${plain.why}`,
-    'Show them these choices, in these words, and wait for their reply:',
-    ...choices(held),
-    `They answer by typing 1, 2 or 3, or the words, in this session${dm ? ' or in their Slack or Discord DM' : ''}. Only their own reply counts, so never answer for them.`,
+    ...ask,
     dm
       ? 'If they answer in their DM instead, Memnox tells you when this turn ends, so say you are waiting and end your turn.'
       : 'Try the same call again once they have answered.',
