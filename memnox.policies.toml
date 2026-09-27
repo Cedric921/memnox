@@ -79,3 +79,36 @@ reason = "you chose to be asked about this: a deploy, a merge or a delete lands 
 [policies.decision.alternative]
 action = "aws.*"
 note = "Ask somebody, or change this rule if it is wrong for your work."
+
+[[policies]]
+name = "consequential-ask"
+description = "Moving money, deploying, or handing out authority, through any tool"
+
+[policies.match]
+actions = [ "*", "!filesystem.*", "!file.*", "!fs.*", "!shell.*", "!process.*", "!git.*", "!editor.*", "!test.*", "!build.*", "!package.*" ]
+capabilities = [ "transfer", "deploy", "admin" ]
+
+[policies.decision]
+effect = "ask"
+reason = "you chose to be asked about this: a refund, a deploy or a new admin is the kind of change that should be a person’s, however the agent reached it"
+
+[policies.decision.alternative]
+action = "*"
+note = "Ask somebody, or change this rule if it is wrong for your work."
+
+[[policies]]
+name = "production-ask"
+description = "Any change in an environment named like production"
+
+[policies.match]
+actions = [ "*", "!filesystem.*", "!file.*", "!fs.*", "!shell.*", "!process.*", "!git.*", "!editor.*", "!test.*", "!build.*", "!package.*" ]
+classes = [ "write", "destructive", "communication" ]
+environments = [ "prod*", "production", "live" ]
+
+[policies.decision]
+effect = "ask"
+reason = "you chose to be asked about this: reading production is how an incident gets understood, and changing it is where one gets made"
+
+[policies.decision.alternative]
+action = "*"
+note = "Ask somebody, or change this rule if it is wrong for your work."
