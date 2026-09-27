@@ -195,7 +195,7 @@ describe('memnox stop and memnox start', () => {
     expect(await readProtectionChanges(home)).toHaveLength(1);
     expect(posted[0]?.events[0]).toMatchObject({
       kind: CLOUD_EVENT.PROTECTION_STOPPED,
-      actorType: 'human',
+      actorType: 'person',
     });
     // Sent once: the next pass has nothing new to say.
     expect((await pushProtection(home, ACCOUNT)).outcome).toBe('nothing');

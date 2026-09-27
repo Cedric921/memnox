@@ -31,7 +31,7 @@ export interface CloudEvent {
   /** Stable across a resend, which is what lets the control plane deduplicate. */
   dedupKey: string;
   subjectId: string;
-  actorType: ActorType;
+  actorType: CloudActorType;
   occurredAt: number;
   agentSessionId?: string;
   payload: Record<string, unknown>;
@@ -40,12 +40,23 @@ export interface CloudEvent {
 /** A machine reporting on itself is automation unless an actor is named. */
 type CloudEventInput = Omit<CloudEvent, 'actorType'> & { actorType?: ActorType };
 
+/**
+ * The control plane's word for who acted. This ledger says `human` and the control plane
+ * `person`, and a batch carrying one `human` row was refused whole, so a person stopping
+ * protection or clearing a taint never reached the workspace and took every row with it.
+ */
+type CloudActorType = Exclude<ActorType, typeof ACTOR_TYPE.HUMAN> | 'person';
+
+function cloudActorOf(actor: ActorType): CloudActorType {
+  return actor === ACTOR_TYPE.HUMAN ? 'person' : actor;
+}
+
 export function eventOf(input: CloudEventInput): CloudEvent {
   return {
     kind: input.kind,
     dedupKey: input.dedupKey,
     subjectId: input.subjectId,
-    actorType: input.actorType ?? ACTOR_TYPE.AUTOMATION,
+    actorType: cloudActorOf(input.actorType ?? ACTOR_TYPE.AUTOMATION),
     occurredAt: input.occurredAt,
     ...(input.agentSessionId === undefined
       ? {}
