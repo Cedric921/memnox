@@ -179,4 +179,29 @@ describe('an answer given for the rest of the session', () => {
     const answered = outcome !== null && 'answered' in outcome ? outcome.answered : held;
     expect(answeredText(answered)).toContain('That covers pnpm commands only');
   });
+
+  /* A yes to one folder of a repository used to ask again for the next folder of the same
+     repository, which is the same project the person had just agreed to. */
+  it('covers the whole repository a written file is in, and nothing outside it', async () => {
+    const { mkdir } = await import('node:fs/promises');
+    const dir = await home();
+    const repo = join(dir, 'runtime');
+    await mkdir(join(repo, '.git'), { recursive: true });
+    await mkdir(join(repo, 'packages', 'interceptors', 'src'), { recursive: true });
+    const approvals = new PendingApprovals(dir);
+    const write = {
+      ...question(join(repo, 'packages', 'interceptors', 'src', 'hook.ts'), 'write'),
+      action: 'filesystem.write',
+    };
+    const held = await holdInChat(approvals, write, 'session', MOMENT);
+    await approvals.answer(held.id, 'session', 'Moise', MOMENT);
+    const grants = new FileGrants(dir);
+    const at = (target: string) => grantSubjectFor({ ...write, target });
+
+    expect(
+      await grants.covers(at(join(repo, 'packages', 'core', 'test', 'x.test.ts'))),
+    ).toBe(true);
+    expect(await grants.covers(at(join(dir, 'elsewhere', 'y.ts')))).toBe(false);
+    expect(heldNotice(held)).toContain(`only in ${repo}; anywhere else still asks`);
+  });
 });

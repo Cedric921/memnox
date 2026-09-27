@@ -3,7 +3,9 @@
  * every shell wrapper is its own process, and a grant held in memory ended with the one
  * that received it.
  */
-import { dirname, join } from 'node:path';
+import { existsSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
 
 import { TOOL_CLASS } from '../discovery/classify';
 import { MEMNOX_HOME } from '../config/config';
@@ -90,18 +92,17 @@ function withApproval(
     : { record: counted, learned: false };
 }
 
-/** The actions whose yes covers one folder, since a yes to one file is not a yes to the disk. */
-const FOLDER_SCOPED = /^filesystem\./;
+/** The actions whose yes covers where the file lives, since a yes to one file is not a yes to the disk. */
+const PLACE_SCOPED = /^filesystem\./;
 
 /**
- * What a yes covers: the action, except where the target decides what was agreed to. A web
- * request is the action on that host, and a file read or write is the action in that file's
- * folder, so one yes about a file never reaches `~/.zshrc` or `~/.ssh`.
+ * What a yes covers: the action, except where the target decides. A web request is the host,
+ * a command the program, and a file the repository it is in, never `~/.zshrc` or `~/.ssh`.
  */
 export function grantKeyFor(action: string, target?: string): string {
   if (action.startsWith('http.')) return `${action} ${target ?? ''}`;
-  if (FOLDER_SCOPED.test(action) && target !== undefined && target !== '')
-    return `${action} ${grantFolderOf(target)}`;
+  if (PLACE_SCOPED.test(action) && target !== undefined && target !== '')
+    return `${action} ${grantPlaceOf(target)}`;
   if (PROGRAM_SCOPED.includes(action) && target !== undefined && target !== '')
     return `${action} ${grantProgramOf(target)}`;
   return action;
@@ -117,10 +118,26 @@ export function grantProgramOf(line: string): string {
   return program.split('/').pop() ?? program;
 }
 
-/** The folder a file target's grant covers: the file's own, never anything above it. */
-export function grantFolderOf(target: string): string {
-  const folder = dirname(target.replace(/\\/g, '/'));
-  return folder === '' ? '.' : folder;
+const placeOf = new Map<string, string>();
+
+/**
+ * Where a file yes reaches: its git repository, so one yes covers the project asked about.
+ * Outside a repository, or in one that is the home directory, only the file's own folder.
+ */
+export function grantPlaceOf(target: string): string {
+  const folder = dirname(resolve(target.replace(/\\/g, '/')));
+  const known = placeOf.get(folder);
+  if (known !== undefined) return known;
+  let place = folder;
+  for (let at = folder; ; at = dirname(at)) {
+    if (existsSync(join(at, '.git'))) {
+      if (at !== homedir() && at !== dirname(at)) place = at;
+      break;
+    }
+    if (dirname(at) === at) break;
+  }
+  placeOf.set(folder, place);
+  return place;
 }
 
 /** In memory, for a test or a process that lives as long as its session. */

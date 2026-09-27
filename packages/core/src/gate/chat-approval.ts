@@ -8,7 +8,7 @@ import { HOLD_ANSWER, type HoldAnswer, type HoldRequest } from './hold';
 import { PendingApprovals, type PendingApproval } from './pending';
 import { plainAsk, type PlainAsk } from './plain-ask';
 import {
-  grantFolderOf,
+  grantPlaceOf,
   grantKeyFor,
   grantProgramOf,
   type GrantSubject,
@@ -230,11 +230,11 @@ export const PICKER_LABEL = {
 /** The header a held question's picker carries, so the hook knows it is ours. */
 export const PICKER_HEADER = 'Memnox';
 
-/** The folder a file yes covers, where the grant is narrower than the action. */
+/** Where a file yes reaches, the repository or folder, where the grant is narrower than the action. */
 function coveredFolder(held: PendingApproval): string | undefined {
   const { operation, target } = held.request;
   if (coversOneTarget(held) || target === undefined) return undefined;
-  return operation.startsWith('filesystem.') ? grantFolderOf(target) : undefined;
+  return operation.startsWith('filesystem.') ? grantPlaceOf(target) : undefined;
 }
 
 /** The program a command yes covers, where the grant is narrower than running anything. */
