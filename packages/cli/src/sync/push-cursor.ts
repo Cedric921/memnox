@@ -6,9 +6,17 @@ import { MEMNOX_HOME, readJsonFile, writeJsonFile } from '@memnox/core';
 
 const CURSOR_FILE = 'sync.json';
 
+/** An event already sent, remembered while the overlap still reads it back. */
+export interface SentEvent {
+  id: string;
+  at: string;
+}
+
 interface Cursor {
   /** The `at` of the newest event known to have landed. */
   pushedThrough?: string;
+  /** What landed inside the overlap, so a pass sends only what it has not sent. */
+  recentlySent?: SentEvent[];
   lastPushAt?: string;
   /** `takenAt` of the newest scan already sent, so one scan is sent once. */
   censusThrough?: string;

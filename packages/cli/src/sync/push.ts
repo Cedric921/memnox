@@ -18,7 +18,7 @@ import { censusFrom, decisionDigest, type CensusDecisions } from './census';
 import { callCloud } from './client';
 import { MAX_POST, type CloudEvent } from './cloud-event';
 import { findingsFrom } from './findings';
-import { mergeCursor, readCursor } from './push-cursor';
+import { mergeCursor, readCursor, type SentEvent } from './push-cursor';
 import { skillChangesFrom } from './skills';
 import { localDecisionEvents, readLocalDecisions } from './local-decisions';
 import { protectionEvents, readProtectionChanges } from './protection-changes';
@@ -36,6 +36,12 @@ const BATCH = MAX_POST;
  * deduplicates on, so an overlap costs a comparison and closes a crash's gap.
  */
 const OVERLAP_MS = secondsToMs(60);
+
+/**
+ * How many sent ids the cursor keeps. One forgotten is only sent again, which the
+ * control plane deduplicates, so this bounds the file rather than guarding anything.
+ */
+const MOST_REMEMBERED = 2_000;
 
 export const PUSH_OUTCOME = {
   SENT: 'sent',
@@ -137,6 +143,16 @@ export function pushFrom(pushedThrough: string | undefined, enrolledAt: string):
   return new Date(Math.max(behind, floor)).toISOString();
 }
 
+/** The sent events the next pass's overlap will still read, newest last and bounded. */
+function stillOverlapping(
+  sent: readonly SentEvent[],
+  pushedThrough: string | undefined,
+): SentEvent[] {
+  if (pushedThrough === undefined) return [];
+  const from = Date.parse(pushedThrough) - OVERLAP_MS;
+  return sent.filter((each) => Date.parse(each.at) >= from).slice(-MOST_REMEMBERED);
+}
+
 export async function pushEvents(
   home: string,
   account: Account,
@@ -147,7 +163,11 @@ export async function pushEvents(
   const cursor = await readCursor(home);
   const since = pushFrom(cursor.pushedThrough, account.enrolledAt);
 
-  const events = await ledger.query({ since, limit: BATCH });
+  // The overlap still reads the last minute back, since a hook in another process can
+  // stamp an event before the cursor; what already landed is left out of the resend.
+  const sent = new Set((cursor.recentlySent ?? []).map((each) => each.id));
+  const read = await ledger.query({ since, limit: BATCH });
+  const events = read.filter((event) => !sent.has(event.id));
   if (events.length === 0) return NOTHING;
 
   const { drafts, through } = fitting(events);
@@ -156,8 +176,13 @@ export async function pushEvents(
 
   // Only past what `fitting` included, or the actions it left out would be skipped for good.
   const newest = through[through.length - 1];
+  const pushedThrough = newest === undefined ? cursor.pushedThrough : newest.at;
   await mergeCursor(home, {
-    ...(newest === undefined ? {} : { pushedThrough: newest.at }),
+    ...(pushedThrough === undefined ? {} : { pushedThrough }),
+    recentlySent: stillOverlapping(
+      [...(cursor.recentlySent ?? []), ...through.map(({ id, at }) => ({ id, at }))],
+      pushedThrough,
+    ),
     lastPushAt: now().toISOString(),
   });
   return result;
