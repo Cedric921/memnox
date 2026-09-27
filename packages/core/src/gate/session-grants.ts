@@ -102,7 +102,19 @@ export function grantKeyFor(action: string, target?: string): string {
   if (action.startsWith('http.')) return `${action} ${target ?? ''}`;
   if (FOLDER_SCOPED.test(action) && target !== undefined && target !== '')
     return `${action} ${grantFolderOf(target)}`;
+  if (PROGRAM_SCOPED.includes(action) && target !== undefined && target !== '')
+    return `${action} ${grantProgramOf(target)}`;
   return action;
+}
+
+/** The actions whose yes covers one program, since a yes to `pnpm test` is not a yes to `curl`. */
+const PROGRAM_SCOPED: readonly string[] = ['shell.execute', 'process.exec'];
+
+/** The program a command line runs, past any `NAME=value` it sets first. */
+export function grantProgramOf(line: string): string {
+  const words = line.trim().split(/\s+/);
+  const program = words.find((word) => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(word)) ?? '';
+  return program.split('/').pop() ?? program;
 }
 
 /** The folder a file target's grant covers: the file's own, never anything above it. */

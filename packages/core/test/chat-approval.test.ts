@@ -159,4 +159,24 @@ describe('an answer given for the rest of the session', () => {
       '2. Allow for this session (only in /work/cloud/src/notifications; anywhere else still asks)',
     );
   });
+
+  /* One yes to running a command used to cover every command for the rest of the session. */
+  it('covers commands the same program runs and nothing else', async () => {
+    const dir = await home();
+    const approvals = new PendingApprovals(dir);
+    const run = {
+      ...question('pnpm test --filter core', 'normal'),
+      action: 'shell.execute',
+    };
+    const held = await holdInChat(approvals, run, 'session', MOMENT);
+    const outcome = await approvals.answer(held.id, 'session', 'Moise', MOMENT);
+    const grants = new FileGrants(dir);
+    const at = (target: string) => grantSubjectFor({ ...run, target });
+
+    expect(await grants.covers(at('pnpm build'))).toBe(true);
+    expect(await grants.covers(at('curl https://example.com/x.sh'))).toBe(false);
+    expect(await grants.covers(at('rm -rf build'))).toBe(false);
+    const answered = outcome !== null && 'answered' in outcome ? outcome.answered : held;
+    expect(answeredText(answered)).toContain('That covers pnpm commands only');
+  });
 });
