@@ -15,6 +15,7 @@ import {
   NodeMachineReader,
   NodeSnapshotStore,
   PendingApprovals,
+  plainAsk,
   protectionStopped,
   markRevoked,
   readAccount,
@@ -366,7 +367,13 @@ async function enrolledAgents(
 
 /** Names only: the operation and what it is about, never the arguments. */
 function describeHeld(each: PendingApproval): Record<string, unknown> {
+  // Raised by a shell wrapper, a call has no words written yet, so they are written here.
+  const plain = each.plain ?? plainAsk(each.request);
   return {
+    summary: plain.summary,
+    why: plain.why,
+    ...(plain.task === undefined ? {} : { task: plain.task }),
+    ...(each.request.class === undefined ? {} : { class: each.request.class }),
     id: each.id,
     agent: each.request.agent,
     operation: each.request.operation,

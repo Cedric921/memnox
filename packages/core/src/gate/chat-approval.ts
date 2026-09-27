@@ -6,6 +6,7 @@
 import { digest } from '../domain/digest';
 import { HOLD_ANSWER, type HoldAnswer, type HoldRequest } from './hold';
 import { PendingApprovals, type PendingApproval } from './pending';
+import { plainAsk, type PlainAsk } from './plain-ask';
 import { grantKeyFor, type GrantSubject } from './session-grants';
 import { TOOL_CLASS } from '../discovery/classify';
 import {
@@ -24,6 +25,8 @@ export interface ChatQuestion {
   target?: string;
   class: string;
   reason: string;
+  /** What the person asked for this session, so the question says what it is in service of. */
+  task?: string;
 }
 
 function grantKeyOf(question: Pick<ChatQuestion, 'action' | 'target'>): string {
@@ -88,7 +91,11 @@ export async function holdInChat(
     grantKey: grantKeyOf(question),
   };
   const raised = await approvals.raise(request, moment, CHAT_APPROVAL_MS);
-  const routed: PendingApproval = { ...raised, route };
+  const routed: PendingApproval = {
+    ...raised,
+    route,
+    plain: plainAsk(request, question.task),
+  };
   await approvals.keep(routed);
   return routed;
 }
@@ -131,7 +138,16 @@ export function replyOf(
   return only === undefined || more.length > 0 ? null : { id: only.id, answer };
 }
 
+/** The numbered choices every question shows. */
+const NUMBERED: Readonly<Record<string, HoldAnswer>> = {
+  '1': HOLD_ANSWER.ONCE,
+  '2': HOLD_ANSWER.SESSION,
+  '3': HOLD_ANSWER.DENY,
+};
+
 function answerOf(said: string): HoldAnswer | null {
+  const numbered = NUMBERED[said.replace(/[.)]$/, '')];
+  if (numbered !== undefined) return numbered;
   if (REFUSING.test(said)) return HOLD_ANSWER.DENY;
   if (!ALLOWING.test(said)) return null;
   return FOR_SESSION.test(said) ? HOLD_ANSWER.SESSION : HOLD_ANSWER.ONCE;
@@ -183,24 +199,93 @@ export async function waitingOnDm(
   return open.some((each) => each.route === APPROVAL_ROUTE.BOTH);
 }
 
-/** What the agent is told once a person answered, so it carries on or stops. */
-export function answeredText(held: PendingApproval): string {
-  const what = held.request.operation;
-  const by = held.answeredBy ?? 'the person';
-  if (held.answer === HOLD_ANSWER.ONCE || held.answer === HOLD_ANSWER.SESSION) {
-    const scope =
-      held.answer === HOLD_ANSWER.SESSION ? 'for the rest of this session' : 'once';
-    return `Memnox: ${by} allowed ${what} ${scope} (${held.id}). Try the same call again now and carry on.`;
-  }
-  return `Memnox: ${by} said no to ${what} (${held.id}). Do not try it, or the same thing another way. Carry on without it, or say what you need instead.`;
+/** A delete is granted on its target only, so its "for this session" has to say so. */
+function coversOneTarget(held: PendingApproval): boolean {
+  return (
+    held.request.class === TOOL_CLASS.DESTRUCTIVE && held.request.target !== undefined
+  );
 }
 
-/** What the agent is told when its question is held, so it knows who to ask and how. */
-export function heldText(held: PendingApproval): string {
-  const ask = `Ask the person to reply "allow", "allow for this session" or "deny" (${held.id}) here.`;
-  const also =
+function plainOf(held: PendingApproval): PlainAsk {
+  return held.plain ?? plainAsk(held.request);
+}
+
+/** "delete", from "delete finish-cloud.patch", for the note on what a session yes leaves out. */
+function actionWord(held: PendingApproval): string {
+  return (plainOf(held).doing ?? held.request.operation).split(' ')[0] ?? 'action';
+}
+
+/** The three answers, labelled the same wherever they are shown and read. */
+export const PICKER_LABEL = {
+  ONCE: 'Allow once',
+  SESSION: 'Allow for this session',
+  DENY: 'Deny',
+} as const;
+
+/** What "for this session" leaves out, where it leaves anything out. */
+function sessionNote(held: PendingApproval): string | undefined {
+  return coversOneTarget(held)
+    ? `this ${held.request.target ?? 'target'} only; any other ${actionWord(held)} still asks`
+    : undefined;
+}
+
+/** The three answers, numbered the same wherever they are shown, so "2" means one thing. */
+function choices(held: PendingApproval): string[] {
+  const note = sessionNote(held);
+  const session =
+    note === undefined ? PICKER_LABEL.SESSION : `${PICKER_LABEL.SESSION} (${note})`;
+  return [`  1. ${PICKER_LABEL.ONCE}`, `  2. ${session}`, `  3. ${PICKER_LABEL.DENY}`];
+}
+
+/** What the agent is told once a person answered, so it carries on or stops. */
+export function answeredText(held: PendingApproval): string {
+  const plain = plainOf(held);
+  const what = plain.doing ?? held.request.operation;
+  const by = held.answeredBy ?? 'Your person';
+  if (held.answer === HOLD_ANSWER.ONCE)
+    return `Memnox: ${by} said yes, once: you may ${what} (${held.id}). Try the same call again now and carry on.`;
+  if (held.answer === HOLD_ANSWER.SESSION) {
+    const scope = coversOneTarget(held)
+      ? ` Any other ${actionWord(held)} still needs their OK.`
+      : '';
+    return `Memnox: ${by} said yes for the rest of this session: you may ${what} (${held.id}).${scope} Try the same call again now and carry on.`;
+  }
+  return `Memnox: ${by} said no: do not ${what}, and do not get the same result another way (${held.id}). Carry on without it, or tell them what you need instead.`;
+}
+
+/**
+ * The question in the person's own words, shown to them by the host rather than left for
+ * the agent to relay, because an agent that ends its turn quietly leaves nobody asked.
+ */
+export function heldNotice(held: PendingApproval): string {
+  const plain = plainOf(held);
+  const dm =
     held.route === APPROVAL_ROUTE.BOTH
-      ? ' It was also sent to their Slack or Discord. If they answer there, Memnox tells you when this turn ends, so say you are waiting and end your turn.'
-      : ' Try the same call again once they have answered.';
-  return `A person has to allow this, so Memnox is holding it as ${held.id}. ${ask}${also} Doing it another way is the same action.`;
+      ? ' It was also sent to your Slack or Discord.'
+      : '';
+  return [
+    `Memnox needs your OK (${held.id})`,
+    plain.summary,
+    ...(plain.task === undefined ? [] : [`While working on: "${plain.task}"`]),
+    `Why you are asked: ${plain.why}`,
+    ...choices(held),
+    `Reply here with 1, 2 or 3, or in words.${dm}`,
+  ].join('\n');
+}
+
+/** What the agent is told when its question is held: the choices to show, and how to wait. */
+export function heldText(held: PendingApproval): string {
+  const plain = plainOf(held);
+  const dm = held.route === APPROVAL_ROUTE.BOTH;
+  return [
+    `Memnox is holding this until your person answers (${held.id}): ${plain.summary}`,
+    `Why: ${plain.why}`,
+    'Show them these choices, in these words, and wait for their reply:',
+    ...choices(held),
+    `They answer by typing 1, 2 or 3, or the words, in this session${dm ? ' or in their Slack or Discord DM' : ''}. Only their own reply counts, so never answer for them.`,
+    dm
+      ? 'If they answer in their DM instead, Memnox tells you when this turn ends, so say you are waiting and end your turn.'
+      : 'Try the same call again once they have answered.',
+    'Doing it another way is the same action.',
+  ].join('\n');
 }

@@ -4,7 +4,9 @@ import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 import {
+  answeredText,
   grantSubjectFor,
+  heldNotice,
   holdInChat,
   openQuestionFor,
   replyOf,
@@ -33,6 +35,9 @@ const TWO = [held('apr_a1_b2'), held('apr_c3_d4')];
 
 describe('reading a reply as an answer', () => {
   it.each([
+    ['1', 'once'],
+    ['2.', 'session'],
+    ['3', 'deny'],
     ['yes', 'once'],
     ['Allow', 'once'],
     ['go ahead', 'once'],
@@ -49,10 +54,7 @@ describe('reading a reply as an answer', () => {
   });
 
   it('answers the one a reply names by id', () => {
-    expect(replyOf('allow apr_c3_d4', TWO)).toEqual({
-      id: 'apr_c3_d4',
-      answer: 'once',
-    });
+    expect(replyOf('allow apr_c3_d4', TWO)).toEqual({ id: 'apr_c3_d4', answer: 'once' });
     expect(replyOf('deny apr_zz_zz', TWO)).toBeNull();
   });
 
@@ -109,5 +111,20 @@ describe('an answer given for the rest of the session', () => {
     await approvals.answer(held.id, 'session', 'Moise', MOMENT);
     const other = { ...write, target: 'b.ts' };
     expect(await new FileGrants(dir).covers(grantSubjectFor(other))).toBe(true);
+  });
+
+  it('tells the agent and the person that a delete was allowed on one file only', async () => {
+    const dir = await home();
+    const approvals = new PendingApprovals(dir);
+    const held = await holdInChat(approvals, question('a.patch'), 'both', MOMENT);
+    const outcome = await approvals.answer(held.id, 'session', 'Moise', MOMENT);
+    const answered = outcome !== null && 'answered' in outcome ? outcome.answered : held;
+    expect(answeredText(answered)).toBe(
+      `Memnox: Moise said yes for the rest of this session: you may delete a.patch (${held.id}). Any other delete still needs their OK. Try the same call again now and carry on.`,
+    );
+    expect(heldNotice(held)).toContain(
+      '2. Allow for this session (this a.patch only; any other delete still asks)',
+    );
+    expect(heldNotice(held)).toContain('also sent to your Slack or Discord');
   });
 });

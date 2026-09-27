@@ -24,6 +24,7 @@ import {
   HOLD_ANSWER,
   openQuestionFor,
   PendingApprovals,
+  SessionTasks,
   type ApprovalRoute,
   type ChatQuestion,
   type PendingApproval,
@@ -172,7 +173,10 @@ async function heldFor(
   route: ApprovalRoute,
   context: ToolHookContext,
 ): Promise<PendingApproval | null> {
-  const question = questionOf(ruling, sessionId, context.agent);
+  const question = {
+    ...questionOf(ruling, sessionId, context.agent),
+    ...(await taskOf(context.home, sessionId)),
+  };
   return holdInChat(
     new PendingApprovals(context.home),
     question,
@@ -236,6 +240,12 @@ async function withSessionGrant(
     effect: DECISION_EFFECT.ALLOW,
     reason: `a person already allowed ${ruling.action} in this session`,
   };
+}
+
+/** The person's ask this session, best effort, since a question without it still stands. */
+async function taskOf(home: string, sessionId: string): Promise<{ task?: string }> {
+  const task = await new SessionTasks(home).read(sessionId).catch(() => null);
+  return task === null ? {} : { task: task.statement };
 }
 
 /** What a held question is about, from the ruling that raised it. */

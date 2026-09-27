@@ -8,6 +8,7 @@ import {
   EVENT_SCHEMA_VERSION,
   EVENT_SURFACE,
   EXECUTION,
+  heldNotice,
   heldText,
   localRuleRef,
   newEventId,
@@ -217,7 +218,9 @@ export function toolReply(
     permissionDecision: decision,
     permissionDecisionReason: reason,
   };
-  return { stdout: JSON.stringify({ hookSpecificOutput }) };
+  // The host shows this to the person, so a held question never depends on the agent relaying it.
+  const shown = held === null || asking ? {} : { systemMessage: heldNotice(held) };
+  return { stdout: JSON.stringify({ hookSpecificOutput, ...shown }) };
 }
 
 /** Whether the host shows a person this ruling's question, rather than a refusal in its place. */
@@ -235,6 +238,9 @@ function reasonFor(
   asking: boolean,
   held: PendingApproval | null,
 ): string {
+  // The held text already says why, in the person's words, and what to do next.
+  if (ruling.effect === DECISION_EFFECT.ASK && !asking && held !== null)
+    return heldText(held);
   const parts = [`Memnox: ${ruling.reason}`];
   if (ruling.rule !== undefined) parts.push(`(rule ${ruling.rule})`);
   if (ruling.alternative !== undefined)

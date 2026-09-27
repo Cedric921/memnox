@@ -7,6 +7,7 @@ import {
   type HoldAnswer,
   type HoldRequest,
 } from './hold';
+import type { PlainAsk } from './plain-ask';
 import { FileGrants } from './session-grants';
 import { msToSeconds } from '../domain/time';
 import { JsonRecordDir } from '../store/json-records';
@@ -35,6 +36,8 @@ export interface PendingApproval {
   route?: 'session' | 'both';
   /** When the agent was told the answer, so it is told once. */
   toldAgentAt?: string;
+  /** The question in a person's words, the same in the session and in their DM. */
+  plain?: PlainAsk;
 }
 
 /** Whether the workspace is sent this call, so a person can answer it from chat. */
