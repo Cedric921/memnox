@@ -1,6 +1,13 @@
 import { join } from 'node:path';
 import { MEMNOX_HOME } from '../config/config';
-import { describeHeldCall, type HoldAnswer, type HoldRequest } from './hold';
+import {
+  describeHeldCall,
+  HOLD_ANSWER,
+  holdGrantSubject,
+  type HoldAnswer,
+  type HoldRequest,
+} from './hold';
+import { FileGrants } from './session-grants';
 import { msToSeconds } from '../domain/time';
 import { JsonRecordDir } from '../store/json-records';
 
@@ -49,7 +56,7 @@ export function pendingIdFor(request: HoldRequest, at: string): string {
 export class PendingApprovals {
   private readonly records: JsonRecordDir<PendingApproval>;
 
-  constructor(home: string) {
+  constructor(private readonly home: string) {
     this.records = new JsonRecordDir(pendingDirFor(home));
   }
 
@@ -106,6 +113,9 @@ export class PendingApprovals {
       answeredBy: by,
     };
     await this.records.write(id, answered);
+    // Granted here, since an answer from a DM used to count only if the agent retried in time.
+    if (answer === HOLD_ANSWER.SESSION)
+      await new FileGrants(this.home).grant(holdGrantSubject(pending.request));
     return { answered };
   }
 

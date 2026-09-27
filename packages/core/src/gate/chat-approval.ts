@@ -6,7 +6,8 @@
 import { digest } from '../domain/digest';
 import { HOLD_ANSWER, type HoldAnswer, type HoldRequest } from './hold';
 import { PendingApprovals, type PendingApproval } from './pending';
-import { grantKeyFor } from './session-grants';
+import { grantKeyFor, type GrantSubject } from './session-grants';
+import { TOOL_CLASS } from '../discovery/classify';
 import {
   APPROVAL_ROUTE,
   type ApprovalRoute,
@@ -29,19 +30,40 @@ function grantKeyOf(question: Pick<ChatQuestion, 'action' | 'target'>): string {
   return grantKeyFor(question.action, question.target);
 }
 
+/**
+ * One per thing a yes covers: the action, or for a delete the action on that target, so an
+ * answer about one file is never spent on another.
+ */
+function fingerprintOf(question: ChatQuestion): string {
+  const key = grantKeyOf(question);
+  if (question.class !== TOOL_CLASS.DESTRUCTIVE)
+    return digest(`${question.sessionId}\u0000${key}`);
+  return digest(`${question.sessionId}\u0000${key}\u0000${question.target ?? ''}`);
+}
+
+/** What "for this session" grants, the same shape the answer writes and the next call reads. */
+export function grantSubjectFor(question: ChatQuestion): GrantSubject {
+  return {
+    sessionId: question.sessionId,
+    operation: grantKeyOf(question),
+    fingerprint: fingerprintOf(question),
+    class: question.class,
+  };
+}
+
 /** The held call for this question, so asking twice before an answer is one question. */
 export async function openQuestionFor(
   approvals: PendingApprovals,
   question: ChatQuestion,
   moment: string,
 ): Promise<PendingApproval | null> {
-  const key = grantKeyOf(question);
+  const fingerprint = fingerprintOf(question);
   const open = await approvals.list(moment);
   return (
     open.find(
       (each) =>
         each.request.sessionId === question.sessionId &&
-        (each.request.grantKey ?? each.request.operation) === key,
+        each.request.fingerprint === fingerprint,
     ) ?? null
   );
 }
@@ -55,16 +77,15 @@ export async function holdInChat(
 ): Promise<PendingApproval> {
   const open = await openQuestionFor(approvals, question, moment);
   if (open !== null) return open;
-  const key = grantKeyOf(question);
   const request: HoldRequest = {
     sessionId: question.sessionId,
     agent: question.agent,
     operation: question.action,
     ...(question.target === undefined ? {} : { target: question.target }),
-    fingerprint: digest(`${question.sessionId}\u0000${key}`),
+    fingerprint: fingerprintOf(question),
     reason: question.reason,
     class: question.class,
-    grantKey: key,
+    grantKey: grantKeyOf(question),
   };
   const raised = await approvals.raise(request, moment, CHAT_APPROVAL_MS);
   const routed: PendingApproval = { ...raised, route };

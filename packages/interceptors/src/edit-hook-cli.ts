@@ -64,6 +64,9 @@ async function main(): Promise<void> {
     : null;
   if (ruled !== null && ruled.ruling.effect === DECISION_EFFECT.DENY)
     return emit(ruled.reply);
+  // Held for a person, so their question is what is shown, and nothing is claimed until they answer.
+  if (ruled !== null && ruled.ruling.effect === DECISION_EFFECT.ASK && !ruled.asked)
+    return emit(ruled.reply);
   const reply =
     ruled === null ? null : await replyInSession(payload, ruled, context, process.env);
 

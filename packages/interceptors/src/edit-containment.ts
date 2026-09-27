@@ -9,7 +9,11 @@ import {
   ACTION,
   containmentAsk,
   ENFORCEMENT_MODE,
+  FileGrants,
+  grantSubjectFor,
   SESSION_VAR,
+  TOOL_CLASS,
+  UNNAMED_SESSION,
   type ContainmentAsk,
 } from '@memnox/core';
 
@@ -55,9 +59,30 @@ export async function containedEdit(
       { action: ACTION.FILESYSTEM_WRITE, target: file },
       containment,
     );
-    if (asked !== null) return replyFor(found.host, asked, asking);
+    if (asked === null) continue;
+    // The policy half raised this same question, so a yes given there for the session holds here too.
+    if (await grantedInSession(context, edit.sessionId, file)) continue;
+    return replyFor(found.host, asked, asking);
   }
   return null;
+}
+
+async function grantedInSession(
+  context: EditHookContext,
+  hostSession: string,
+  file: string,
+): Promise<boolean> {
+  const sessionId =
+    context.runSession ?? (hostSession === '' ? UNNAMED_SESSION : hostSession);
+  const subject = grantSubjectFor({
+    sessionId,
+    agent: context.agent,
+    action: ACTION.FILESYSTEM_WRITE,
+    target: file,
+    class: TOOL_CLASS.WRITE,
+    reason: '',
+  });
+  return new FileGrants(context.home).covers(subject).catch(() => false);
 }
 
 /** Claude Code puts an ask to its person; every other host is refused with the reason. */

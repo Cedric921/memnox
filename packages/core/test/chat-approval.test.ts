@@ -1,6 +1,17 @@
+import { mkdtemp } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import { describe, expect, it } from 'vitest';
-import { replyOf } from '../src/gate/chat-approval';
-import type { PendingApproval } from '../src/gate/pending';
+import {
+  grantSubjectFor,
+  holdInChat,
+  openQuestionFor,
+  replyOf,
+  type ChatQuestion,
+} from '../src/gate/chat-approval';
+import { PendingApprovals, type PendingApproval } from '../src/gate/pending';
+import { FileGrants } from '../src/gate/session-grants';
 
 function held(id: string): PendingApproval {
   return {
@@ -38,7 +49,10 @@ describe('reading a reply as an answer', () => {
   });
 
   it('answers the one a reply names by id', () => {
-    expect(replyOf('allow apr_c3_d4', TWO)).toEqual({ id: 'apr_c3_d4', answer: 'once' });
+    expect(replyOf('allow apr_c3_d4', TWO)).toEqual({
+      id: 'apr_c3_d4',
+      answer: 'once',
+    });
     expect(replyOf('deny apr_zz_zz', TWO)).toBeNull();
   });
 
@@ -46,5 +60,54 @@ describe('reading a reply as an answer', () => {
     expect(replyOf('now write the tests for the billing module please', ONE)).toBeNull();
     expect(replyOf('no '.repeat(40), ONE)).toBeNull();
     expect(replyOf('yes', [])).toBeNull();
+  });
+});
+
+describe('an answer given for the rest of the session', () => {
+  const MOMENT = '2026-09-27T03:36:49.000Z';
+
+  function question(target: string, cls = 'destructive'): ChatQuestion {
+    return {
+      sessionId: 's1',
+      agent: 'claude-code',
+      action: 'filesystem.delete',
+      target,
+      class: cls,
+      reason: 'r',
+    };
+  }
+
+  async function home(): Promise<string> {
+    return mkdtemp(join(tmpdir(), 'memnox-chat-'));
+  }
+
+  it('is granted when it is answered, so a DM answer counts without the agent retrying in time', async () => {
+    const dir = await home();
+    const approvals = new PendingApprovals(dir);
+    const held = await holdInChat(approvals, question('a.patch'), 'both', MOMENT);
+    await approvals.answer(held.id, 'session', 'Moise', MOMENT);
+    const grants = new FileGrants(dir);
+    expect(await grants.covers(grantSubjectFor(question('a.patch')))).toBe(true);
+  });
+
+  it('covers only the file a delete named, and never answers a question about another', async () => {
+    const dir = await home();
+    const approvals = new PendingApprovals(dir);
+    const held = await holdInChat(approvals, question('a.patch'), 'both', MOMENT);
+    await approvals.answer(held.id, 'session', 'Moise', MOMENT);
+    expect(await new FileGrants(dir).covers(grantSubjectFor(question('b.patch')))).toBe(
+      false,
+    );
+    expect(await openQuestionFor(approvals, question('b.patch'), MOMENT)).toBeNull();
+  });
+
+  it('covers the whole action where it destroys nothing', async () => {
+    const dir = await home();
+    const approvals = new PendingApprovals(dir);
+    const write = { ...question('a.ts', 'write'), action: 'filesystem.write' };
+    const held = await holdInChat(approvals, write, 'both', MOMENT);
+    await approvals.answer(held.id, 'session', 'Moise', MOMENT);
+    const other = { ...write, target: 'b.ts' };
+    expect(await new FileGrants(dir).covers(grantSubjectFor(other))).toBe(true);
   });
 });

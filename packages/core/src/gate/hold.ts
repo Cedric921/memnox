@@ -123,7 +123,7 @@ export class HoldService {
 
   /** Whether this call was already answered "for this session", or learned. */
   async hasSessionGrant(request: HoldRequest): Promise<boolean> {
-    return this.grants.covers(subjectOf(request));
+    return this.grants.covers(holdGrantSubject(request));
   }
 
   async hold(request: HoldRequest): Promise<HoldResult> {
@@ -154,7 +154,7 @@ export class HoldService {
       return { outcome: HOLD_OUTCOME.DENIED, answer };
     }
     if (answer === HOLD_ANSWER.EDIT) return editedResult(asked, request);
-    const subject = subjectOf(request);
+    const subject = holdGrantSubject(request);
     if (answer === HOLD_ANSWER.SESSION) await this.grants.grant(subject);
     const learned = await this.grants.approved(subject);
     return {
@@ -170,7 +170,7 @@ export class HoldService {
   }
 }
 
-function subjectOf(request: HoldRequest): GrantSubject {
+export function holdGrantSubject(request: HoldRequest): GrantSubject {
   return {
     sessionId: request.sessionId,
     operation: request.grantKey ?? request.operation,

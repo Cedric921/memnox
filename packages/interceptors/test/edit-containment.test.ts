@@ -2,7 +2,13 @@ import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { PROBATION_KIND, ProbationRegister, SessionContainments } from '@memnox/core';
+import {
+  FileGrants,
+  grantSubjectFor,
+  PROBATION_KIND,
+  ProbationRegister,
+  SessionContainments,
+} from '@memnox/core';
 import { EDIT_HOST, EDIT_MOMENT, type AgentEdits } from '../src/agent-edits';
 import { containmentFor } from '../src/containment-loader';
 import type { EditHookContext } from '../src/edit-claims';
@@ -67,6 +73,28 @@ describe('a hooked agent writing outside its repository', () => {
     };
     expect(parsed.permission).toBe('deny');
     expect(parsed.agent_message).toContain(NOT_FROM_CHAT);
+  });
+
+  /* The policy half held the same write as a question, and the person answered it for
+     the session from their DM; refusing it again here asked them twice for one thing. */
+  it('lets the write through once the person allowed writes for the session', async () => {
+    const machine = await home();
+    await new FileGrants(machine).grant(
+      grantSubjectFor({
+        sessionId: 's1',
+        agent: 'claude-code',
+        action: 'filesystem.write',
+        target: '/etc/hosts',
+        class: 'write',
+        reason: '',
+      }),
+    );
+    expect(
+      await containedEdit(edits('/etc/hosts'), false, context(machine), () => REPO),
+    ).toBeNull();
+    expect(
+      await containedEdit(edits('/etc/hosts'), false, context(await home()), () => REPO),
+    ).not.toBeNull();
   });
 
   /* Auto mode shows no prompt, and an agent told to ask in chat took the yes and wrote

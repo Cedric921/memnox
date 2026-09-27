@@ -18,7 +18,7 @@ import {
   type EnforcementMode,
   type EventSink,
   FileGrants,
-  grantKeyFor,
+  grantSubjectFor,
   APPROVAL_ROUTE,
   holdInChat,
   HOLD_ANSWER,
@@ -228,12 +228,7 @@ async function withSessionGrant(
 ): Promise<ToolRuling> {
   if (ruling.effect !== DECISION_EFFECT.ASK) return ruling;
   const covered = await new FileGrants(home)
-    .covers({
-      sessionId,
-      operation: grantKeyFor(ruling.action, ruling.target),
-      fingerprint: ruling.target ?? ruling.action,
-      class: ruling.class,
-    })
+    .covers(grantSubjectFor(questionOf(ruling, sessionId, '')))
     .catch(() => false);
   if (!covered) return ruling;
   return {
@@ -262,12 +257,7 @@ async function grantSession(
   home: string,
 ): Promise<void> {
   await new FileGrants(home)
-    .grant({
-      sessionId,
-      operation: grantKeyFor(ruling.action, ruling.target),
-      fingerprint: ruling.target ?? ruling.action,
-      class: ruling.class,
-    })
+    .grant(grantSubjectFor(questionOf(ruling, sessionId, '')))
     .catch(() => undefined);
 }
 
