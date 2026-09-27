@@ -1,5 +1,13 @@
 # @memnox/core
 
+## 0.13.7
+
+### Patch Changes
+
+- 8e8fd11: In Claude Code a held question is now asked in Claude Code's own picker, the same one the agent uses for its questions: Allow once, Allow for this session, or Deny, chosen with the arrow keys, and the pick is recorded as the person's answer at once. The agent can send that picker with its own answer already filled in and Claude Code passes it through unseen, so Memnox refuses a picker that arrives answered and takes an answer only from one it saw open empty. Every other agent still shows the numbered choices, and typing 1, 2 or 3 still works everywhere.
+- c9da610: A held question is now put to the person in plain words, and the session shows it to them directly rather than leaving the agent to relay it: which agent wants to do what ("Claude Code wants to delete finish-cloud.patch."), what it was working on, why they are being asked, and three numbered choices they can answer with 1, 2 or 3. A target that is only a shell variable, like `$S`, says so instead of reading like a file name. The agent is told the same choices and, once somebody answers, what it may now do. The heartbeat carries the same wording to the control plane, so a DM can ask in the same words.
+- b7c2b21: A yes for the rest of the session now counts the moment it is given, wherever it was given: typed in the session, run as `memnox approve`, or pressed in a Slack or Discord DM. It used to count only if the agent retried the same call before the question expired, so an answer from a phone was usually lost and the same question came back. The project boundary check reads the same grant, so one yes is never asked for twice, and when a question is held for a person that question is what the session shows, rather than a refusal telling the agent that a yes could not help. A yes for the session on a delete covers that one file, and an answer about one file is never spent on another.
+
 ## 0.13.6
 
 ### Patch Changes
