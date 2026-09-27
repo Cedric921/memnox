@@ -16,6 +16,7 @@ import {
   NodeSnapshotStore,
   PendingApprovals,
   plainAsk,
+  redactSecrets,
   protectionStopped,
   markRevoked,
   readAccount,
@@ -369,18 +370,21 @@ async function enrolledAgents(
 function describeHeld(each: PendingApproval): Record<string, unknown> {
   // Raised by a shell wrapper, a call has no words written yet, so they are written here.
   const plain = each.plain ?? plainAsk(each.request);
+  // Masked again here, since a question raised before masking existed carries its words unmasked.
   return {
-    summary: plain.summary,
-    why: plain.why,
-    ...(plain.task === undefined ? {} : { task: plain.task }),
+    summary: redactSecrets(plain.summary),
+    why: redactSecrets(plain.why),
+    ...(plain.task === undefined ? {} : { task: redactSecrets(plain.task) }),
     ...(each.request.class === undefined ? {} : { class: each.request.class }),
     id: each.id,
     agent: each.request.agent,
     operation: each.request.operation,
-    reason: each.request.reason,
+    reason: redactSecrets(each.request.reason),
     askedAt: each.askedAt,
     expiresAt: each.expiresAt,
-    ...(each.request.target === undefined ? {} : { target: each.request.target }),
+    ...(each.request.target === undefined
+      ? {}
+      : { target: redactSecrets(each.request.target) }),
   };
 }
 

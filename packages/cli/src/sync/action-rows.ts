@@ -3,6 +3,7 @@ import {
   EXECUTION,
   UNNAMED_AGENT,
   type MemnoxEvent,
+  redactSecrets,
 } from '@memnox/core';
 
 import { CLOUD_EVENT, eventOf, MAX_POST, type CloudEvent } from './cloud-event';
@@ -95,7 +96,8 @@ function actionOf(event: MemnoxEvent): Record<string, unknown> {
     surface: event.surface,
     operation: event.operation,
     classes: [event.class],
-    ...(event.target === undefined ? {} : { resourceRef: event.target }),
+    // The local ledger keeps the target whole for `why`; what leaves the machine is masked.
+    ...(event.target === undefined ? {} : { resourceRef: redactSecrets(event.target) }),
     ...(event.argsDigest === undefined ? {} : { argsDigest: event.argsDigest }),
   };
 }
@@ -105,7 +107,7 @@ function verdictOf(event: MemnoxEvent): Record<string, unknown> {
   return {
     effect: event.effect,
     finalEffect: finalEffectOf(event),
-    reason: event.reason,
+    reason: redactSecrets(event.reason),
     ...(event.rule === undefined ? {} : { ruleId: event.rule.name }),
     ...(event.policyHash === undefined ? {} : { policyHash: event.policyHash }),
     ...(event.bundleHash === undefined ? {} : { bundleHash: event.bundleHash }),

@@ -1,4 +1,5 @@
 import type { HoldRequest } from './hold';
+import { redactSecrets } from '../domain/redact';
 
 /**
  * A held call in the words a person reads it in: who wants to do what, why they are being
@@ -125,12 +126,13 @@ export function plainAsk(
   request: Pick<HoldRequest, 'agent' | 'operation' | 'target' | 'reason'>,
   task?: string,
 ): PlainAsk {
-  const shownTask = task === undefined ? undefined : taskShown(task);
-  const action = doing(request);
+  // This wording reaches the control plane and a DM, so no credential in a target or a prompt rides along.
+  const shownTask = task === undefined ? undefined : taskShown(redactSecrets(task));
+  const action = redactSecrets(doing(request));
   return {
     summary: `${agentShown(request.agent)} wants to ${action}.`,
     doing: action,
-    why: whyShown(request.reason),
+    why: redactSecrets(whyShown(request.reason)),
     ...(shownTask === undefined ? {} : { task: shownTask }),
   };
 }

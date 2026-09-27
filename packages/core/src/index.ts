@@ -8,6 +8,7 @@ export * from './constants/risk.constants';
 export * from './domain/action-class';
 export * from './domain/capability';
 export * from './domain/time';
+export * from './domain/redact';
 export * from './domain/line-buffer';
 export * from './domain/exit-code';
 export * from './domain/action-event';
