@@ -1,4 +1,5 @@
 import type { DecisionEffect } from '../constants/decision.constants';
+import { ACTION } from '../constants/action.constants';
 import type { ActionRequest } from '../domain/action-event';
 import type { Alternative, MatchedPolicy } from '../domain/decision';
 import { DECISION_EFFECT, EFFECT_PRECEDENCE } from '../constants/decision.constants';
@@ -117,6 +118,7 @@ export class LocalGate {
     // First: nothing a rule or an allowance says lets an agent change what governs it.
     const contained =
       selfProtection(request) ??
+      hiddenCode(request) ??
       offIntent(this.options.task ?? null, request, evaluation.effect) ??
       this.contained(request, evaluation.effect);
     const effect = effectUnder(evaluation.effect, contained);
@@ -255,4 +257,14 @@ function reasonOf(
 ): string {
   if (allowed !== null) return describeAllowance(allowed);
   return contained === null ? ruled : contained.reason;
+}
+
+/** Code nobody could read before it runs is put to a person, whatever the rules allow. */
+function hiddenCode(request: ActionRequest): ContainmentAsk | null {
+  if (request.action !== ACTION.SHELL_HIDDEN) return null;
+  return {
+    reason:
+      'this runs code nobody could read before it runs, so a person should look first',
+    signal: 'hidden-code',
+  };
 }

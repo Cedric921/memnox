@@ -26,7 +26,11 @@ import {
 } from '../verbs/index';
 import { TOOL_CLASS } from '../discovery/classify';
 import type { ToolClass } from '../discovery/classify';
-import { normalizeShellCommand, type OpaqueReason } from '../domain/shell-normalizer';
+import {
+  normalizeShellCommand,
+  OPAQUE_REASON,
+  type OpaqueReason,
+} from '../domain/shell-normalizer';
 import { ACTION } from '../constants/action.constants';
 
 export interface ResolvedAction {
@@ -262,9 +266,30 @@ export function resolveShellLine(
   const printed = environmentRead(variablesPrinted(normalized.parsed));
   const all = [...actions, ...redirected, ...(printed === null ? [] : [printed])];
   const governing = governingChange(line, all, normalized);
+  const hidden = hiddenCode(normalized.opaque);
   return {
-    actions: governing === null ? all : [...all, governing],
+    actions: [
+      ...all,
+      ...(governing === null ? [] : [governing]),
+      ...(hidden === null ? [] : [hidden]),
+    ],
     opaque: normalized.opaque,
+  };
+}
+
+/** Code the line runs that nobody here could read first, which a person is asked about. */
+function hiddenCode(opaque: readonly OpaqueReason[]): ResolvedAction | null {
+  const unreadable = opaque.filter(
+    (each) => each === OPAQUE_REASON.REMOTE_SOURCE || each === OPAQUE_REASON.UNDECODABLE,
+  );
+  if (unreadable.length === 0) return null;
+  return {
+    action: ACTION.SHELL_HIDDEN,
+    class: TOOL_CLASS.DESTRUCTIVE,
+    because:
+      unreadable[0] === OPAQUE_REASON.REMOTE_SOURCE
+        ? 'it pipes a download straight into a shell, so what runs is only known once it has run'
+        : 'it decodes something and runs it, and what it decodes could not be read first',
   };
 }
 

@@ -7,6 +7,8 @@ export const ACTION = {
   FILESYSTEM_WRITE: 'filesystem.write',
   FILESYSTEM_DELETE: 'filesystem.delete',
   SHELL_EXECUTE: 'shell.execute',
+  /** Code a line runs that nothing here could read first: a download piped into a shell, an undecodable payload. */
+  SHELL_HIDDEN: 'shell.hidden',
   BROWSER_NAVIGATE: 'browser.navigate',
   GIT_PUSH: 'git.push',
   GIT_PUSH_FORCE: 'git.push-force',

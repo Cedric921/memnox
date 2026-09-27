@@ -132,6 +132,8 @@ function walk(raw: string, depth: number, state: Walk): void {
     if (words.length === 0) continue;
 
     if (EXPANSION.test(part)) opaque.add(OPAQUE_REASON.EXPANSION);
+    // What a substitution runs is a command like any other, so `echo $(rm -rf ~)` is an rm.
+    for (const body of substitutionsIn(part)) walk(body, depth + 1, state);
 
     const binary = basename(words[0] ?? '');
     if (pipesIntoInterpreter && DOWNLOADERS.has(binary)) {
@@ -166,6 +168,104 @@ function endsInInterpreter(pipeline: readonly string[]): boolean {
   return INTERPRETERS.has(basename(words[0]?.text ?? ''));
 }
 
+/**
+ * The bodies of `$(...)` and backticks in a command, outermost first, so what they run is
+ * ruled on rather than only noted as something the line could not see through.
+ */
+function substitutionsIn(part: string): string[] {
+  const bodies: string[] = [];
+  for (let at = 0; at < part.length; at += 1) {
+    if (part[at] === '`') {
+      const end = part.indexOf('`', at + 1);
+      if (end === -1) break;
+      bodies.push(part.slice(at + 1, end));
+      at = end;
+    } else if (part[at] === '$' && part[at + 1] === '(' && part[at + 2] !== '(') {
+      let depth = 0;
+      for (let end = at + 1; end < part.length; end += 1) {
+        if (part[end] === '(') depth += 1;
+        if (part[end] === ')') depth -= 1;
+        if (depth === 0) {
+          bodies.push(part.slice(at + 2, end));
+          at = end;
+          break;
+        }
+      }
+    }
+  }
+  return bodies;
+}
+
+/** Words that only run the next one, and how many values each of their options takes. */
+const PREFIXES = new Map<string, ReadonlySet<string>>([
+  ['env', new Set(['-u', '--unset', '-C', '--chdir', '-S'])],
+  ['sudo', new Set(['-u', '-g', '-C', '-h', '-p', '-U', '-r', '-t', '-D'])],
+  ['doas', new Set(['-u', '-C'])],
+  ['command', new Set()],
+  ['nohup', new Set()],
+  ['time', new Set()],
+  ['nice', new Set(['-n'])],
+  ['ionice', new Set(['-c', '-n', '-p'])],
+  ['stdbuf', new Set(['-i', '-o', '-e'])],
+  ['xargs', new Set(['-n', '-I', '-L', '-P', '-s', '-d', '-E', '-a'])],
+]);
+
+/** The command a prefix runs, past its own options, its `NAME=value` words and its duration. */
+function afterPrefix(binary: string, words: readonly string[]): string | null {
+  const valued = PREFIXES.get(binary);
+  if (valued === undefined) return null;
+  let at = 1;
+  while (at < words.length) {
+    const word = words[at] ?? '';
+    if (valued.has(word)) at += 2;
+    else if (word.startsWith('-') || ENV_ASSIGNMENT.test(word)) at += 1;
+    else break;
+  }
+  const rest = words.slice(at);
+  return rest.length === 0 ? null : rest.join(' ');
+}
+
+/** `timeout 5 rm x`: the duration is the first word, then the command. */
+function afterTimeout(words: readonly string[]): string | null {
+  let at = 1;
+  while (at < words.length && (words[at] ?? '').startsWith('-')) at += 1;
+  const rest = words.slice(at + 1);
+  return rest.length === 0 ? null : rest.join(' ');
+}
+
+/** `find . -delete` removes what it finds, and `-exec rm {} ;` runs rm on each. */
+function findRuns(words: readonly string[]): string | null {
+  const exec = words.findIndex(
+    (word) => word === '-exec' || word === '-execdir' || word === '-ok',
+  );
+  if (exec !== -1) {
+    const end = words.findIndex(
+      (word, at) => at > exec && (word === ';' || word === '\\;' || word === '+'),
+    );
+    return words.slice(exec + 1, end === -1 ? undefined : end).join(' ') || null;
+  }
+  if (words.includes('-delete')) {
+    const start = words[1] !== undefined && !words[1].startsWith('-') ? words[1] : '.';
+    return `rm -rf ${start}`;
+  }
+  return null;
+}
+
+/** `git -c alias.x='!rm -rf ~' x` runs the alias body as shell, whatever the verb says. */
+function gitAliasRuns(words: readonly string[]): string | null {
+  for (let at = 1; at < words.length - 1; at += 1) {
+    if (words[at] !== '-c') continue;
+    const shell = /^alias\.[^=]+=!(.+)$/.exec(words[at + 1] ?? '');
+    if (shell !== null) return shell[1] ?? null;
+  }
+  return null;
+}
+
+/** `-c`, and the same flag run together with others: `bash -lc`, `sh -ec`. */
+function codeFlagAt(words: readonly string[]): number {
+  return words.findIndex((word, at) => at > 0 && /^-[a-z]*c[a-z]*$/.test(word));
+}
+
 /** Returns the wrapped command when this word list is a wrapper, else null. */
 function unwrap(
   binary: string,
@@ -175,8 +275,13 @@ function unwrap(
   if (binary === 'eval' || binary === 'exec') {
     return words.slice(1).join(' ');
   }
+  if (binary === 'timeout') return afterTimeout(words);
+  if (binary === 'find') return findRuns(words);
+  if (binary === 'git') return gitAliasRuns(words);
+  const prefixed = afterPrefix(binary, words);
+  if (prefixed !== null) return prefixed;
   if (INTERPRETERS.has(binary)) {
-    const index = words.indexOf('-c');
+    const index = codeFlagAt(words);
     if (index !== -1 && index + 1 < words.length) return words[index + 1] ?? null;
     return null;
   }
