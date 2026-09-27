@@ -114,6 +114,28 @@ the line it explains; anything longer belongs in `docs/`, where it is read on pu
 // Annotations win over the verb table: the server author knows the tool better than we do.
 ```
 
+### 0.6 Committing and releasing
+
+**One commit per logical change, and each one green on its own.** Typecheck, format,
+tests and `knip` pass at every commit, not only at the last. Somebody else's work often
+sits uncommitted in the same tree, so commit your own files and nothing else.
+
+**Every user-visible change carries a changeset**, written in the commit that makes the
+change: `.changeset/<name>.md`, with all four packages at `patch`, since they release
+together.
+
+**A release is `pnpm ship "<summary>"` on `main`, and nothing else.** It versions,
+commits `chore(release): X.Y.Z, <summary>`, tags `vX.Y.Z` and pushes, and `release.yml`
+tests the tag and publishes with the repository's npm token. Never run `pnpm release` or
+`changeset publish` from a laptop: the `@memnox/*` packages require two factor
+authentication, a passkey cannot answer from a script, and 0.13.8 went out as a CLI
+whose own dependencies did not exist yet until they were published by hand. Pushing and
+publishing leave this machine, so an agent prepares and commits a release and runs
+`pnpm ship` only when the person asked for the release.
+
+**`memnox.policies.toml` is the person's to commit.** It is Memnox's own rules, and
+Memnox refuses to let an agent change it, committing included.
+
 ---
 
 # THE MILESTONES
