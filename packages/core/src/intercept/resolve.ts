@@ -5,6 +5,7 @@
 import { classifyBinary, classifyReader, COMMAND_CLASS } from './binary-class';
 import { classifyWriter } from './writers';
 import { loosens, MEMNOX_ACTION_PREFIX } from '../gate/self-protection';
+import { namesProtected } from '../gate/protected-paths';
 import { environmentRead, variablesPrinted } from './environment-reads';
 import {
   fileStatementIn,
@@ -259,10 +260,102 @@ export function resolveShellLine(
   }
   const redirected = redirectActions(normalized.redirects, env);
   const printed = environmentRead(variablesPrinted(normalized.parsed));
+  const all = [...actions, ...redirected, ...(printed === null ? [] : [printed])];
+  const governing = governingChange(line, all, normalized);
   return {
-    actions: [...actions, ...redirected, ...(printed === null ? [] : [printed])],
+    actions: governing === null ? all : [...all, governing],
     opaque: normalized.opaque,
   };
+}
+
+/** Interpreters whose code can write anywhere, whatever the rest of the line says. */
+const INTERPRETERS: readonly string[] = [
+  'python',
+  'python3',
+  'node',
+  'deno',
+  'bun',
+  'ruby',
+  'perl',
+  'php',
+  'osascript',
+  'sh',
+  'bash',
+  'zsh',
+  'fish',
+  'dash',
+  'ksh',
+  'lua',
+  'tclsh',
+  'awk',
+  'gawk',
+];
+
+/** Words that only run the next one, so the command is what follows them. */
+const PREFIXES: readonly string[] = [
+  'env',
+  'sudo',
+  'command',
+  'nohup',
+  'nice',
+  'timeout',
+  'exec',
+  'time',
+  'xargs',
+];
+
+/**
+ * Whether any command in the raw line starts an interpreter. Read off the line as typed,
+ * because the normalizer unwraps `python -c` and walks the code as shell, which hides it.
+ */
+function runsInterpreter(line: string): boolean {
+  return line.split(/[;&|()\n]+/).some((segment) => {
+    const words = splitCommandLine(segment.trim());
+    let at = 0;
+    while (
+      at < words.length &&
+      (PREFIXES.includes(words[at] ?? '') ||
+        /^\w+=/.test(words[at] ?? '') ||
+        /^-/.test(words[at] ?? ''))
+    )
+      at += 1;
+    const binary = (words[at] ?? '').split('/').pop() ?? '';
+    if (binary === 'sqlite3') return !words.includes('-readonly');
+    return INTERPRETERS.includes(binary.replace(/[\d.]+$/, ''));
+  });
+}
+
+/**
+ * A line naming what governs the agent that also changes something, runs code or hides part
+ * of itself is a write there: `cd ~/.memnox && tee x` and `ln -s ~/.memnox g` name no path.
+ */
+function governingChange(
+  line: string,
+  actions: readonly ResolvedAction[],
+  normalized: ReturnType<typeof normalizeShellCommand>,
+): ResolvedAction | null {
+  const named = namesProtected(line);
+  if (named === null) return null;
+  const changes =
+    normalized.opaque.length > 0 ||
+    runsInterpreter(line) ||
+    actions.some(
+      (each) => each.class === TOOL_CLASS.WRITE || each.class === TOOL_CLASS.DESTRUCTIVE,
+    );
+  if (!changes) return null;
+  return {
+    action: ACTION.FILESYSTEM_WRITE,
+    class: TOOL_CLASS.WRITE,
+    because: `the line names ${named} and changes something`,
+    target: protectedTargetFor(named),
+  };
+}
+
+function protectedTargetFor(named: string): string {
+  if (named.startsWith('.memnox')) return '~/.memnox/';
+  if (named === 'disableAllHooks' || named === 'allowUnsandboxedCommands')
+    return '~/.claude/settings.json';
+  return named;
 }
 
 /** `> file` and `< file` as the writes and reads they are, which argv never shows. */

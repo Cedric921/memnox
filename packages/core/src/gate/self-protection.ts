@@ -5,6 +5,7 @@
  */
 import { ACTION } from '../constants/action.constants';
 import type { ActionRequest } from '../domain/action-event';
+import { touchesProtected } from './protected-paths';
 
 /** What a refusal here is recorded under, so `why` names it rather than a rule. */
 export const SELF_PROTECTION_SIGNAL = 'self-protection';
@@ -54,24 +55,14 @@ const READING: readonly string[] = [
 
 const WRITES: readonly string[] = [ACTION.FILESYSTEM_WRITE, ACTION.FILESYSTEM_DELETE];
 
-/** The Memnox home, and rule files wherever they live. Matched on the path, not the name typed. */
-function isMemnoxPath(target: string): boolean {
-  const path = target.replace(/\\/g, '/');
-  if (path.includes('/.memnox/') || path.endsWith('/.memnox')) return true;
-  const name = path.split('/').pop() ?? '';
-  return (
-    /^memnox\.policies\.(toml|ya?ml|json)$/.test(name) || /\.policies\.toml$/.test(name)
-  );
-}
-
 /** A refusal for an agent touching what governs it, or null for anything else. */
 export function selfProtection(
   request: ActionRequest,
 ): { reason: string; signal: string; refuses: true } | null {
   if (WRITES.includes(request.action) && request.target !== undefined) {
-    if (!isMemnoxPath(request.target)) return null;
+    if (!touchesProtected(request.target)) return null;
     return {
-      reason: `${request.target} is Memnox's own rules or state, which a person changes and an agent never does.`,
+      reason: `${request.target} is Memnox's own rules or state, or the settings that install its hooks, which a person changes and an agent never does.`,
       signal: SELF_PROTECTION_SIGNAL,
       refuses: true,
     };

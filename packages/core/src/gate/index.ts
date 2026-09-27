@@ -15,3 +15,4 @@ export * from './allowances';
 export * from './self-protection';
 export * from './chat-approval';
 export * from './plain-ask';
+export * from './protected-paths';

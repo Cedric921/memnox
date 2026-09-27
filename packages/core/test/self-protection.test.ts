@@ -97,3 +97,56 @@ describe('a shell line into a rule file', () => {
     expect(refused.map((each) => each.effect)).toContain('deny');
   });
 });
+
+/* Each of these reached ~/.memnox or the hook settings with no argument that looked like
+   the path: the target was a link name, a relative file after a `cd`, or code. */
+describe('what governs an agent, reached some other way', () => {
+  const ruled = (line: string): string[] =>
+    resolveShellLine(line, { HOME: '/Users/me' }).actions.map(
+      (each) =>
+        gate().evaluate({
+          action: each.action,
+          toolClass: each.class,
+          ...(each.target === undefined ? {} : { target: each.target }),
+        }).effect,
+    );
+
+  it.each([
+    'cd ~/.memnox/grants && tee s.json',
+    'ln -s ~/.memnox g',
+    `python3 -c "open('/Users/me/.memnox/stopped.json','w').write('{}')"`,
+    `node -e "require('fs').writeFileSync('/Users/me/.memnox/config.toml','')"`,
+    'chmod 000 ~/.memnox/config.toml',
+    'sqlite3 ~/.memnox/memnox.db "delete from events"',
+    `python3 -c "import json;p='/Users/me/.claude/settings.json';d=json.load(open(p));d['disableAllHooks']=True;json.dump(d,open(p,'w'))"`,
+    'echo x > .claude/settings.local.json',
+  ])('denies `%s`', (line) => {
+    expect(ruled(line)).toContain('deny');
+  });
+
+  it.each([
+    'cat ~/.memnox/daemon.log',
+    'grep -r pending ~/.memnox',
+    'sqlite3 -readonly ~/.memnox/memnox.db "select count(*) from events"',
+    'cat ~/.claude/settings.json',
+  ])('still lets `%s` read', (line) => {
+    expect(ruled(line)).not.toContain('deny');
+  });
+
+  it('follows a link into ~/.memnox to where it really lands', async () => {
+    const { mkdtemp, mkdir, symlink } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const root = await mkdtemp(join(tmpdir(), 'memnox-protect-'));
+    await mkdir(join(root, 'home', '.memnox', 'grants'), { recursive: true });
+    await mkdir(join(root, 'project'));
+    await symlink(join(root, 'home', '.memnox'), join(root, 'project', 'g'));
+
+    const verdict = gate().evaluate({
+      action: 'filesystem.write',
+      toolClass: 'write',
+      target: join(root, 'project', 'g', 'grants', 'session.json'),
+    });
+    expect(verdict.effect).toBe('deny');
+  });
+});
