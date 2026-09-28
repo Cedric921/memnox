@@ -36,7 +36,7 @@ export interface CodeFingerprint {
 const ENFORCE_KEY = 'enforce';
 
 /** Lines of guidance one session is told, so a long file cannot fill a context window. */
-export const MOST_GUIDANCE_LINES = 40;
+export const MOST_GUIDANCE_LINES = 60;
 
 /** Characters of one guidance line. */
 const MOST_GUIDANCE_LENGTH = 200;
@@ -71,7 +71,14 @@ export function parseCodeFingerprint(raw: string): CodeFingerprint {
   const stated = Object.fromEntries(
     Object.entries(document).filter(([key]) => key !== ENFORCE_KEY),
   );
-  const guidance = linesOf(stated, [])
+  const every = linesOf(stated, []);
+  // Said, since guidance cut in silence reads as guidance the repository never stated.
+  if (every.length > MOST_GUIDANCE_LINES) {
+    issues.push(
+      `${every.length - MOST_GUIDANCE_LINES} guidance line(s) past the first ${MOST_GUIDANCE_LINES} are not read`,
+    );
+  }
+  const guidance = every
     .slice(0, MOST_GUIDANCE_LINES)
     .map((line) => line.slice(0, MOST_GUIDANCE_LENGTH));
   return { checks, guidance, issues };
@@ -107,7 +114,8 @@ export function describeFingerprint(fingerprint: CodeFingerprint): string | null
   const enforced = fingerprint.checks.map(
     (check) => `enforced: ${check.reason} (${check.files.join(', ')})`,
   );
-  const lines = [...fingerprint.guidance, ...enforced].slice(0, MOST_GUIDANCE_LINES);
+  // Every check, however long the guidance: one the agent is never told still refuses it.
+  const lines = [...fingerprint.guidance, ...enforced];
   if (lines.length === 0) return null;
   return [
     `This repository states how its code is written, in ${CODE_FINGERPRINT_FILE}. Follow it; a write that breaks an enforced line is refused.`,

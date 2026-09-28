@@ -3,6 +3,7 @@ import { parse, stringify } from 'yaml';
 import { matchesAny } from '../policy/pattern-matcher';
 import {
   fingerprintPolicies,
+  MOST_GUIDANCE_LINES,
   parseCodeFingerprint,
   type CodeFingerprint,
 } from './code-fingerprint';
@@ -13,17 +14,45 @@ import {
  * language and any framework: the agent names what it finds.
  */
 export const FINGERPRINT_PROMPT = [
-  'Read enough of this repository to see how its code is written, then call the memnox-session "fingerprint" tool with it as `yaml`. Every agent working here after you is held to it.',
+  'Read this repository closely enough to write its code fingerprint: the page an agent who has never seen this code reads before changing it, and the checks a machine runs on every line an agent writes. Then call the memnox-session "fingerprint" tool with it as `yaml`. Every agent after you is held to it and only a person changes it later, so take the time to get it right.',
   '',
-  'Top level sections are yours to name for whatever this codebase uses, in any language or framework: for example language, framework, architecture, naming, functions, errors, async, database, testing, imports, comments. Under each, state what the code actually does, as short values or lists, such as `files: kebab-case` or `avoid: [deeply nested conditionals]`. State only what most of the existing code already follows, never what you would prefer.',
+  'How to read: start from the README and the build files, walk the directory layout, then open at least two files of every kind (entry points, handlers, business logic, data access, models, configuration, jobs, migrations, tests). Before you state a convention, search the code to see how often it is followed. State only what most of the code already does, never what you would prefer, and name the exception where there is one.',
   '',
-  'Then add an `enforce` list, only for conventions a single added line can break, which a machine checks on every line an agent writes. Each entry:',
+  'What to write: top level sections of your own naming, as short values or lists, such as `files: kebab-case` or `avoid: [deeply nested conditionals]`. Cover each of these that applies and skip the rest:',
+  '  stack: languages and versions, frameworks, key libraries, the build tool',
+  '  layout: where each kind of file lives, and which folders are generated or vendored and never edited by hand',
+  '  architecture: the layers, which may call which, and where writes, side effects and external calls happen',
+  '  recipe: the steps to add a typical feature end to end, in order, naming the files each step touches',
+  '  naming: files, types, functions, variables, tests, database objects',
+  '  style: formatting, imports, immutability, how data types are declared and built',
+  '  errors: how failures are raised, wrapped and reported, and the message format',
+  '  data: absence and nulls, time and time zones, money and numbers, ids',
+  '  logging: the logger, how it is named and how it is called',
+  '  configuration: where settings come from, and how secrets stay out of the code',
+  '  dependencies: how one is added, and what is deliberately not used',
+  '  testing: frameworks, where tests live, naming, structure, fixtures, what is mocked and what is real',
+  '  commands: how to build, test, format and regenerate code',
+  '  comments: when and how',
+  `Where a section has one, add an \`example:\` path to the file that shows it best. Keep to ${MOST_GUIDANCE_LINES} lines of guidance at most, each under 200 characters, because what is past that is not read.`,
+  '',
+  'Then an `enforce` list: checks a machine runs on every line an agent adds. Each entry:',
   '  name: a short kebab case id',
   '  files: globs relative to the repository root; a leading ! takes files back out',
   '  forbid: patterns an added line must not match. `*` is the only wildcard and matches anything, matching is case insensitive and covers the whole line, so write `*console.log(*` rather than `console.log(`. No regular expressions.',
   '  reason: the convention, in one line',
   '  instead: what to write instead, in one line',
-  'Leave out anything a single line cannot show, such as function length or layering. A check that matches code the repository already has, or whose files name nothing it has, is dropped, so keep each one precise.',
+  '',
+  'Aim for 8 to 15 checks, spent where an agent is most likely to go wrong here:',
+  '  1. the architecture: a call that crosses a layer it must not, such as data access from a handler, or a write outside the one place writes belong',
+  '  2. the data rules: the wrong clock or time zone, a null where the code uses an optional, floating point for money, a hand built id',
+  '  3. errors and logging: printing instead of logging, the wrong exception at a boundary',
+  '  4. testing: the wrong test framework or assertion library in test files',
+  '  5. anything else most of the code avoids that an agent would plausibly write',
+  'Never spend a check on a library or annotation nothing here would use, because a check that can never fire protects nothing. Scope each one to the files it is about, and keep tests apart from main code where their rules differ.',
+  '',
+  'Make every pattern exact, because it matches any line containing it: `*@Inject*` also refuses `@InjectMocks`, so write `*import javax.inject*`. Search the code for each pattern before you submit it. A check that matches code the repository already has is dropped, and so is one whose files are only vendored or ignored folders, which are not read. A rule that no single line can show, such as never editing generated code or keeping functions short, belongs in the guidance instead.',
+  '',
+  'The tool answers with what it kept, what it dropped and why. Tell the person that, and that the file is theirs to review and commit.',
 ].join('\n');
 
 /** How much of an agent's answer is read, since a fingerprint is a page and never a book. */

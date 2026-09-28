@@ -130,7 +130,28 @@ enforce:
       '\n',
     );
 
-    expect(parseCodeFingerprint(long).guidance).toHaveLength(MOST_GUIDANCE_LINES);
+    const fingerprint = parseCodeFingerprint(long);
+
+    expect(fingerprint.guidance).toHaveLength(MOST_GUIDANCE_LINES);
+    expect(fingerprint.issues).toContain(
+      `${100 - MOST_GUIDANCE_LINES} guidance line(s) past the first ${MOST_GUIDANCE_LINES} are not read`,
+    );
+  });
+
+  // A check the agent is never told about still refuses its writes, so none is ever cut.
+  it('tells every check, however long the guidance before it', () => {
+    const long = [
+      ...Array.from({ length: 100 }, (_, n) => `rule${n}: keep it ${n}`),
+      'enforce:',
+      '  - name: no-console',
+      '    files: ["src/**"]',
+      '    forbid: ["*console.*"]',
+      '    reason: use the logger',
+    ].join('\n');
+
+    expect(describeFingerprint(parseCodeFingerprint(long))).toContain(
+      '- enforced: use the logger (src/**)',
+    );
   });
 });
 
