@@ -1,7 +1,7 @@
 {
   "name": "memnox",
   "version": "0.13.14",
-  "description": "Memnox CLI — run the trust runtime, manage policies, inspect the audit trail.",
+  "description": "Your agents can already do the work. Memnox makes it safe to let them do it without you: one boundary of allow, ask and deny over every agent on your machine.",
   "keywords": [
     "ai-agents",
     "governance",
