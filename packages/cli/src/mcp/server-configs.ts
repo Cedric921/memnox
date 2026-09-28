@@ -28,6 +28,8 @@ export interface ConfigFile {
   urlOnly: string[];
   /** The agent these servers belong to, written into each wrapped line. */
   agent?: DiscoveredAgentKind;
+  /** A repository's own file, usually committed, which is read and never rewritten. */
+  shared?: true;
 }
 
 /** One server's new launch line. */
@@ -55,8 +57,9 @@ export async function readConfigs(home: string, project: string): Promise<Config
   for (const each of MCP_CONFIG_LOCATIONS) {
     const path = join(each.scope === 'home' ? home : project, each.relative);
     const owner = each.agent === undefined ? {} : { agent: each.agent };
+    const shared = each.scope === 'project' ? { shared: true as const } : {};
     const file = await readConfig(path);
-    if (file !== null) found.push({ ...file, ...owner });
+    if (file !== null) found.push({ ...file, ...owner, ...shared });
   }
   return found;
 }
