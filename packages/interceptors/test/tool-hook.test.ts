@@ -3,9 +3,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
+  CLAIM_ANSWER,
   DECISION_EFFECT,
   ENFORCEMENT_MODE,
   EVENT_SURFACE,
+  type ClaimOutcome,
+  type EnforcementMode,
+  type IntendedAction,
+  type SharedActions,
   EXECUTION,
   LocalGate,
   policiesFrom,
@@ -669,5 +674,206 @@ describe('MCP tools and CLIs through the hook', () => {
     expect(await effectOf('Bash', { command: 'npm run test' })).toBe(
       DECISION_EFFECT.ALLOW,
     );
+  });
+});
+
+/* A repository's conventions, held at the write rather than left to an agent's memory
+   of CLAUDE.md: the agent is refused with the rule and why, and fixes it in its turn. */
+describe("a repository's conventions, at the write", () => {
+  const CONVENTIONS: Policy[] = [
+    {
+      name: 'no-optional-chaining',
+      match: {
+        actions: ['filesystem.write'],
+        targets: [`${REPO}/src/**`],
+        content: ['*?.*'],
+      },
+      decision: {
+        effect: DECISION_EFFECT.DENY,
+        reason: 'CLAUDE.md: no optional chaining, write the check',
+        alternative: {
+          action: 'filesystem.write',
+          note: 'write `if (x === undefined) return` instead',
+        },
+      },
+    },
+    {
+      name: 'no-console',
+      match: {
+        actions: ['filesystem.write'],
+        targets: [`${REPO}/src/**`, `!${REPO}/src/main.ts`],
+        content: ['*console.*'],
+      },
+      decision: { effect: DECISION_EFFECT.DENY, reason: 'use the CLOUD_LOGGER token' },
+    },
+  ];
+
+  async function ruled(tool: string, input: Record<string, unknown>) {
+    const rows = new Rows();
+    const answer = await answerToolCall(claude(tool, input), context(), {
+      authorizer: authorizer(CONVENTIONS),
+      mode: ENFORCEMENT_MODE.ENFORCE,
+      sink: rows,
+    });
+    const said = JSON.parse(answer?.reply?.stdout ?? '{}') as {
+      hookSpecificOutput?: {
+        permissionDecision: string;
+        permissionDecisionReason: string;
+      };
+    };
+    return { said: said.hookSpecificOutput, rows: rows.appended };
+  }
+
+  it('refuses an edit that adds what the repository forbids, saying the rule and the fix', async () => {
+    const { said, rows } = await ruled('Edit', {
+      file_path: `${REPO}/src/billing.ts`,
+      old_string: 'const a = 1;',
+      new_string: 'const name = user?.name;',
+    });
+
+    expect(said?.permissionDecision).toBe('deny');
+    expect(said?.permissionDecisionReason).toContain('no optional chaining');
+    expect(said?.permissionDecisionReason).toContain('if (x === undefined) return');
+    // The row names the rule and never the line, since contents stay on this machine.
+    expect(JSON.stringify(rows)).not.toContain('user?.name');
+  });
+
+  it('holds only what the agent adds, not what was already in the file', async () => {
+    const { said } = await ruled('Edit', {
+      file_path: `${REPO}/src/billing.ts`,
+      old_string: 'const name = user?.name;',
+      new_string: 'const name = user === undefined ? "" : user.name;',
+    });
+
+    expect(said?.permissionDecision).not.toBe('deny');
+  });
+
+  it('reads a whole new file, every edit of a MultiEdit and each file of a Codex patch', async () => {
+    const write = await ruled('Write', {
+      file_path: `${REPO}/src/new.ts`,
+      content: 'export const x = 1;\nconsole.log(x);\n',
+    });
+    const multi = await ruled('MultiEdit', {
+      file_path: `${REPO}/src/billing.ts`,
+      edits: [
+        { old_string: 'a', new_string: 'b' },
+        { old_string: 'c', new_string: 'const n = o?.p;' },
+      ],
+    });
+    const patch = toolCallOf(
+      claude('apply_patch', {
+        command:
+          '*** Begin Patch\n*** Add File: src/a.ts\n+console.log(1);\n*** End Patch',
+      }),
+      HOME,
+    );
+
+    expect(write.said?.permissionDecision).toBe('deny');
+    expect(multi.said?.permissionDecision).toBe('deny');
+    expect(patch?.requests[0]?.content).toEqual(['console.log(1);']);
+  });
+
+  it('leaves the files a convention excludes, and the ones it does not name', async () => {
+    const main = await ruled('Edit', {
+      file_path: `${REPO}/src/main.ts`,
+      old_string: 'a',
+      new_string: 'console.log("listening");',
+    });
+    const docs = await ruled('Write', {
+      file_path: `${REPO}/docs/guide.md`,
+      content: 'Call user?.name to read it.',
+    });
+
+    expect(main.said?.permissionDecision).not.toBe('deny');
+    expect(docs.said?.permissionDecision).not.toBe('deny');
+  });
+});
+
+/* An MCP server a project declares reaches only Claude Code through the proxy, so for the
+   other agents the hook asks the workspace the proxy's question: does another agent have it. */
+describe('the same outward action from two agents, where no proxy sits', () => {
+  class Register implements SharedActions {
+    readonly claimed: IntendedAction[] = [];
+    constructor(private readonly outcome: ClaimOutcome) {}
+    async claim(action: IntendedAction): Promise<ClaimOutcome> {
+      this.claimed.push(action);
+      return this.outcome;
+    }
+    async finish(): Promise<void> {}
+  }
+
+  const TAKEN: ClaimOutcome = {
+    answer: CLAIM_ANSWER.DUPLICATE,
+    agent: 'cursor',
+    machine: 'ana-laptop',
+    at: '2026-09-28T10:00:00.000Z',
+    operation: 'slack.send_message',
+  };
+
+  function windsurf(tool: string): Record<string, unknown> {
+    return {
+      agent_action_name: 'pre_mcp_tool_use',
+      trajectory_id: 't1',
+      tool_info: {
+        mcp_server_name: 'slack',
+        mcp_tool_name: tool,
+        mcp_tool_arguments: { channel: 'C1', text: 'release is out' },
+        cwd: REPO,
+      },
+    };
+  }
+
+  async function ruled(
+    tool: string,
+    register: Register,
+    mode: EnforcementMode = ENFORCEMENT_MODE.ENFORCE,
+  ) {
+    const answer = await answerToolCall(windsurf(tool), context(), {
+      authorizer: authorizer([]),
+      mode,
+      sink: null,
+      actions: register,
+    });
+    return answer?.ruling;
+  }
+
+  it('refuses a repeat another agent already claimed, naming who', async () => {
+    const register = new Register(TAKEN);
+
+    const ruling = await ruled('send_message', register);
+
+    expect(ruling?.effect).toBe(DECISION_EFFECT.DENY);
+    expect(ruling?.reason).toContain('cursor on ana-laptop');
+    // Named as the proxy names it, so a proxied agent and a hooked one meet.
+    expect(register.claimed[0]?.operation).toBe('slack.send_message');
+  });
+
+  it('claims nothing for a read, which two agents never collide over', async () => {
+    const register = new Register(TAKEN);
+
+    const ruling = await ruled('list_channels', register);
+
+    expect(register.claimed).toEqual([]);
+    expect(ruling?.effect).not.toBe(DECISION_EFFECT.DENY);
+  });
+
+  it('lets the call go where the workspace cannot say', async () => {
+    const ruling = await ruled(
+      'send_message',
+      new Register({ answer: CLAIM_ANSWER.UNKNOWN, because: 'not enrolled' }),
+    );
+
+    expect(ruling?.effect).toBe(DECISION_EFFECT.ALLOW);
+  });
+
+  it('only records the meeting on a machine that is watching', async () => {
+    const ruling = await ruled(
+      'send_message',
+      new Register(TAKEN),
+      ENFORCEMENT_MODE.OBSERVE,
+    );
+
+    expect(ruling?.effect).toBe(DECISION_EFFECT.ALLOW);
+    expect(ruling?.shadowEffect).toBe(DECISION_EFFECT.DENY);
   });
 });

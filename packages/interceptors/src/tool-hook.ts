@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import {
+  CloudActions,
   configPathFor,
   DECISION_EFFECT,
   ENFORCEMENT_MODE,
@@ -29,10 +30,12 @@ import {
   type ChatQuestion,
   type PendingApproval,
   toolDeclarations,
+  type SharedActions,
   type ToolDeclarations,
 } from '@memnox/core';
 
 import { HookAuthorizer } from './hook-authorizer';
+import { claimedElsewhere } from './mcp-claims';
 import { readHookConfig } from './hook-config';
 import { loadHookGate } from './hook-gate-loader';
 import { toolCallOf, type ToolCall } from './tool-calls';
@@ -70,6 +73,8 @@ export interface ToolHookContext {
 /** Injected by tests; each falls back to what the process would build for itself. */
 export interface ToolHookSeams {
   authorizer?: HookAuthorizer;
+  /** The workspace's register of outward actions, so a test needs no control plane. */
+  actions?: SharedActions;
   mode?: EnforcementMode;
   /** Null records nothing. */
   sink?: EventSink | null;
@@ -141,7 +146,8 @@ export async function answerToolCall(
   });
   const sessionId = sessionFor(call, context);
   const granted = await withSessionGrant(ruled, sessionId, context.home);
-  const ruling = await withChatAnswer(granted, sessionId, context);
+  const answered = await withChatAnswer(granted, sessionId, context);
+  const ruling = await withDuplicateCheck(answered, call, { sessionId, context, seams });
   // The breaker counts drift for a session only the hooks see, which reports nothing else.
   if (ruling.effect === DECISION_EFFECT.ALLOW && ruling.outOfScope === true) {
     await reportToDaemon(context.home, {
@@ -282,6 +288,33 @@ async function grantSession(
     .grant(grantSubjectFor(questionOf(ruling, sessionId, '')))
     .catch(() => undefined);
 }
+
+/**
+ * An MCP call another agent already has, refused as the proxy refuses it, since a server a
+ * project declares cannot always be put behind the proxy. Only an allowed call is asked.
+ */
+async function withDuplicateCheck(
+  ruling: ToolRuling,
+  call: ToolCall,
+  where: { sessionId: string; context: ToolHookContext; seams: ToolHookSeams },
+): Promise<ToolRuling> {
+  if (ruling.effect !== DECISION_EFFECT.ALLOW) return ruling;
+  const { sessionId, context, seams } = where;
+  const reason = await claimedElsewhere(
+    call,
+    seams.actions ?? new CloudActions(context.home),
+    { agent: context.agent, sessionId, pid: process.ppid },
+  );
+  if (reason === null) return ruling;
+  // Observing blocks nothing, so the meeting is recorded as what enforce would have done.
+  if (ruling.mode === ENFORCEMENT_MODE.OBSERVE) {
+    return { ...ruling, shadowEffect: DECISION_EFFECT.DENY, reason };
+  }
+  return { ...ruling, effect: DECISION_EFFECT.DENY, reason, rule: DUPLICATE_WORK_RULE };
+}
+
+/** What a refused repeat is filed under, so `why` names it rather than a rule file. */
+const DUPLICATE_WORK_RULE = 'duplicate-work';
 
 /** The session `memnox run` set, then the host's own, the way every row here is filed. */
 export function sessionFor(
