@@ -153,7 +153,7 @@ async function call(
 }
 
 describe('the session tools', () => {
-  it('offers exactly why, status, replay, decisions, memory, brief and rewind', () => {
+  it('offers exactly why, status, replay, decisions, memory, brief, fingerprint and rewind', () => {
     expect(SESSION_TOOLS.map((tool) => tool.name)).toEqual([
       'why',
       'status',
@@ -161,6 +161,7 @@ describe('the session tools', () => {
       'decisions',
       'memory',
       'brief',
+      'fingerprint',
       'rewind',
     ]);
   });
@@ -172,10 +173,14 @@ describe('the session tools', () => {
     }
   });
 
-  it('marks every tool read only except rewind, so the host asks the person about that one', () => {
+  /* Recording a fingerprint writes, and only ever adds what agents are held to, so the host
+     need not ask; rewind moves a person's files, so it is the one the person is asked about. */
+  it('marks every tool read only except fingerprint and rewind, and only rewind destructive', () => {
     const acting = SESSION_TOOLS.filter((tool) => !tool.annotations.readOnlyHint);
-    expect(acting.map((tool) => tool.name)).toEqual(['rewind']);
-    expect(acting[0]?.annotations.destructiveHint).toBe(true);
+    expect(acting.map((tool) => tool.name)).toEqual(['fingerprint', 'rewind']);
+    expect(
+      acting.filter((tool) => tool.annotations.destructiveHint).map((tool) => tool.name),
+    ).toEqual(['rewind']);
   });
 
   it('answers tools/list over the wire with the same list', async () => {

@@ -1,8 +1,13 @@
 import { homedir } from 'node:os';
 
 import {
+  CODE_FINGERPRINT_FILE,
   FileAllowances,
+  fingerprintPolicies,
+  loadPolicyFiles,
   parentAgentsOf,
+  readCodeFingerprint,
+  type Policy,
   LocalGate,
   openNotice,
   SessionTasks,
@@ -31,7 +36,14 @@ export async function loadHookGate(
   },
 ): Promise<LocalGate | null> {
   const { task, containment } = await readSession(config, home, now);
-  if (config.policyFiles.length === 0 && containment === null) return null;
+  const fingerprint = await fingerprintRules(warn);
+  if (
+    config.policyFiles.length === 0 &&
+    containment === null &&
+    fingerprint.length === 0
+  ) {
+    return null;
+  }
   const overlays = await overlaysInForce(home);
 
   // A registered file that is gone stopped every command on the machine, git included,
@@ -48,8 +60,8 @@ export async function loadHookGate(
       }
     : undefined;
 
-  const gate = await LocalGate.fromFiles(
-    config.policyFiles,
+  const gate = new LocalGate(
+    [...(await loadPolicyFiles(config.policyFiles, sources)), ...fingerprint],
     {
       agentName: config.agentName ?? DEFAULT_AGENT_NAME,
       ...(config.agentRole === undefined ? {} : { agentRole: config.agentRole }),
@@ -60,9 +72,23 @@ export async function loadHookGate(
       // An agent another agent started is held to that agent's rules as well as its own.
       parents: parentAgentsOf(process.env, config.agentName ?? DEFAULT_AGENT_NAME),
     },
-    sources,
   );
   return noticing(gate, config, home);
+}
+
+/**
+ * The conventions the repository the agent works in states for itself, as rules. A check
+ * that could not be read is skipped out loud, since one bad entry must not stop every write.
+ */
+async function fingerprintRules(warn: (message: string) => void): Promise<Policy[]> {
+  const root = repositoryRootOf(process.cwd());
+  if (root === null) return [];
+  const fingerprint = await readCodeFingerprint(root);
+  if (fingerprint === null) return [];
+  for (const issue of fingerprint.issues) {
+    warn(`${CODE_FINGERPRINT_FILE}: ${issue}, so it is not enforced.`);
+  }
+  return fingerprintPolicies(fingerprint, root);
 }
 
 /**

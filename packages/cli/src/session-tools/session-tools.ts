@@ -1,6 +1,7 @@
 /**
- * The tools the session server offers, and the one rule over the list: nothing here lets
- * an agent allow, approve, trust, unfreeze, change a mode or edit a rule, since it would approve itself.
+ * The tools the session server offers, and the one rule over the list: nothing here lets an
+ * agent loosen, allow, approve, trust or unfreeze, since it would approve itself. Recording
+ * a first code fingerprint is the one write, and it can only add what an agent is held to.
  */
 import {
   decisionsTool,
@@ -12,6 +13,7 @@ import {
 } from './read-tools';
 import { rewindTool, type RewindSeams } from './rewind-tool';
 import { briefTool, memoryTool } from './memory-tools';
+import { fingerprintTool } from './fingerprint-tool';
 
 /** A tool as `tools/list` describes it; the annotations are how a host decides to ask. */
 interface ToolDefinition {
@@ -117,6 +119,22 @@ export const SESSION_TOOLS: readonly ToolDefinition[] = [
     },
   ),
   {
+    name: 'fingerprint',
+    description:
+      "Record how this repository's code is written, once, so every agent here is held to it: call it without `yaml` for what to write, then with it. Only a repository that states none yet is recorded.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        yaml: {
+          type: 'string',
+          description: 'the fingerprint, as the call without it describes',
+        },
+      },
+    },
+    // Writes one file and only ever adds what agents are held to, so nothing to confirm.
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+  },
+  {
     name: 'rewind',
     description:
       'Put the working tree back to before the last session changed it, or to a milestone. Your person must approve it; the current files are kept first.',
@@ -157,6 +175,8 @@ export async function callTool(
       return memoryTool(deps, args);
     case 'brief':
       return briefTool(deps, args);
+    case 'fingerprint':
+      return fingerprintTool(deps, args);
     case 'rewind':
       return rewindTool(deps, seams, args);
     default:

@@ -1,4 +1,6 @@
 export * from './policy-file';
+export * from './code-fingerprint';
+export * from './fingerprint-proposal';
 export * from './local-gate';
 export * from './containment';
 export * from './hold';
