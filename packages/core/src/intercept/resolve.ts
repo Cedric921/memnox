@@ -33,6 +33,7 @@ import {
 } from '../domain/shell-normalizer';
 import { ACTION } from '../constants/action.constants';
 import { awkMayWrite } from './awk';
+import { shownWrites } from './shown-writes';
 
 export interface ResolvedAction {
   action: string;
@@ -52,6 +53,8 @@ export interface ResolvedAction {
   method?: string;
   /** The environment the command names, as it named it, for a rule's `environments`. */
   environment?: string;
+  /** LOCAL ONLY: the lines a write adds, where the line itself shows them. Never recorded. */
+  content?: readonly string[];
 }
 
 export interface ResolveOptions {
@@ -263,7 +266,10 @@ export function resolveShellLine(
       }
     }
   }
-  const redirected = redirectActions(normalized.redirects, env);
+  const redirected = [
+    ...redirectActions(normalized.redirects, env),
+    ...shownWrites(normalized.parsed, env),
+  ];
   const printed = environmentRead(variablesPrinted(normalized.parsed));
   const all = [...actions, ...redirected, ...(printed === null ? [] : [printed])];
   const governing = governingChange(line, all, normalized);

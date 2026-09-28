@@ -47,6 +47,8 @@ export interface ParsedCommand {
   argv: string[];
   /** A heredoc or here-string, which is where `psql <<EOF` keeps its statement. */
   stdin?: string;
+  /** The files this command's own redirects write, so what it prints can be told apart. */
+  writes?: string[];
 }
 
 export interface Redirects {
@@ -95,7 +97,7 @@ export function normalizeShellCommand(raw: string): NormalizedCommand {
   const commands: string[] = [];
   const parsed: ParsedCommand[] = [];
   for (const command of state.found) {
-    const key = `${command.canonical}\u0000${command.parsed.stdin ?? ''}`;
+    const key = `${command.canonical}\u0000${command.parsed.stdin ?? ''}\u0000${(command.parsed.writes ?? []).join('\u0000')}`;
     if (command.canonical.length === 0 || seen.has(key)) continue;
     seen.add(key);
     segments.push(command.canonical);
@@ -150,7 +152,10 @@ interface Line {
 
 function walkCommand(part: string, tokens: Token[], line: Line, state: Walk): void {
   const { found, opaque } = state;
-  const { kept, stdin } = takeRedirects(tokens, line.bodies, state.redirects);
+  const own: Redirects = { writes: [], reads: [] };
+  const { kept, stdin } = takeRedirects(tokens, line.bodies, own);
+  state.redirects.writes.push(...own.writes);
+  state.redirects.reads.push(...own.reads);
   const words = kept.map((token) => token.text);
   if (words.length === 0) return;
 
@@ -171,7 +176,11 @@ function walkCommand(part: string, tokens: Token[], line: Line, state: Walk): vo
   found.push({
     canonical: canonicalize(words),
     literal: words.join(' '),
-    parsed: { argv: words, ...(stdin === undefined ? {} : { stdin }) },
+    parsed: {
+      argv: words,
+      ...(stdin === undefined ? {} : { stdin }),
+      ...(own.writes.length === 0 ? {} : { writes: own.writes }),
+    },
   });
 }
 

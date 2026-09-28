@@ -171,6 +171,7 @@ export class ShellSeam {
           ...(resolved.environment === undefined
             ? {}
             : { environment: resolved.environment }),
+          ...(resolved.content === undefined ? {} : { content: resolved.content }),
         });
         const verdict = await this.deps.authorizer.authorize(request);
         const alternative = alternativeFor(
@@ -324,13 +325,21 @@ export class ShellSeam {
       toolClass,
       method,
       environment,
-    }: { toolClass?: string; method?: string; environment?: string } = {},
+      content,
+    }: {
+      toolClass?: string;
+      method?: string;
+      environment?: string;
+      content?: readonly string[];
+    } = {},
   ): ActionRequest {
     return {
       action,
       target,
       ...(toolClass === undefined ? {} : { toolClass }),
       ...(environment === undefined ? {} : { environment }),
+      // LOCAL ONLY, as an edit's content is: read by a `content` convention, never recorded.
+      ...(content === undefined ? {} : { content }),
       // LOCAL ONLY. The SDK strips this before anything reaches the runtime.
       arguments: {
         command: target,
