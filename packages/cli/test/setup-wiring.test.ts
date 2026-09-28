@@ -93,6 +93,7 @@ describe('wiring a machine that has just been set up', () => {
       'beforeMCPExecution',
       'beforeReadFile',
       'afterFileEdit',
+      'sessionStart',
       'sessionEnd',
       'postToolUse',
       'stop',

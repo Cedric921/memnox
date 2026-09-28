@@ -2,7 +2,13 @@
  * The session server's wire: MCP over newline-delimited JSON on stdio, answering
  * `initialize`, `tools/list` and `tools/call`, and asking the person through the host where it can.
  */
-import { LineBuffer, readWorkspaceMemoryCached } from '@memnox/core';
+import {
+  describeFingerprint,
+  LineBuffer,
+  readCodeFingerprint,
+  readWorkspaceMemoryCached,
+} from '@memnox/core';
+import { repositoryRootOf } from '@memnox/interceptors';
 
 import { answerText } from './bounded';
 import type { SessionToolDeps } from './read-tools';
@@ -107,7 +113,7 @@ class SessionConnection {
       protocolVersion: typeof asked === 'string' ? asked : PROTOCOL_VERSION,
       capabilities: { tools: {} },
       serverInfo: SERVER_INFO,
-      instructions: await instructionsFor(this.options.deps.home),
+      instructions: await instructionsFor(this.options.deps),
     };
   }
 
@@ -196,8 +202,27 @@ const ABOUT_SESSION =
  * Read by every host at connect, which makes it the one place an agent whose hooks add no
  * context (Cursor, Windsurf) still learns to ask what its workspace settled before it edits.
  */
-async function instructionsFor(home: string): Promise<string> {
-  const memory = await readWorkspaceMemoryCached(home).catch(() => null);
-  if (memory === null || memory.facts.length === 0) return ABOUT_SESSION;
-  return `${ABOUT_SESSION} Your workspace has settled ${memory.facts.length} decision(s), policies and owners: before you change code, call "brief" with the paths you are about to edit, or "memory" with the subject, and cite what it says. Where your task disagrees with it, ask your person first.`;
+async function instructionsFor(deps: SessionToolDeps): Promise<string> {
+  const memory = await readWorkspaceMemoryCached(deps.home).catch(() => null);
+  const settled =
+    memory === null || memory.facts.length === 0
+      ? ''
+      : ` Your workspace has settled ${memory.facts.length} decision(s), policies and owners: before you change code, call "brief" with the paths you are about to edit, or "memory" with the subject, and cite what it says. Where your task disagrees with it, ask your person first.`;
+  const written = await fingerprintHere(deps.cwd);
+  return `${ABOUT_SESSION}${settled}${written === '' ? '' : `\n\n${written}`}`;
 }
+
+/**
+ * The repository's fingerprint, or the ask to record one, for the hosts whose hooks say
+ * nothing when a session starts and so hear it only here. Empty outside a repository.
+ */
+async function fingerprintHere(cwd: string): Promise<string> {
+  const root = repositoryRootOf(cwd);
+  if (root === null) return '';
+  const fingerprint = await readCodeFingerprint(root).catch(() => null);
+  if (fingerprint === null) return RECORD_FINGERPRINT;
+  return describeFingerprint(fingerprint) ?? '';
+}
+
+const RECORD_FINGERPRINT =
+  'This repository does not yet state how its code is written. Before your first change here, call the "fingerprint" tool without arguments for what to write, read enough of the code to answer it, and record it. It is done once, for every agent after you.';

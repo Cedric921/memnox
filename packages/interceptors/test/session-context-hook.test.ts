@@ -332,6 +332,34 @@ describe("the repository's code fingerprint, when a session starts", () => {
     expect(text).toContain('"fingerprint" tool');
   });
 
+  // Cursor has a session start of its own and reads its own shape back.
+  it('answers Cursor with the same context, in the shape Cursor reads', async () => {
+    const start = sessionStartOf({
+      hook_event_name: 'sessionStart',
+      session_id: 'c1',
+    });
+    if (start === null) throw new Error('not read as a session start');
+
+    const said = JSON.parse(await answerSessionStart(start, await machine())) as {
+      additional_context?: string;
+      hookSpecificOutput?: unknown;
+    };
+
+    expect(said.additional_context).toContain(
+      'does not yet state how its code is written',
+    );
+    expect(said.hookSpecificOutput).toBeUndefined();
+  });
+
+  it('names the command each agent types, which Codex files under prompts:', async () => {
+    const deps = { ...(await machine()), agent: 'codex-cli' };
+    const said = await answerSessionStart({ sessionId: 's1' }, deps);
+
+    expect((JSON.parse(said) as { systemMessage?: string }).systemMessage).toContain(
+      '/prompts:fingerprint',
+    );
+  });
+
   // What only the agent is told looks like nothing to its person, so they are told as well.
   it('tells the person too, with what to ask for', async () => {
     const said = await answerSessionStart({ sessionId: 's1' }, await machine());

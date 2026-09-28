@@ -159,7 +159,7 @@ function withJsonHooks(config: JsonHooks, entries: readonly EventEntry[]): JsonH
 /**
  * Before a write and after one, since `afterFileEdit` always says what changed; before a
  * command, an MCP call and a read, where a rule can refuse it; after every tool call and
- * turn, where a waiting note is handed over; and at the end.
+ * turn, where a waiting note is handed over; and at the start and the end.
  */
 function cursorEntries(command: string): EventEntry[] {
   return [
@@ -171,6 +171,7 @@ function cursorEntries(command: string): EventEntry[] {
     { event: CURSOR_EVENT.BEFORE_MCP, entry: { command } },
     { event: CURSOR_EVENT.BEFORE_READ, entry: { command } },
     { event: CURSOR_EVENT.AFTER_FILE_EDIT, entry: { command } },
+    { event: CURSOR_EVENT.SESSION_START, entry: { command } },
     { event: CURSOR_EVENT.SESSION_END, entry: { command } },
     { event: CURSOR_EVENT.POST_TOOL_USE, entry: { command } },
     { event: CURSOR_EVENT.STOP, entry: { command } },

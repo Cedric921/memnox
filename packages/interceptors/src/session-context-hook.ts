@@ -15,6 +15,7 @@ import {
   decisionsMentioned,
   describeDecision,
   describeFingerprint,
+  DISCOVERED_AGENT_KIND,
   ENFORCEMENT_MODE,
   readCodeFingerprint,
   rememberRepository,
@@ -32,6 +33,7 @@ import {
   type ProtectionStop,
 } from '@memnox/core';
 
+import { CURSOR_EVENT } from './agent-edits';
 import { containmentFor } from './containment-loader';
 import { EDIT_HOOK_EVENT } from './edit-hook';
 import { readHookConfig } from './hook-config';
@@ -54,6 +56,8 @@ export interface SessionContextDeps {
 interface SessionStart {
   sessionId: string;
   cwd?: string;
+  /** Cursor reads its own shape back; every other host reads Claude Code's. */
+  cursor?: boolean;
 }
 
 /** Where a decision is being looked for: one tool call's actions, or a person's words. */
@@ -64,13 +68,18 @@ interface DecisionLookup {
   prompt?: string;
 }
 
-/** Claude Code, Codex and Gemini CLI all name it `SessionStart`, with the same reply. */
+/** Claude Code, Codex and Gemini CLI all name it `SessionStart`; Cursor, `sessionStart`. */
 export function sessionStartOf(payload: unknown): SessionStart | null {
   const hook = fieldsOf(payload);
-  if (hook === null || hook['hook_event_name'] !== EDIT_HOOK_EVENT.SESSION_START)
-    return null;
+  const event = hook?.['hook_event_name'];
+  const cursor = event === CURSOR_EVENT.SESSION_START;
+  if (hook === null || (event !== EDIT_HOOK_EVENT.SESSION_START && !cursor)) return null;
   const cwd = cwdOf(hook);
-  return { sessionId: sessionOf(hook), ...(cwd === undefined ? {} : { cwd }) };
+  return {
+    sessionId: sessionOf(hook),
+    ...(cwd === undefined ? {} : { cwd }),
+    ...(cursor ? { cursor } : {}),
+  };
 }
 
 /** The boundary as added context, or empty where Memnox is off and has nothing to say. */
@@ -83,7 +92,7 @@ export async function answerSessionStart(
   const stop = await readProtectionStop(deps.home);
   // Said rather than silent, so an agent and its person know nothing is being checked.
   if (stop !== null && !stopHasEnded(stop, deps.now())) {
-    return `${addedContext(EDIT_HOOK_EVENT.SESSION_START, stoppedLine(stop))}\n`;
+    return `${sessionStartReply(start, stoppedLine(stop), null)}\n`;
   }
   const mode = await readMachineMode(deps.home);
   if (mode === ENFORCEMENT_MODE.OFF) return '';
@@ -101,7 +110,7 @@ export async function answerSessionStart(
   const repository = (deps.rootOf ?? repositoryRootOf)(cwd);
   // Picked up the first time an agent works here, so the daemon wraps its MCP servers.
   if (repository !== null) rememberRepository(deps.home, repository);
-  const fingerprint = await fingerprintHere(repository);
+  const fingerprint = await fingerprintHere(repository, deps.agent);
   const text = [
     boundaryContext({ mode, rules, containment }),
     await memoryLine(deps.home),
@@ -110,7 +119,7 @@ export async function answerSessionStart(
     .filter((each) => each !== '')
     .join('\n');
   if (text === '') return '';
-  return `${sessionStartReply(text, fingerprint.notice)}\n`;
+  return `${sessionStartReply(start, text, fingerprint.notice)}\n`;
 }
 
 /** What the agent is told about the fingerprint, and what its person sees said about it. */
@@ -124,11 +133,14 @@ interface FingerprintHere {
  * or, where it states none yet, the ask to record it, which the first agent here does once.
  * The person is shown a line too, since what only the agent is told looks like nothing.
  */
-async function fingerprintHere(root: string | null): Promise<FingerprintHere> {
+async function fingerprintHere(
+  root: string | null,
+  agent: string,
+): Promise<FingerprintHere> {
   if (root === null) return { told: '', notice: null };
   const fingerprint = await readCodeFingerprint(root).catch(() => null);
   if (fingerprint === null)
-    return { told: RECORD_FINGERPRINT, notice: NO_FINGERPRINT_YET };
+    return { told: RECORD_FINGERPRINT, notice: noFingerprintYet(agent) };
   const checks = fingerprint.checks.length;
   return {
     told: describeFingerprint(fingerprint) ?? '',
@@ -141,10 +153,21 @@ async function fingerprintHere(root: string | null): Promise<FingerprintHere> {
 
 const RECORD_FINGERPRINT = `This repository does not yet state how its code is written. Before your first change here, read enough of it to see, and record it with the memnox-session "fingerprint" tool: call it without arguments for what to write. It is done once, for every agent after you, and your first write here is held until you have.`;
 
-const NO_FINGERPRINT_YET = `Memnox: this repository has no code fingerprint yet. Type /fingerprint to record it now, or the agent records one before its first change here.`;
+/** What the person types in each agent, since Codex files a custom prompt under `prompts:`. */
+function noFingerprintYet(agent: string): string {
+  const typed =
+    agent === DISCOVERED_AGENT_KIND.CODEX_CLI ? '/prompts:fingerprint' : '/fingerprint';
+  return `Memnox: this repository has no code fingerprint yet. Type ${typed} to record it now, or the agent records one before its first change here.`;
+}
 
-/** The context for the agent, and a line its person sees, in the reply every host reads. */
-function sessionStartReply(text: string, notice: string | null): string {
+/** The context for the agent, and a line its person sees, in the reply its host reads. */
+function sessionStartReply(
+  start: SessionStart,
+  text: string,
+  notice: string | null,
+): string {
+  // Cursor has no line for its person here, so the agent is the one told.
+  if (start.cursor === true) return JSON.stringify({ additional_context: text });
   return JSON.stringify({
     ...(notice === null ? {} : { systemMessage: notice }),
     hookSpecificOutput: {

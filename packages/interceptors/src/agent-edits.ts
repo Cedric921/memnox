@@ -76,6 +76,8 @@ export const CURSOR_EVENT = {
   PRE_TOOL_USE: 'preToolUse',
   AFTER_FILE_EDIT: 'afterFileEdit',
   SESSION_END: 'sessionEnd',
+  /** Its `additional_context` is the agent's first context, as Claude Code's is. */
+  SESSION_START: 'sessionStart',
   POST_TOOL_USE: 'postToolUse',
   STOP: 'stop',
   /** Before a command, an MCP call or a read, where a rule can still refuse it. */

@@ -32,9 +32,8 @@ import {
 } from '../agents/managed-toml';
 import { backupPathFor } from '../memnox-paths';
 import {
-  FINGERPRINT_COMMAND,
-  placeFingerprintCommand,
-  removeFingerprintCommand,
+  placeFingerprintCommands,
+  removeFingerprintCommands,
 } from './fingerprint-command';
 import { onPath } from '../on-path';
 
@@ -237,8 +236,8 @@ export async function removeEverywhere(
   for (const target of targets) {
     if (await removeSessionServer(home, target)) removedFrom.push(target.name);
   }
-  // The command only calls these tools, so it goes where they go.
-  await removeFingerprintCommand(home);
+  // The commands only call these tools, so they go where the tools go.
+  await removeFingerprintCommands(home);
   return removedFrom;
 }
 
@@ -249,13 +248,7 @@ export async function wireSessionTools(
 ): Promise<SessionPlacement> {
   if (!isSessionServerOnPath(resolve)) return { held: [], written: [], files: [] };
   const placement = await placeEverywhere(home);
-  // Claude Code alone reads commands from here, and only once it holds the tool they call.
-  const claude = SESSION_TARGETS.find(
-    (target) => target.agent === DISCOVERED_AGENT_KIND.CLAUDE_CODE,
-  );
-  const holds = claude !== undefined && placement.held.includes(claude.name);
-  if (holds && (await placeFingerprintCommand(home))) {
-    placement.files.push(join(home, FINGERPRINT_COMMAND));
-  }
+  // Each agent's `/fingerprint`, only where that agent holds the tool it calls.
+  placement.files.push(...(await placeFingerprintCommands(home, placement.held)));
   return placement;
 }
