@@ -107,6 +107,33 @@ export function changeIn(
   return replacements === null ? null : { kind: EDIT_CHANGE.EDIT, replacements };
 }
 
+/** Lines one write may be checked against, so a generated file cannot stall the hook. */
+export const MOST_CHECKED_LINES = 5_000;
+
+/** Characters of one line that are checked, since a minified line is not written by hand. */
+export const MOST_CHECKED_LINE_LENGTH = 2_000;
+
+/**
+ * The lines a change adds, for a rule's `content` convention: the whole file for a write,
+ * and only the new side of each replacement for an edit, so what was already in the file
+ * is never held against the agent. Undefined where there is no change to read.
+ */
+export function addedLines(change: EditChange | null | undefined): string[] | undefined {
+  if (change === null || change === undefined) return undefined;
+  const text =
+    change.kind === EDIT_CHANGE.WRITE
+      ? [change.content]
+      : change.replacements.map((each) => each.to);
+  return (
+    text
+      .flatMap((each) => each.split('\n'))
+      // A blank line breaks no convention, and a trailing newline would add one to every write.
+      .filter((line) => line.trim() !== '')
+      .slice(0, MOST_CHECKED_LINES)
+      .map((line) => line.slice(0, MOST_CHECKED_LINE_LENGTH))
+  );
+}
+
 /**
  * One replacement, or the ordered `edits` list, or null where any of them cannot be read.
  */

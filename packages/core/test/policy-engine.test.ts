@@ -140,3 +140,35 @@ describe('what a rule set pulled from elsewhere can do', () => {
     ).toBe(DECISION_EFFECT.ASK);
   });
 });
+
+/* A convention is about what a write adds, one line at a time, and nothing else. */
+describe('a content convention', () => {
+  const noConsole: Policy = {
+    name: 'no-console',
+    match: { actions: ['filesystem.write'], content: ['*console.*', '!*// allowed*'] },
+    decision: { effect: DECISION_EFFECT.DENY, reason: 'use the logger' },
+  };
+  const engine = new PolicyEngine([noConsole]);
+  const write = (content?: readonly string[]) =>
+    engine.evaluate(
+      {
+        action: 'filesystem.write',
+        target: 'src/a.ts',
+        ...(content === undefined ? {} : { content }),
+      },
+      CONTEXT,
+    ).effect;
+
+  it('matches when any added line does', () => {
+    expect(write(['const a = 1;', '  console.log(a);'])).toBe(DECISION_EFFECT.DENY);
+  });
+
+  it('lets a line its own exclusion names through', () => {
+    expect(write(['console.log(a); // allowed in the CLI'])).toBe(DECISION_EFFECT.ALLOW);
+  });
+
+  it('does not reach a write whose lines nobody could read', () => {
+    expect(write()).toBe(DECISION_EFFECT.ALLOW);
+    expect(write(['const a = 1;'])).toBe(DECISION_EFFECT.ALLOW);
+  });
+});

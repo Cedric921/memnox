@@ -113,6 +113,7 @@ async function worstOf(
       toolClass: request.class,
       ...(request.target === undefined ? {} : { target: request.target }),
       ...(request.arguments === undefined ? {} : { arguments: request.arguments }),
+      ...(request.content === undefined ? {} : { content: request.content }),
       ...(request.environment === undefined ? {} : { environment: request.environment }),
       // Where the agent works, so a rule about `{workspace}` can tell inside from outside.
       ...(workingDirectory === undefined ? {} : { workingDirectory }),

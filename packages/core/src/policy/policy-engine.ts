@@ -191,6 +191,7 @@ export class PolicyEngine {
         capabilityOf(request.action, request.toolClass),
       ) &&
       matchesAllArguments(policy.match.arguments, request.arguments) &&
+      matchesContent(policy.match.content, request.content) &&
       matchesAmount(policy.match.aboveAmount, request.amount) &&
       matchesScope(policy.match.scope, context.scope) &&
       matchesState(policy.match.state, context.state) &&
@@ -324,6 +325,20 @@ function matchesAmount(
   if (threshold === undefined) return true;
   if (amount === undefined) return true;
   return amount > threshold;
+}
+
+/**
+ * Any added line matching is enough, since one `console.log` is the violation. A write
+ * whose lines nobody could read is not matched: a convention about content says nothing
+ * about an action with none, and the other fields still rule on it.
+ */
+function matchesContent(
+  patterns: readonly string[] | undefined,
+  lines: readonly string[] | undefined,
+): boolean {
+  if (patterns === undefined || patterns.length === 0) return true;
+  if (lines === undefined) return false;
+  return lines.some((line) => matchesAny(patterns, line));
 }
 
 /** Each named argument narrows the rule further, so all of them must hold. */

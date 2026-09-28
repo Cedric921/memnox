@@ -151,6 +151,15 @@ describe('validatePolicyDocument — argument, context and outcome fields', () =
     );
   });
 
+  it('accepts a content convention, and refuses one that names no content', () => {
+    const doc = validatePolicyDocument(documentWith({ content: ['*console.*'] }));
+
+    expect(doc.policies[0]?.match.content).toEqual(['*console.*']);
+    expect(() => validatePolicyDocument(documentWith({ content: [] }))).toThrow(
+      PolicyValidationError,
+    );
+  });
+
   it('accepts working directory and branch patterns', () => {
     const doc = validatePolicyDocument(
       documentWith({ workingDirectories: ['/srv/*'], branches: ['main', 'release/*'] }),

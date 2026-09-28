@@ -100,7 +100,7 @@ export interface AgentEdits {
 }
 
 /** Where Cursor and Gemini put a whole new file's content. */
-const CONTENT_KEYS: readonly string[] = ['content', 'contents'];
+export const CONTENT_KEYS: readonly string[] = ['content', 'contents'];
 
 /** Where Cursor names the file a write goes to. */
 const CURSOR_PATH_KEYS: readonly string[] = ['file_path', 'path', 'target_file'];

@@ -173,8 +173,26 @@ function validateMatch(
     windows: asOptionalWindows(match['windows'], `${path}.windows`, issues),
     scope: asOptionalScope(match['scope'], `${path}.scope`, issues),
     state: asOptionalStringArray(match['state'], `${path}.state`, issues),
+    content: asContentPatterns(match['content'], `${path}.content`, issues),
     unless: asOptionalCarveOuts(match['unless'], `${path}.unless`, issues),
   };
+}
+
+/**
+ * A convention's patterns. An empty list is refused rather than read as none, since a rule
+ * about content that names no content would stop every write it reaches.
+ */
+function asContentPatterns(
+  input: unknown,
+  path: string,
+  issues: string[],
+): string[] | undefined {
+  const patterns = asOptionalStringArray(input, path, issues);
+  if (patterns !== undefined && patterns.length === 0) {
+    issues.push(`${path} must name at least one pattern`);
+    return undefined;
+  }
+  return patterns;
 }
 
 /**

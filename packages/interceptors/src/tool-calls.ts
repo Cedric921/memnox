@@ -15,6 +15,7 @@ import {
 } from '@memnox/core';
 
 import {
+  CONTENT_KEYS,
   CURSOR_EDIT_TOOLS,
   CURSOR_EVENT,
   EDIT_HOST,
@@ -26,6 +27,8 @@ import {
 import { patchEditsOf } from './codex-patch';
 import { EDIT_HOOK_EVENT, EDIT_TOOLS } from './edit-hook';
 import {
+  addedLines,
+  changeIn,
   CODEX_PATCH_TOOL,
   cwdOf,
   fieldsOf,
@@ -49,6 +52,8 @@ export interface ToolRequest {
   class: ToolClass;
   /** Local only: ruled on for what it carries and never written to a row. */
   arguments?: Record<string, string>;
+  /** Local only: the lines a write adds, for a `content` convention. Never written to a row. */
+  content?: readonly string[];
   /** The environment the call named, for a rule's `environments` and the refusal. */
   environment?: string;
 }
@@ -162,7 +167,14 @@ function namedCall(
     const files = patchEditsOf(hook) ?? [];
     return withRequests(
       base,
-      files.map((file) => fileRequest(ACTION.FILESYSTEM_WRITE, file.path, { cwd, home })),
+      files.map((file) =>
+        fileRequest(
+          ACTION.FILESYSTEM_WRITE,
+          file.path,
+          { cwd, home },
+          addedLines(file.change),
+        ),
+      ),
     );
   }
   const requests = requestsFor(tool, input, { cwd, home }, declared);
@@ -217,7 +229,14 @@ function requestsFor(
       : [fileRequest(ACTION.FILESYSTEM_READ, where, base)];
   }
   if (WRITE_TOOLS.includes(tool) && path !== undefined) {
-    return [fileRequest(ACTION.FILESYSTEM_WRITE, path, base)];
+    return [
+      fileRequest(
+        ACTION.FILESYSTEM_WRITE,
+        path,
+        base,
+        addedLines(changeIn(input, CONTENT_KEYS)),
+      ),
+    ];
   }
   if (FETCH_TOOLS.includes(tool)) return [fetchRequest(input)];
   if (WEB_SEARCH_TOOLS.includes(tool)) return [searchRequest(input)];
@@ -232,10 +251,20 @@ export function absolutePath(path: string, base: PathBase): string {
   return resolve(base.cwd, path);
 }
 
-function fileRequest(action: string, path: string, base: PathBase): ToolRequest {
+function fileRequest(
+  action: string,
+  path: string,
+  base: PathBase,
+  content?: readonly string[],
+): ToolRequest {
   const toolClass =
     action === ACTION.FILESYSTEM_READ ? TOOL_CLASS.READ : TOOL_CLASS.WRITE;
-  return { action, target: absolutePath(path, base), class: toolClass };
+  return {
+    action,
+    target: absolutePath(path, base),
+    class: toolClass,
+    ...(content === undefined ? {} : { content }),
+  };
 }
 
 /**

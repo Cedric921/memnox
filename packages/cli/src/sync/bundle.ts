@@ -330,6 +330,7 @@ const HONOURED_CONDITIONS: ReadonlySet<string> = new Set([
   'jurisdictions',
   'branches',
   'arguments',
+  'content',
   'aboveAmount',
   'windows',
   'scope',

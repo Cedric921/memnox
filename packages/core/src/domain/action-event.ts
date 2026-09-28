@@ -43,6 +43,11 @@ export interface ActionRequest {
   toolClass?: string;
   /** LOCAL ONLY: the raw payload. The SDK strips it; `signals` travel instead. */
   arguments?: Record<string, string>;
+  /**
+   * LOCAL ONLY: the lines a write is adding, for a rule's `content` convention. Read where
+   * the call is made and never recorded, since a row carries names and never contents.
+   */
+  content?: readonly string[];
   /** What the local gate found. Testimony: it may ask, never loosen. */
   signals?: string[];
 }

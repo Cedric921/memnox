@@ -37,6 +37,11 @@ export interface PolicyMatch {
   capabilities?: string[];
   /** Every named argument must match; matched only by the in-process gate. */
   arguments?: Record<string, string[]>;
+  /**
+   * A convention on what a write adds: matches when any added line does, so a new
+   * `console.log` is refused and one already there is not. In-process gate only.
+   */
+  content?: string[];
   /** An action that does not state its size still matches, because it cannot prove it is under. */
   aboveAmount?: number;
   /** The policy applies only inside these recurring windows. */
