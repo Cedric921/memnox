@@ -12,11 +12,10 @@ import {
   SessionContextStore,
 } from '@memnox/core';
 
-import { EDIT_HOST } from './agent-edits';
 import type { EditHookContext } from './edit-claims';
-import { EDIT_HOOK_EVENT } from './edit-hook';
 import { repositoryRootOf } from './seam-runtime';
 import type { ToolAnswer } from './tool-hook';
+import { refusalReply, type ToolReply } from './tool-policy';
 
 /** Under this id the session remembers it was held, one repository apart from the next. */
 const HELD_ID_PREFIX = 'fingerprint-hold:';
@@ -28,10 +27,9 @@ export async function fingerprintHold(
   ruled: ToolAnswer,
   context: EditHookContext,
   rootOf: (path: string) => string | null = repositoryRootOf,
-): Promise<string | null> {
+): Promise<ToolReply | null> {
   const { call, ruling } = ruled;
-  if (ruling.effect !== DECISION_EFFECT.ALLOW || call.host !== EDIT_HOST.PRE_TOOL_USE)
-    return null;
+  if (ruling.effect !== DECISION_EFFECT.ALLOW) return null;
   const sessionId = context.runSession ?? call.sessionId;
   if (sessionId === '') return null;
   // The session's repository, since a file about to be created has no folder to ask git in.
@@ -50,11 +48,6 @@ export async function fingerprintHold(
   const id = `${HELD_ID_PREFIX}${root}`;
   if (notYetShown(state, [id]).length === 0) return null;
   await store.write(sessionId, markShown(state, [id], context.now().toISOString()));
-  return JSON.stringify({
-    hookSpecificOutput: {
-      hookEventName: EDIT_HOOK_EVENT.PRE_TOOL_USE,
-      permissionDecision: 'deny',
-      permissionDecisionReason: RECORD_FIRST,
-    },
-  });
+  // In each host's own words, since every agent that writes can be sent to record one.
+  return refusalReply(call.host, RECORD_FIRST);
 }

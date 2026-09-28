@@ -24,7 +24,7 @@ import { answerPicker } from './held-picker';
 import { checkpointBeforeFirstWrite } from './checkpoint-seam';
 import { canAskPerson } from './edit-hook';
 import { fingerprintHold } from './fingerprint-hold';
-import { keepBeforeShell } from './shell-written';
+import { keepBeforeShell, takeOwedReport } from './shell-written';
 import { fieldsOf } from './hook-payload';
 import { answerPause } from './edit-pause';
 import { keepSessionSummary } from './session-summary-row';
@@ -33,7 +33,7 @@ import { log, readStdin } from './seam-runtime';
 import { sessionEventOf } from './session-events';
 import { answerToolCall, failedToolAnswer, type ToolAnswer } from './tool-hook';
 import { DEFAULT_AGENT_NAME, TOOL_POLICY_FLAG } from './tool-hook.constants';
-import type { ToolReply } from './tool-policy';
+import { refusalReply, type ToolReply } from './tool-policy';
 
 /**
  * The hook an editor runs before a tool call and when a session ends: with `--policy` it
@@ -125,9 +125,15 @@ async function stoppedHere(
   // Held for a person, so their question is what is shown, and nothing is claimed until they answer.
   if (ruled.ruling.effect === DECISION_EFFECT.ASK && !ruled.asked)
     return { reply: ruled.reply };
+  // A report its host could not hear after the last command is heard here, once.
+  const owed = await takeOwedReport(
+    context.home,
+    context.runSession ?? ruled.call.sessionId,
+  );
+  if (owed !== null) return { reply: refusalReply(ruled.call.host, owed) };
   // Before any lease, so a write sent back to record the fingerprint claims nothing.
   const recordFirst = await heldForFingerprint(ruled, context);
-  return recordFirst === null ? null : { reply: { stdout: recordFirst } };
+  return recordFirst === null ? null : { reply: recordFirst };
 }
 
 /** Best effort: a tree not kept only means this command's lines go unchecked afterwards. */
@@ -147,7 +153,7 @@ async function keepTreeBeforeShell(
 async function heldForFingerprint(
   ruled: ToolAnswer,
   context: EditHookContext,
-): Promise<string | null> {
+): Promise<ToolReply | null> {
   try {
     return await fingerprintHold(ruled, context);
   } catch (err) {

@@ -19,7 +19,6 @@ import {
   type ExistingFile,
 } from '@memnox/core';
 
-import { EDIT_HOST } from './agent-edits';
 import type { EditHookContext } from './edit-claims';
 import { fieldsOf } from './hook-payload';
 import { repositoryRootOf } from './seam-runtime';
@@ -43,9 +42,8 @@ export async function keepBeforeShell(
   context: EditHookContext,
 ): Promise<void> {
   const { call, ruling } = ruled;
-  if (call.shell === undefined || call.host !== EDIT_HOST.PRE_TOOL_USE) return;
-  if (ruling.effect !== DECISION_EFFECT.ALLOW) return;
-  const id = toolUseOf(payload);
+  if (call.shell === undefined || ruling.effect !== DECISION_EFFECT.ALLOW) return;
+  const id = callKey(payload, context.runSession ?? call.sessionId);
   const root = repositoryRootOf(call.cwd ?? context.cwd);
   if (id === null || root === null || !(await enforces(root))) return;
   const tree = treeOf(root, context.home);
@@ -56,12 +54,12 @@ export async function keepBeforeShell(
 export async function brokenByShell(
   payload: unknown,
   context: EditHookContext,
+  sessionId: string,
 ): Promise<string | null> {
-  const id = toolUseOf(payload);
-  if (id === null) return null;
   const kept = keptFor(context.home);
-  const before = await kept.read(id);
-  if (before === null) return null;
+  const found = await keptTree(kept, payload, sessionId);
+  if (found === null) return null;
+  const { id, before } = found;
   await kept.remove(id);
   const fingerprint = await readCodeFingerprint(before.root).catch(() => null);
   if (fingerprint === null || fingerprint.checks.length === 0) return null;
@@ -167,8 +165,62 @@ function keptFor(home: string): JsonRecordDir<KeptTree> {
   return new JsonRecordDir(join(home, MEMNOX_HOME, KEPT_DIR));
 }
 
-/** The host's id for the call, made safe as a file name, or null where it sends none. */
-function toolUseOf(payload: unknown): string | null {
+/**
+ * The tree kept for this call, by its id first and then by its session, since Cursor rules on
+ * a command where it sends no id and reports its return where it sends one.
+ */
+async function keptTree(
+  kept: JsonRecordDir<KeptTree>,
+  payload: unknown,
+  sessionId: string,
+): Promise<{ id: string; before: KeptTree } | null> {
+  const keys = [callKey(payload, sessionId), callKey({}, sessionId)];
+  for (const id of keys) {
+    if (id === null) continue;
+    const before = await kept.read(id);
+    if (before !== null) return { id, before };
+  }
+  return null;
+}
+
+/**
+ * What pairs a command with its return: the host's id for the call where it sends one, else
+ * the session, since Gemini and Windsurf send none and run one command at a time.
+ */
+function callKey(payload: unknown, sessionId: string): string | null {
   const id = fieldsOf(payload)?.['tool_use_id'];
-  return typeof id === 'string' && id !== '' ? id.replace(/[^\w.-]/g, '_') : null;
+  if (typeof id === 'string' && id !== '') return safe(id);
+  return sessionId === '' ? null : `session-${safe(sessionId)}`;
+}
+
+function safe(id: string): string {
+  return id.replace(/[^\w.-]/g, '_');
+}
+
+/** A report whose host reads nothing after a tool, kept to refuse its next call with. */
+const OWED_DIR = 'shell-owed';
+
+export async function oweReport(
+  home: string,
+  sessionId: string,
+  report: string,
+): Promise<void> {
+  if (sessionId !== '') await owedFor(home).write(safe(sessionId), { report });
+}
+
+/** The report this session is owed, taken so it is said once, or null. */
+export async function takeOwedReport(
+  home: string,
+  sessionId: string,
+): Promise<string | null> {
+  if (sessionId === '') return null;
+  const owed = owedFor(home);
+  const found = await owed.read(safe(sessionId));
+  if (found === null) return null;
+  await owed.remove(safe(sessionId));
+  return found.report;
+}
+
+function owedFor(home: string): JsonRecordDir<{ report: string }> {
+  return new JsonRecordDir(join(home, MEMNOX_HOME, OWED_DIR));
 }

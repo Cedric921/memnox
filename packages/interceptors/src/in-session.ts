@@ -33,7 +33,7 @@ import { SESSION_MOMENT, type SessionEvent } from './session-events';
 import { learnFromAnswer, rememberQuestion } from './prompt-answers';
 import { authorizerFor, type ToolAnswer } from './tool-hook';
 import { taintFromResult } from './result-taint';
-import { brokenByShell } from './shell-written';
+import { brokenByShell, oweReport } from './shell-written';
 import { DEFAULT_AGENT_NAME } from './tool-hook.constants';
 import type { ToolReply } from './tool-policy';
 
@@ -110,6 +110,22 @@ async function markIfInstructed(
 }
 
 /**
+ * What a shell command just wrote against the fingerprint, said now, or, where the host reads
+ * nothing after a tool (Windsurf), kept to refuse its next call with. Best effort.
+ */
+async function shellReport(
+  payload: unknown,
+  pause: SessionEvent,
+  context: EditHookContext,
+  sessionId: string,
+): Promise<string | null> {
+  const broken = await brokenByShell(payload, context, sessionId).catch(() => null);
+  if (broken === null || pause.host !== EDIT_HOST.WINDSURF) return broken;
+  await oweReport(context.home, sessionId, broken).catch(() => undefined);
+  return null;
+}
+
+/**
  * At a pause: a tool Memnox asked about has run, so its yes is learned; a prompt is read for
  * a decision it names, returned to ride beside any note. Null where there is nothing to add.
  */
@@ -124,7 +140,7 @@ export async function beforePause(
     if (pause.moment === SESSION_MOMENT.AFTER_TOOL) {
       await learnFromAnswer(payload, { ...context, env });
       await markIfInstructed(payload, context, env);
-      const broken = await brokenByShell(payload, context).catch(() => null);
+      const broken = await shellReport(payload, pause, context, sessionId);
       const arrived = await answersArrived({ ...clockOf(context, sessionId), waitMs: 0 });
       const said = [broken, arrived].filter((each): each is string => each !== null);
       return said.length === 0 ? null : said.join('\n\n');

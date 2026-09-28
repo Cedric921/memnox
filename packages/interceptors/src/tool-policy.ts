@@ -22,7 +22,7 @@ import {
   type ToolClass,
 } from '@memnox/core';
 
-import { EDIT_HOST } from './agent-edits';
+import { EDIT_HOST, type EditHost } from './agent-edits';
 import { EDIT_HOOK_EVENT } from './edit-hook';
 import type { HookAuthorizer, HookVerdict } from './hook-authorizer';
 import { ShellSeam } from './shell-seam';
@@ -188,6 +188,26 @@ export interface ToolReply {
   stdout?: string;
   stderr?: string;
   exitCode?: number;
+}
+
+/** A plain refusal in the host's own words, for a hold that is Memnox's rather than a rule's. */
+export function refusalReply(host: EditHost, reason: string): ToolReply {
+  if (host === EDIT_HOST.WINDSURF) return { stderr: reason, exitCode: WINDSURF_BLOCK };
+  const decision = DECISION_EFFECT.DENY;
+  if (host === EDIT_HOST.GEMINI) return { stdout: JSON.stringify({ decision, reason }) };
+  if (host === EDIT_HOST.CURSOR) {
+    const said = { permission: decision, user_message: reason, agent_message: reason };
+    return { stdout: JSON.stringify(said) };
+  }
+  return {
+    stdout: JSON.stringify({
+      hookSpecificOutput: {
+        hookEventName: EDIT_HOOK_EVENT.PRE_TOOL_USE,
+        permissionDecision: decision,
+        permissionDecisionReason: reason,
+      },
+    }),
+  };
 }
 
 /**

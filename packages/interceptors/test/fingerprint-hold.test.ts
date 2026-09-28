@@ -9,6 +9,7 @@ import { EDIT_HOST } from '../src/agent-edits';
 import type { EditHookContext } from '../src/edit-claims';
 import { fingerprintHold, RECORD_FIRST } from '../src/fingerprint-hold';
 import type { ToolAnswer } from '../src/tool-hook';
+import type { ToolReply } from '../src/tool-policy';
 
 /* The ask at session start alone was skipped by an agent busy with its task, so a repository
    that states no fingerprint has the first write of a session held once, and only once. */
@@ -60,11 +61,14 @@ function write(
   };
 }
 
-const reasonOf = (reply: string | null): string | undefined =>
-  reply === null
+const reasonOf = (reply: ToolReply | null): string | undefined =>
+  reply?.stdout === undefined
     ? undefined
-    : (JSON.parse(reply) as { hookSpecificOutput: { permissionDecisionReason: string } })
-        .hookSpecificOutput.permissionDecisionReason;
+    : (
+        JSON.parse(reply.stdout) as {
+          hookSpecificOutput: { permissionDecisionReason: string };
+        }
+      ).hookSpecificOutput.permissionDecisionReason;
 
 describe('the first write in a repository with no fingerprint', () => {
   it('is held once a session, sending the agent to record one', async () => {
@@ -97,13 +101,34 @@ describe('the first write in a repository with no fingerprint', () => {
     ).toBeNull();
   });
 
+  // Every agent that writes can be sent to record one, each told in its own host's words.
+  it('holds the first write in every agent, refused the way that agent reads a refusal', async () => {
+    const { repo, context } = await place();
+    const rootOf = (): string => repo;
+    const held = async (host: string, sessionId: string): Promise<ToolReply | null> =>
+      fingerprintHold(write(`${repo}/src/a.ts`, { host, sessionId }), context, rootOf);
+
+    const gemini = await held(EDIT_HOST.GEMINI, 'g1');
+    const cursor = await held(EDIT_HOST.CURSOR, 'c1');
+    const windsurf = await held(EDIT_HOST.WINDSURF, 'w1');
+
+    expect(JSON.parse(gemini?.stdout ?? '{}')).toEqual({
+      decision: 'deny',
+      reason: RECORD_FIRST,
+    });
+    expect(JSON.parse(cursor?.stdout ?? '{}')).toMatchObject({
+      permission: 'deny',
+      agent_message: RECORD_FIRST,
+    });
+    expect(windsurf).toEqual({ stderr: RECORD_FIRST, exitCode: 2 });
+  });
+
   it('holds nothing it was not going to allow, outside the repository, or without a session', async () => {
     const { repo, context } = await place();
     const rootOf = (): string => repo;
 
     for (const answer of [
       write(`${repo}/src/a.ts`, { effect: DECISION_EFFECT.DENY }),
-      write(`${repo}/src/a.ts`, { host: EDIT_HOST.CURSOR }),
       write('/tmp/elsewhere/a.ts'),
       write(`${repo}/src/a.ts`, { sessionId: '' }),
     ]) {
