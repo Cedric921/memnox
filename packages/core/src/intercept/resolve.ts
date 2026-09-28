@@ -32,6 +32,7 @@ import {
   type OpaqueReason,
 } from '../domain/shell-normalizer';
 import { ACTION } from '../constants/action.constants';
+import { awkMayWrite } from './awk';
 
 export interface ResolvedAction {
   action: string;
@@ -309,7 +310,8 @@ function placesReached(
   env: NodeJS.ProcessEnv,
 ): ResolvedAction[] {
   // Code nobody here can read: every path it names could be one it writes.
-  const unreadable = normalized.opaque.length > 0 || runsInterpreter(line);
+  const unreadable =
+    normalized.opaque.length > 0 || runsInterpreter(line, normalized.parsed);
   const changes =
     unreadable ||
     actions.some(
@@ -368,8 +370,6 @@ const INTERPRETERS: readonly string[] = [
   'ksh',
   'lua',
   'tclsh',
-  'awk',
-  'gawk',
 ];
 
 /** Words that only run the next one, so the command is what follows them. */
@@ -389,7 +389,11 @@ const PREFIXES: readonly string[] = [
  * Whether any command in the raw line starts an interpreter. Read off the line as typed,
  * because the normalizer unwraps `python -c` and walks the code as shell, which hides it.
  */
-function runsInterpreter(line: string): boolean {
+function runsInterpreter(
+  line: string,
+  parsed: readonly { argv: readonly string[] }[],
+): boolean {
+  if (parsed.some(({ argv }) => awkMayWrite(argv))) return true;
   return line.split(/[;&|()\n]+/).some((segment) => {
     const words = splitCommandLine(segment.trim());
     let at = 0;
@@ -419,7 +423,7 @@ function governingChange(
   if (named === null) return null;
   const changes =
     normalized.opaque.length > 0 ||
-    runsInterpreter(line) ||
+    runsInterpreter(line, normalized.parsed) ||
     actions.some(
       (each) => each.class === TOOL_CLASS.WRITE || each.class === TOOL_CLASS.DESTRUCTIVE,
     );

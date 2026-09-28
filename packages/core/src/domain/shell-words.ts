@@ -7,15 +7,19 @@ import type { Redirects } from './shell-normalizer';
 /**
  * Splits on `;`, `&&`, `||`, `|` and newlines that sit outside quotes, because a separator
  * inside `psql -c "SELECT 1; DROP TABLE t"` is part of the statement, not a second command.
+ * Each part keeps the separator after it, since `;` carries a variable on and `|` does not.
  */
-export function splitOutsideQuotes(input: string): string[] {
-  const parts: string[] = [];
+export function splitWithSeparators(input: string): { text: string; then: string }[] {
+  const parts: { text: string; then: string }[] = [];
   let start = 0;
   for (const { index, width } of separatorsIn(input)) {
-    parts.push(input.slice(start, index));
+    parts.push({
+      text: input.slice(start, index),
+      then: input.slice(index, index + width),
+    });
     start = index + width;
   }
-  parts.push(input.slice(start));
+  parts.push({ text: input.slice(start), then: '' });
   return parts;
 }
 

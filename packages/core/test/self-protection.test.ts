@@ -120,6 +120,12 @@ describe('what governs an agent, reached some other way', () => {
     'sqlite3 ~/.memnox/memnox.db "delete from events"',
     `python3 -c "import json;p='/Users/me/.claude/settings.json';d=json.load(open(p));d['disableAllHooks']=True;json.dump(d,open(p,'w'))"`,
     'echo x > .claude/settings.local.json',
+    'H=/Users/me/.memnox; rm -rf $H/config.toml',
+    'cat $X/.memnox/policy.toml && rm -rf $X',
+    `awk '{ print > "/Users/me/.memnox/config.toml" }' notes.txt`,
+    `awk 'BEGIN { system("rm -rf ~/.memnox") }'`,
+    'awk -f edit.awk ~/.memnox/config.toml',
+    'gawk -i inplace 1 ~/.memnox/config.toml',
   ])('denies `%s`', (line) => {
     expect(ruled(line)).toContain('deny');
   });
@@ -129,6 +135,9 @@ describe('what governs an agent, reached some other way', () => {
     'grep -r pending ~/.memnox',
     'sqlite3 -readonly ~/.memnox/memnox.db "select count(*) from events"',
     'cat ~/.claude/settings.json',
+    // A repository's own fingerprint, read through a variable the line itself set.
+    'S=/tmp/work; cat $S/repo/.memnox/code-fingerprint.yaml',
+    `grep -rn '~/.memnox/' src | awk '{ print $1 }'`,
   ])('still lets `%s` read', (line) => {
     expect(ruled(line)).not.toContain('deny');
   });

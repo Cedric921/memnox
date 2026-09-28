@@ -125,6 +125,45 @@ describe('what it cannot resolve', () => {
     expect(segmentsOf(`base64 -d ${twice}`)).toContain('rm -f -r /data');
   });
 
+  // The shell expands nothing inside single quotes, so an awk program's `$i` is text.
+  it('does not flag a dollar inside single quotes', () => {
+    expect(opaqueOf(`awk '{ if ($i == "x") print $NF }' f`)).toEqual([]);
+    expect(opaqueOf(`grep '$HOME' notes.txt`)).toEqual([]);
+    expect(opaqueOf(`echo "$HOME"`)).toContain(OPAQUE_REASON.EXPANSION);
+    expect(opaqueOf(`echo "it's" $TARGET`)).toContain(OPAQUE_REASON.EXPANSION);
+  });
+
+  it('reads a variable the line itself set to a literal', () => {
+    const line = 'S=/tmp/work; cat $S/notes.txt && rm -rf ${S}/build';
+
+    expect(opaqueOf(line)).toEqual([]);
+    expect(segmentsOf(line)).toEqual([
+      'cat /tmp/work/notes.txt',
+      'rm -f -r /tmp/work/build',
+    ]);
+    expect(segmentsOf('S=/tmp/a\nls $S')).toEqual(['ls /tmp/a']);
+    expect(segmentsOf("S=/tmp/a; echo '$S'")).toEqual(['echo $S']);
+  });
+
+  // Each of these can leave `$S` holding something other than the literal the line shows.
+  it('keeps a variable unknown wherever its value could be something else', () => {
+    for (const line of [
+      'S=/tmp/a | rm -rf $S',
+      'S=/tmp/a || rm -rf $S',
+      'S=/tmp/a; for S in /data; do rm -rf $S; done',
+      'S=/tmp/a; read S; rm -rf $S',
+      'S=/tmp/a; S=/data; rm -rf $S',
+      'S=/tmp/a; eval "$X"; rm -rf $S',
+      'S=/tmp/a; source env.sh; rm -rf $S',
+      'S=$(pwd); rm -rf $S',
+      "S='/tmp/a b'; rm -rf $S",
+      'rm -rf $S; S=/tmp/a',
+      'S=/tmp/a rm -rf $S',
+    ]) {
+      expect(opaqueOf(line), line).toContain(OPAQUE_REASON.EXPANSION);
+    }
+  });
+
   it('reports nothing opaque for a plain command', () => {
     expect(opaqueOf('npm run build')).toEqual([]);
     expect(opaqueOf('git status')).toEqual([]);

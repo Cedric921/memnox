@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resolveAction } from '../src/intercept/resolve';
+import { resolveAction, resolveShellLine } from '../src/intercept/resolve';
 import { takesLease } from '../src/coordination/writes';
 
 const argv = (line: string): string[] => line.split(' ').filter((w) => w !== '');
@@ -107,5 +107,17 @@ describe('commands that read a file', () => {
 
   it('is a read, so nothing here ever takes a lease or reads as a conflict', () => {
     expect(takesLease(String(resolve('cat ~/.npmrc', env).class))).toBe(false);
+  });
+});
+
+/* An awk program's `$i` sits in single quotes, so the line reads and writes nothing; taking
+   it for an expansion made it a write to every place the line named, the cd included. */
+describe('a line whose only dollar is quoted code', () => {
+  it('reads, and writes nowhere', () => {
+    const line = `cd ~/work/app && git ls-files --others | awk -F/ '{ for(i=1;i<=NF;i++) if($i=="node_modules"){print $i; next} }' | sort | uniq -c; find . -maxdepth 3 -name .gitignore`;
+    const { actions, opaque } = resolveShellLine(line, { HOME: '/Users/me' });
+
+    expect(opaque).toEqual([]);
+    expect(actions.filter((each) => each.class === 'write')).toEqual([]);
   });
 });

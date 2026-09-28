@@ -1,6 +1,6 @@
 import {
   liftHeredocs,
-  splitOutsideQuotes,
+  splitWithSeparators,
   takeRedirects,
   tokenizeQuoted,
   type Token,
@@ -115,42 +115,167 @@ export function normalizeShellCommand(raw: string): NormalizedCommand {
 }
 
 function walk(raw: string, depth: number, state: Walk): void {
-  const { found, opaque } = state;
   if (depth > MAX_DEPTH) {
-    opaque.add(OPAQUE_REASON.TOO_DEEP);
+    state.opaque.add(OPAQUE_REASON.TOO_DEEP);
     return;
   }
   const { text, bodies } = liftHeredocs(raw);
-  const pipeline = splitOutsideQuotes(text).map((part) => part.trim());
-  const pipesIntoInterpreter = pipeline.length > 1 && endsInInterpreter(pipeline);
+  const split = splitWithSeparators(text);
+  const pipeline = split.map((part) => part.text.trim());
+  const line: Line = {
+    bodies,
+    depth,
+    pipesIntoInterpreter: pipeline.length > 1 && endsInInterpreter(pipeline),
+  };
+  const bindable = bindableNames(text, pipeline);
+  const known = new Map<string, string>();
 
+  for (const [index, written] of pipeline.entries()) {
+    if (written.length === 0) continue;
+    const part = substituteKnown(written, known);
+    const assigned = tokenizeQuoted(part);
+    const tokens = stripEnvTokens(assigned);
+    if (tokens.length === 0)
+      remember(assigned, split[index]?.then ?? '', bindable, known);
+    else walkCommand(part, tokens, line, state);
+  }
+}
+
+/** What every command of one line shares while it is walked. */
+interface Line {
+  bodies: string[];
+  depth: number;
+  pipesIntoInterpreter: boolean;
+}
+
+function walkCommand(part: string, tokens: Token[], line: Line, state: Walk): void {
+  const { found, opaque } = state;
+  const { kept, stdin } = takeRedirects(tokens, line.bodies, state.redirects);
+  const words = kept.map((token) => token.text);
+  if (words.length === 0) return;
+
+  if (EXPANSION.test(outsideSingleQuotes(part))) opaque.add(OPAQUE_REASON.EXPANSION);
+  // What a substitution runs is a command like any other, so `echo $(rm -rf ~)` is an rm.
+  for (const body of substitutionsIn(part)) walk(body, line.depth + 1, state);
+
+  const binary = basename(words[0] ?? '');
+  if (line.pipesIntoInterpreter && DOWNLOADERS.has(binary)) {
+    opaque.add(OPAQUE_REASON.REMOTE_SOURCE);
+  }
+
+  const inner = unwrap(binary, words, opaque);
+  if (inner !== null) {
+    walk(inner, line.depth + 1, state);
+    return;
+  }
+  found.push({
+    canonical: canonicalize(words),
+    literal: words.join(' '),
+    parsed: { argv: words, ...(stdin === undefined ? {} : { stdin }) },
+  });
+}
+
+/** A value that says what it is: a path or a word, nothing the shell would split or expand. */
+const LITERAL_BINDING = /^([A-Za-z_][A-Za-z0-9_]*)=([\w@%+=:,./~-]*)$/;
+
+/** Separators after which the next command runs in the same shell, with the variable set. */
+const CARRIES = new Set([';', '\n', '&&']);
+
+/** Commands that can set a variable nothing in the line spells out. */
+const HIDDEN_ASSIGNERS = new Set(['eval', 'source', '.']);
+
+/**
+ * Names whose one assignment is the only place they are written bare, so `$S` can only
+ * be that value; `for S in`, `read S` or a second `S=` anywhere leaves `$S` unknown.
+ */
+function bindableNames(text: string, pipeline: readonly string[]): Set<string> {
+  const names = new Set<string>();
+  const runsHidden = pipeline.some((part) =>
+    HIDDEN_ASSIGNERS.has(stripEnvTokens(tokenizeQuoted(part))[0]?.text ?? ''),
+  );
+  if (runsHidden) return names;
   for (const part of pipeline) {
-    if (part.length === 0) continue;
-    const tokens = stripEnvTokens(tokenizeQuoted(part));
-    const { kept, stdin } = takeRedirects(tokens, bodies, state.redirects);
-    const words = kept.map((token) => token.text);
-    if (words.length === 0) continue;
-
-    if (EXPANSION.test(part)) opaque.add(OPAQUE_REASON.EXPANSION);
-    // What a substitution runs is a command like any other, so `echo $(rm -rf ~)` is an rm.
-    for (const body of substitutionsIn(part)) walk(body, depth + 1, state);
-
-    const binary = basename(words[0] ?? '');
-    if (pipesIntoInterpreter && DOWNLOADERS.has(binary)) {
-      opaque.add(OPAQUE_REASON.REMOTE_SOURCE);
+    for (const token of tokenizeQuoted(part)) {
+      const name = LITERAL_BINDING.exec(token.text)?.[1];
+      if (name === undefined) continue;
+      const bare = text.match(new RegExp(`(?<![$\\w{])${name}(?!\\w)`, 'g')) ?? [];
+      if (bare.length === 1) names.add(name);
     }
+  }
+  return names;
+}
 
-    const inner = unwrap(binary, words, opaque);
-    if (inner !== null) {
-      walk(inner, depth + 1, state);
+/** A part that only assigns, remembered where the next command inherits what it set. */
+function remember(
+  assigned: readonly Token[],
+  then: string,
+  bindable: ReadonlySet<string>,
+  known: Map<string, string>,
+): void {
+  if (!CARRIES.has(then)) return;
+  for (const token of assigned) {
+    const bound = LITERAL_BINDING.exec(token.text);
+    if (bound === null || token.quoted) continue;
+    const [, name, value] = bound;
+    if (name !== undefined && value !== undefined && bindable.has(name))
+      known.set(name, value);
+  }
+}
+
+/** `$NAME` and `${NAME}` replaced where the line itself set them, and nowhere inside single quotes. */
+function substituteKnown(part: string, known: ReadonlyMap<string, string>): string {
+  if (known.size === 0) return part;
+  let out = '';
+  let quote: string | null = null;
+  for (let at = 0; at < part.length; at += 1) {
+    const character = part[at] as string;
+    if (character === '\\' && quote !== "'") {
+      out += part.slice(at, at + 2);
+      at += 1;
       continue;
     }
-    found.push({
-      canonical: canonicalize(words),
-      literal: words.join(' '),
-      parsed: { argv: words, ...(stdin === undefined ? {} : { stdin }) },
-    });
+    if (quote !== null && character === quote) quote = null;
+    else if (quote === null && (character === "'" || character === '"'))
+      quote = character;
+    const reference =
+      character === '$' && quote !== "'"
+        ? /^\$(?:\{([A-Za-z_]\w*)\}|([A-Za-z_]\w*))/.exec(part.slice(at))
+        : null;
+    const name = reference?.[1] ?? reference?.[2];
+    const value = name === undefined ? undefined : known.get(name);
+    if (reference !== null && value !== undefined) {
+      out += value;
+      at += reference[0].length - 1;
+      continue;
+    }
+    out += character;
   }
+  return out;
+}
+
+/** The part without its single-quoted text, since the shell expands nothing inside it. */
+function outsideSingleQuotes(part: string): string {
+  let out = '';
+  let quote: string | null = null;
+  for (let at = 0; at < part.length; at += 1) {
+    const character = part[at] as string;
+    if (character === '\\' && quote !== "'") {
+      out += part.slice(at, at + 2);
+      at += 1;
+      continue;
+    }
+    if (quote === "'") {
+      if (character === "'") quote = null;
+      continue;
+    }
+    if (quote === null && character === "'") {
+      quote = character;
+      continue;
+    }
+    if (character === '"') quote = quote === '"' ? null : '"';
+    out += character;
+  }
+  return out;
 }
 
 function stripEnvTokens(tokens: readonly Token[]): Token[] {
