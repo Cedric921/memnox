@@ -196,7 +196,7 @@ Your workspace settled this about payment retries: "Declined payments are never 
 ```
 
 **Ask Memnox through the agent**, in plain words. Every agent gets a small MCP server,
-`memnox-session`, with seven tools:
+`memnox-session`, with eight tools:
 
 | You say | Tool |
 |---|---|
@@ -206,10 +206,12 @@ Your workspace settled this about payment retries: "Declined payments are never 
 | "Would `git push --force` be allowed here?" | `decisions` |
 | "What did we decide about retries, and who said so?" | `memory` |
 | "Brief me on `src/payments` before you start" | `brief` |
+| "Record how this repository's code is written" | `fingerprint` |
 | "Undo what you did this session" | `rewind` |
 
-Every tool but `rewind` only reads, and `rewind` waits for your yes before it moves a
-file. None of them can allow, approve or change a rule, and an agent that tries
+Every tool but `rewind` and `fingerprint` only reads. `rewind` waits for your yes before
+it moves a file, and `fingerprint` writes a repository's first fingerprint and never
+changes one that exists. None of them can allow, approve or change a rule, and an agent that tries
 `memnox allow`, `memnox mode off` or an edit to a rule file from its shell is refused
 before any rule is read, since an agent that could would approve itself.
 
@@ -227,6 +229,63 @@ Switching to `memnox protect --enforce` reaches an open session on its next tool
 MCP servers the agent already started, and the note it read at the start, catch up when
 you restart the agent. [Everything from inside the session](docs/use-cases.md#20-everything-from-inside-the-session)
 has the whole story.
+
+## Holding agents to the way your code is written
+
+Every repository has rules nobody wrote down where an agent would read them: writes go
+through one layer, time is always UTC, nothing returns null. An agent new to the code
+breaks them in the first hour, and a reviewer catches it days later if at all. Memnox
+turns them into a **code fingerprint** the first agent records and every agent after it
+is held to.
+
+**It is recorded once, by the agent you already run.** A session in a repository with no
+fingerprint says so on your screen. Type `/fingerprint` in Claude Code, or just ask for a
+change: the first write of the session is held until the agent has read the code and
+recorded one. Memnox calls no model of its own.
+
+```
+SessionStart:startup says: Memnox: this repository has no code fingerprint yet. Type /fingerprint to record it now, or the agent records one before its first change here.
+```
+
+The result is `.memnox/code-fingerprint.yaml`, a page a newcomer could work from alone:
+the stack and layout, which layer may call which, the steps to add a feature end to end,
+naming, errors, time and nulls, testing, and the commands to build and test. Under
+`enforce` it names the checks a machine runs on every line an agent adds. Every check is
+tested against your code before it is kept: one your code already breaks, or one that
+covers no file, is dropped with the reason, so what is enforced is what the code already
+does. It is yours to review and commit, and only a person changes it afterwards.
+
+**Every check holds however the agent writes.** A real one, from a Java backend where
+every database write goes through an Action:
+
+```yaml
+enforce:
+  - name: writes-only-in-actions
+    files: ["app/src/main/java/com/acme/shop/http/**", "app/src/main/java/com/acme/shop/service/**"]
+    forbid: ["*Repository.update(*", "*Repository.add(*", "*Repository.delete(*"]
+    reason: all database writes go through Actions, which own transactions and event persistence
+    instead: call actionFactory.create(XAction.class).run(params)
+```
+
+Asked to let a customer cancel an order, an agent in a hurry writes
+`orderRepository.update(...)` straight into the HTTP resource. It is caught three
+ways:
+
+| How the agent writes it | What Memnox does |
+|---|---|
+| The edit tool | Refused before it is written, with the reason and the `instead` |
+| A shell line that shows its text: `cat >> Resource.java <<EOF`, `echo`, `printf`, `tee` | Refused before it runs, with the same message |
+| A shell line that does not: `perl -pi`, `sed -i`, a script | Read after it runs, and the agent is told in the same turn to put it right |
+
+```
+Memnox: that command added lines this repository's code fingerprint forbids. A shell edit is held to the same checks as an edit, so put these right now, before going on:
+- writes-only-in-actions: all database writes go through Actions. 1 line(s), first in app/src/main/java/com/acme/shop/http/OrderResource.java. Instead: call actionFactory.create(XAction.class).run(params).
+```
+
+That last row is what makes a check real rather than a suggestion: switching from the
+edit tool to the shell, which agents do all the time, no longer walks around it. What a
+command wrote is read from a git tree kept through an index of its own, so your index,
+your staging and your stash are never touched.
 
 ## Governing an agent
 

@@ -276,9 +276,10 @@ credential or a hook, and no ledger row names it inside the window. `status` and
 
 Most of the time a person asks Memnox something where they already are, which is the
 agent's conversation. `memnox-session` (`cli/src/session-tools/`) is a local stdio MCP
-server each installed agent launches, with seven tools: `why`, `status`, `replay` and
+server each installed agent launches, with eight tools: `why`, `status`, `replay` and
 `decisions` read the record and write nothing, `memory` and `brief` read what the
-workspace has settled, and `rewind` is the one that acts. The daemon's heartbeat pulls
+workspace has settled, `fingerprint` writes a repository's first code fingerprint and
+never changes one that exists, and `rewind` is the one that acts. The daemon's heartbeat pulls
 that memory into `~/.memnox/memory.json` beside the rules, and the hook matches it
 against a prompt or a write's paths locally, so no network sits on a tool call. A tool
 reads the session `memnox run` named in `MEMNOX_SESSION`, else the newest session of the
