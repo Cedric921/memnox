@@ -2,128 +2,51 @@
   <img src="assets/logo.png" alt="Memnox" width="96">
 </p>
 
-<h1 align="center">Memnox</h1>
+<p align="center"><sub>BEFORE YOU LEAVE AN AGENT RUNNING</sub></p>
+
+<h1 align="center">
+  Your agents can already do the work.<br>
+  <sub>Memnox makes it safe to let them <b>do it without you</b>.</sub>
+</h1>
 
 <p align="center">
-  <strong>See what your AI agents can actually reach. Then decide what they may do.</strong>
+  <img src="assets/agents/claude-code.svg" width="44" height="44" alt="Claude Code" title="Claude Code">&nbsp;&nbsp;
+  <img src="assets/agents/codex.svg" width="44" height="44" alt="Codex" title="Codex">&nbsp;&nbsp;
+  <img src="assets/agents/cursor.svg" width="44" height="44" alt="Cursor" title="Cursor">&nbsp;&nbsp;
+  <img src="assets/agents/cline.svg" width="44" height="44" alt="Cline" title="Cline">&nbsp;&nbsp;
+  <img src="assets/agents/hermes.svg" width="44" height="44" alt="Hermes" title="Hermes">&nbsp;&nbsp;
+  <img src="assets/agents/openclaw.svg" width="44" height="44" alt="OpenClaw" title="OpenClaw">
 </p>
 
 <p align="center">
-  No account. No network. Nothing leaves your machine.
+  <sub>Claude Code · Codex · Cursor · Gemini CLI · Windsurf, and what Cline, Hermes, OpenClaw and Ruflo can reach</sub>
+</p>
+
+<p align="center">
+  <strong>Set it up once. Every agent is governed inside the session it already works in.</strong><br>
+  No model decides anything. Your code and your secrets never leave your machine.
 </p>
 
 ---
 
-```sh
-npx memnox
-```
+You already have agents that read your files, run your shell, push to your repositories
+and call your MCP servers. Memnox sits inside each of their sessions and rules on every
+tool call before it runs: what is allowed goes ahead, what is dangerous is refused with a
+way forward, and what needs a person asks you in the prompt you are already looking at.
 
-That reads the agent configs on your laptop, asks each MCP server what it holds, and
-prints what is reachable from where. It knows Claude Code, Claude Desktop, Cursor,
-Codex, Cline, VS Code, and the three harnesses that run other agents: **Hermes**,
-**OpenClaw** and **Ruflo**. On most machines one line is a surprise. This is a real
-laptop, with the home directory shortened to `~`:
+You do not learn a new tool to get that. You set it up once and keep working the way you
+work now.
 
-```
-memnox scan
-
-On this machine
-agents       claude-code, claude-desktop, cursor, codex-cli, hermes
-harnesses    hermes  1 principal
-             hermes: no roles defined yet
-mcp clients  cursor, codex-cli, hermes
-mcp servers  next-devtools, node_repl, computer-use, memnox
-tools        git, docker, kubectl, psql, mongosh, gh, railway, npm
-
-Credentials these agents can read
-!  ~/.ssh/id_ed25519       4 agents
-!  ~/.config/gh/hosts.yml  4 agents
-   github.com
-!  ~/.railway/config.json  4 agents
-!  ~/.docker/config.json   4 agents
-!  ~/.npmrc                4 agents
-
-What they can do with them, through a shell
-!  docker   can push images to your registries · 2 destructive
-!  gh       can merge pull requests and delete branches · 12 destructive
-   github.com
-!  railway  can deploy · 5 destructive
-!  npm      can publish packages · 1 destructive
-
-Reachable from an agent right now
-!  ~/.ssh/id_ed25519      4 agents
-!  ~/.docker/config.json  4 agents
-!  ~/.npmrc               4 agents
-!  /var/run/docker.sock   4 agents
-!  network                5 agents
-   unrestricted
-
-14 execution surfaces.
-135 capabilities can change something outside this laptop.
-102 of them are governed by a policy.
-```
-
-Nobody granted that. It accumulated.
-
-## When something runs other agents
-
-Hermes, OpenClaw and Ruflo are harnesses: they route work, define roles, install hooks
-and, in two cases, hand work to machines you are not looking at. One row on the roster
-is several principals at the seam, so the scan says how many. Hermes with a CRM server
-beside a Ruflo project that defines two roles reads:
-
-```
-On this machine
-agents       hermes, ruflo
-harnesses    hermes, ruflo  3 principals
-             hermes: no roles defined yet
-             ruflo: 2 roles · runs claude-code
-definitions  2 installed into claude-code
-             2 of them declare no tools, so each inherits every tool in the session
-mcp clients  hermes  3 tools
-mcp servers  crm
-             1 more hidden by the host's own filter, so it is not counted here
-
-Combined capability, where no single tool does this
-!  hermes: customer data can leave, in one session
-   crm.read_customer → crm.create_customer_export → crm.send_customer_report
-
-  Each of these tools is ordinary. Holding all of them is the path.
-```
-
-Every tool in that chain is ordinary and passes review on its own. Holding all three is
-a path, and a per-call allow-list is not shaped to notice it.
-
-Memnox does not replace what those three enforce. Each filters its own tools and each is
-right to, so a tool Hermes excluded is not counted as reachable through Hermes. What none
-of them can see is the other two, the credentials on the disk underneath, and the shell
-all three share. [Harnesses](docs/harnesses.md) is the whole story.
-
-## What this is
-
-Three questions, answered from your own disk:
-
-| Question | Command |
-|---|---|
-| What can act here, and what can it reach? | `memnox scan` |
-| What changed since last time? | `memnox scan --since yesterday`, `memnox watch` |
-| May this action proceed? | `memnox protect`, `memnox policy test` |
-
-And afterwards: `memnox timeline` for what happened, `memnox why` for why it was
-decided that way.
-
-## Putting your agents to work
-
-One command does the whole first run:
+## Set up once
 
 ```sh
+npm install -g memnox
 memnox setup
 ```
 
-It logs this machine in, finds the agents on it, and then goes one at a time:
-what that agent can already reach, what you want to call it, and whether to put
-it under Memnox. Nothing is onboarded without a yes, and nothing is touched for
-the ones you refuse.
+That is the last Memnox command you need. `setup` finds the agents on this machine and
+goes through them one at a time: what each can already reach, what you want to call it,
+and whether to put it under Memnox. Nothing is changed for an agent you say no to.
 
 ```
 Claude Code
@@ -138,44 +61,70 @@ can reach   ~/.aws/credentials, network
   Put Backend Coder under Memnox now?  [Y/n] y
 ```
 
-The name you give is the agent's identity in the workspace: it is sent with the
-enrolment and it is what the console shows from then on. The control plane hashes
-the hostname and never stores it, so without a name a fleet is a list of hex ids
-nobody can tell apart.
+For each agent you accept, it puts a hook in front of every tool call, gives the agent a
+small MCP server (`memnox-session`) it can ask Memnox through, and adds a `/fingerprint`
+command. Then you open Claude Code, Codex, Cursor, Gemini CLI or Windsurf the way you
+always do. There is nothing to launch and nothing to remember.
 
-The same steps are separate commands when you want them one at a time:
+Node 22 or newer, on macOS or Linux. On Windows, run it inside WSL, and
+[ADR 0001](docs/adr/0001-windows-support.md) says why.
 
-```sh
-memnox agents discover         # find them, and say what you call each one
-memnox agents list             # what is here, and which of them is onboarded
-memnox agents onboard "Backend Coder" --name "Backend Coder"
-```
+## What you get, inside every session
 
-`discover` asks for a name per agent and Enter keeps the detected one, so naming
-costs a keystroke to skip. It never asks under `--json` and never asks when
-nothing is attached to the terminal; `--name claude-code="Backend Coder"` is the
-flag for a setup script.
+| When | What Memnox does | What you typed |
+|---|---|---|
+| A session starts | The agent is told the boundary it works in, the rules in force, what your team has settled and how this repository is built, so it plans around them instead of walking into them | nothing |
+| The agent reaches for something your rules refuse | The call never runs. The agent is told why and what to use instead, so it finishes the task rather than stalling | nothing |
+| Something needs a person | You are asked in your agent's own permission prompt, or in the conversation, or in your Slack or Discord DM. Yes once, yes for the session, or no | a yes or a no |
+| The agent writes code that breaks how this repository is built | Refused before it lands, or sent straight back to be put right, even when the agent switches from its edit tool to the shell | nothing |
+| Your prompt touches something your team already decided | The decision is put in front of the agent, with who confirmed it and where | nothing |
+| Two agents go for the same file | The second is told who holds it and what they have been doing | nothing |
+| You want to know why, what happened, or to undo it | Ask the agent in plain words: "why was that refused?", "what have you done this session?", "undo what you did" | a sentence |
 
-The name is yours and the id is the identity. `agt_claude-code` is what every
-ledger row is keyed on and it never moves; the name is what every screen prints,
-and every command answers to either one.
+## One session, start to finish
 
-## Inside the agent's session
-
-After `memnox setup` there is nothing more to type. You start Claude Code, Codex or
-Cursor the way you always do, and each agent's own hook asks Memnox before every tool
-call: a file read or write, a shell command, a web fetch, an MCP call. The answer comes
-back inside the conversation.
-
-**When a session starts**, the agent is told where it stands, so it plans around your
-rules instead of walking into them. A real one, in enforce mode on a connected machine:
+You open Claude Code in a repository and ask it to add order cancellation. Before it
+reads a file, it has been told where it stands:
 
 ```
 Memnox: Memnox rules on this session in enforce mode: a rule that refuses stops the call, and one that asks puts the question to the person.
-Project boundary: ~/work/api. A write outside it asks first.
-When Memnox asks, the prompt puts the question to the person, who can say yes once or always; a refusal names what to use instead.
+Project boundary: ~/work/shop. A write outside it asks first.
 Your workspace has settled 1 decision(s), policies and owners. Before you change code, ask the memnox-session "brief" tool about the paths, or "memory" about the subject, and cite what it says.
+This repository states how its code is written, in .memnox/code-fingerprint.yaml. Follow it; a write that breaks an enforced line is refused.
 ```
+
+Your prompt mentions payment retries, which your team settled in Slack, so that decision
+is put in front of the agent too:
+
+```
+Your workspace settled this about payment retries: "Declined payments are never retried." (a decision, confirmed by ada@acme.com, on 2026-05-02, source https://acme.slack.com/archives/C01/p17).
+```
+
+In a hurry, the agent writes the update straight into the HTTP handler. The repository
+sends every database write through an Action, so the write never lands:
+
+```
+Memnox: This repository's code fingerprint: all database writes go through Actions, which own transactions and event persistence (rule fingerprint:writes-only-in-actions)
+Instead: call actionFactory.create(XAction.class).run(params)
+```
+
+It writes the Action instead, and when the work is done it tries to force push:
+
+```
+verdict     DENY
+reason      you chose to deny this: it rewrites history somebody else may already have pulled
+instead     push a branch and open a PR
+```
+
+So it pushes a branch and opens a PR. You typed one prompt. Every one of those answers
+came back inside the conversation, and each is in the record when you ask the agent
+"why was that refused?"
+
+## How it reaches each agent
+
+Each agent's own hook asks Memnox before every tool call: a file read or write, a shell
+command, a web fetch, an MCP call. The answer comes back in the agent's own format, so the
+agent treats it like any other result.
 
 **When a rule refuses**, the call never runs and the agent is told why and what to use
 instead, so it carries on with the task rather than retrying.
@@ -189,14 +138,10 @@ where the first answer wins.
 
 **When your prompt names something the workspace already settled**, or just before the
 agent's first write to a file it covers, the decision is added to the conversation with
-who confirmed it and where:
+who confirmed it and where.
 
-```
-Your workspace settled this about payment retries: "Declined payments are never retried." (a decision, confirmed by ada@acme.com, on 2026-05-02, source https://acme.slack.com/archives/C01/p17).
-```
-
-**Ask Memnox through the agent**, in plain words. Every agent gets a small MCP server,
-`memnox-session`, with eight tools:
+**Ask Memnox through the agent**, in plain words. Every agent gets `memnox-session`,
+with eight tools:
 
 | You say | Tool |
 |---|---|
@@ -211,11 +156,9 @@ Your workspace settled this about payment retries: "Declined payments are never 
 
 Every tool but `rewind` and `fingerprint` only reads. `rewind` waits for your yes before
 it moves a file, and `fingerprint` writes a repository's first fingerprint and never
-changes one that exists. None of them can allow, approve or change a rule, and an agent that tries
-`memnox allow`, `memnox mode off` or an edit to a rule file from its shell is refused
-before any rule is read, since an agent that could would approve itself.
-
-**What each agent's hook lets Memnox do:**
+changes one that exists. None of them can allow, approve or change a rule, and an agent
+that tries `memnox allow`, `memnox mode off` or an edit to a rule file from its shell is
+refused before any rule is read, since an agent that could would approve itself.
 
 | Agent | Checked before it runs | A question goes to | Told at session start |
 |---|---|---|---|
@@ -225,9 +168,9 @@ before any rule is read, since an agent that could would approve itself.
 | Cursor | commands, MCP calls, file reads and writes | its own prompt for commands and MCP calls | yes |
 | Windsurf | commands, MCP calls, file reads and writes | `memnox approve`, the workspace or your DM | no, only what `memnox-session` says when it connects |
 
-Switching to `memnox protect --enforce` reaches an open session on its next tool call.
-MCP servers the agent already started, and the note it read at the start, catch up when
-you restart the agent. [Everything from inside the session](docs/use-cases.md#20-everything-from-inside-the-session)
+A change to your rules reaches an open session on its next tool call. MCP servers the
+agent already started, and the note it read at the start, catch up when you restart the
+agent. [Everything from inside the session](docs/use-cases.md#20-everything-from-inside-the-session)
 has the whole story.
 
 ## Holding agents to the way your code is written
@@ -318,10 +261,17 @@ what the code already does. A rule your team decides on purpose, rather than rea
 the code, belongs in your Memnox rules (`memnox protect`), where it can ask a person
 instead. That keeps a habit the code happens to have apart from a decision somebody made.
 
-**It is recorded once, by the agent you already run.** A session in a repository with no
-fingerprint says so on your screen. Type the command `memnox setup` put into your agent,
-or just ask for a change: the first write of the session is held until the agent has read
-the code and recorded one. Memnox calls no model of its own.
+### Recorded once, by the agent you already run
+
+A session in a repository with no fingerprint says so on your screen:
+
+```
+SessionStart:startup says: Memnox: this repository has no code fingerprint yet. Type /fingerprint to record it now, or the agent records one before its first change here.
+```
+
+Type the command `setup` put into your agent, or just ask for a change: the first write of
+the session is held until the agent has read the code and recorded one. Memnox calls no
+model of its own.
 
 | Agent | Type | Written to |
 |---|---|---|
@@ -334,10 +284,6 @@ the code and recorded one. Memnox calls no model of its own.
 Each is written only where that agent has the `memnox-session` tools, never over a command
 of the same name you wrote, and taken out with the tools.
 
-```
-SessionStart:startup says: Memnox: this repository has no code fingerprint yet. Type /fingerprint to record it now, or the agent records one before its first change here.
-```
-
 The result is `.memnox/code-fingerprint.yaml`, a page a newcomer could work from alone:
 the stack and layout, which layer may call which, the steps to add a feature end to end,
 naming, errors, time and nulls, testing, and the commands to build and test. Under
@@ -346,8 +292,9 @@ tested against your code before it is kept: one your code already breaks, or one
 covers no file, is dropped with the reason, so what is enforced is what the code already
 does. It is yours to review and commit, and only a person changes it afterwards.
 
-**Every check holds however the agent writes.** A real one, from a Java backend where
-every database write goes through an Action:
+### Every check holds however the agent writes
+
+A real shape, from a Java backend where every database write goes through an Action:
 
 ```yaml
 enforce:
@@ -378,20 +325,113 @@ edit tool to the shell, which agents do all the time, no longer walks around it.
 command wrote is read from a git tree kept through an index of its own, so your index,
 your staging and your stash are never touched.
 
-## Governing an agent
+## What your agents can reach, before you decide anything
+
+Curious what is at stake before you set anything up? One command reads the agent configs
+on your laptop, asks each MCP server what it holds, and prints what is reachable from
+where. It changes nothing and needs no account:
+
+```sh
+npx memnox
+```
+
+On most machines one line is a surprise. This is a real laptop, with the home directory
+shortened to `~`:
+
+```
+memnox scan
+
+On this machine
+agents       claude-code, claude-desktop, cursor, codex-cli, hermes
+harnesses    hermes  1 principal
+             hermes: no roles defined yet
+mcp clients  cursor, codex-cli, hermes
+mcp servers  next-devtools, node_repl, computer-use, memnox
+tools        git, docker, kubectl, psql, mongosh, gh, railway, npm
+
+Credentials these agents can read
+!  ~/.ssh/id_ed25519       4 agents
+!  ~/.config/gh/hosts.yml  4 agents
+   github.com
+!  ~/.railway/config.json  4 agents
+!  ~/.docker/config.json   4 agents
+!  ~/.npmrc                4 agents
+
+What they can do with them, through a shell
+!  docker   can push images to your registries · 2 destructive
+!  gh       can merge pull requests and delete branches · 12 destructive
+   github.com
+!  railway  can deploy · 5 destructive
+!  npm      can publish packages · 1 destructive
+
+Reachable from an agent right now
+!  ~/.ssh/id_ed25519      4 agents
+!  ~/.docker/config.json  4 agents
+!  ~/.npmrc               4 agents
+!  /var/run/docker.sock   4 agents
+!  network                5 agents
+   unrestricted
+
+14 execution surfaces.
+135 capabilities can change something outside this laptop.
+102 of them are governed by a policy.
+```
+
+Nobody granted that. It accumulated.
+
+It knows Claude Code, Claude Desktop, Cursor, Codex, Cline, VS Code, and the three
+harnesses that run other agents: **Hermes**, **OpenClaw** and **Ruflo**. Those three route
+work, define roles, install hooks and, in two cases, hand work to machines you are not
+looking at, so one row on the roster is several principals at the seam:
+
+```
+On this machine
+agents       hermes, ruflo
+harnesses    hermes, ruflo  3 principals
+             hermes: no roles defined yet
+             ruflo: 2 roles · runs claude-code
+definitions  2 installed into claude-code
+             2 of them declare no tools, so each inherits every tool in the session
+mcp clients  hermes  3 tools
+mcp servers  crm
+             1 more hidden by the host's own filter, so it is not counted here
+
+Combined capability, where no single tool does this
+!  hermes: customer data can leave, in one session
+   crm.read_customer → crm.create_customer_export → crm.send_customer_report
+
+  Each of these tools is ordinary. Holding all of them is the path.
+```
+
+Every tool in that chain is ordinary and passes review on its own. Holding all three is a
+path, and a per-call allow-list is not shaped to notice it. Memnox does not replace what
+the harnesses enforce; what none of them can see is the other two, the credentials on the
+disk underneath, and the shell all three share. [Harnesses](docs/harnesses.md) is the
+whole story.
+
+## When you want the terminal
+
+Nothing below is needed day to day. It is here for when you want to look, tune or hand
+more over.
+
+**Start in observe.** A tool that denies something important on its first day gets
+uninstalled on its first day. Observe records the real verdict and applies nothing, and
+you switch when the verdicts look right:
+
+```sh
+memnox timeline                # what happened, and what would have been refused
+memnox protect --enforce       # when the verdicts look right
+```
+
+**Tune the rules.** Every refusal names a way forward:
 
 ```sh
 memnox protect                 # propose reversible steps; changes nothing
 memnox protect --apply         # write them; the undo is printed first
-memnox mcp wrap                # route every MCP server through the proxy
-memnox run -- claude           # start the agent behind the gate
+memnox policy test "git push --force origin main"
 ```
 
-A refusal always names a way forward. With the rules `memnox protect --yes` writes:
-
 ```
-$ memnox policy test "git push --force origin main"
-
 git push --force origin main
 verdict     DENY
 reason      you chose to deny this: it rewrites history somebody else may already have pulled
@@ -402,81 +442,60 @@ DENY  git push --force origin main
 Nothing was run, and nothing on this machine changed.
 ```
 
-The agent that typed it is told the same, and that retrying will fail identically.
-
 An agent told only "no" abandons the task. One told what to use instead finishes it.
 
-## Leaving it running
-
-The point of a boundary is not that it refuses things. It is that you can walk away.
-
-```sh
-memnox next --agent claude-code  # what it would do alone, and what it would ask about
-memnox run --task "fix checkout" --paths 'src/checkout/**' -- claude
-```
-
-An `ask` rule holds the call for a person instead of denying it. Answer it at the
-terminal, or from anywhere:
+**Leave it running.** The point of a boundary is not that it refuses things. It is that
+you can walk away. An `ask` rule holds the call for a person, and you can answer from
+anywhere; five similar calls are one decision:
 
 ```sh
-memnox approvals               # grouped: five similar calls are one decision
+memnox approvals               # what is waiting, grouped
 memnox approve <id> --group
 ```
 
-While it runs, four things stop work without a rule saying so, and each says why:
+The breaker watches outcomes, not requests: the same command failing the same way five
+times, eight failures with nothing succeeding between them, an action count far past what
+the task estimated, or work outside what was asked for. A pause names the count that
+produced it and can always be lifted, because a stop nobody can argue with is one people
+work around by uninstalling.
 
-```
+```sh
 memnox paused                  # a loop the breaker stopped, and how to lift it
 memnox budget                  # what is left in the window
 memnox lock --list             # who holds which path
-memnox doctor                  # names whichever of those is in the way
+memnox run --task "fix checkout" --paths 'src/checkout/**' -- claude
 ```
 
-The breaker watches outcomes, not requests: the same command failing the same way
-five times, eight failures with nothing succeeding between them, an action count far
-past what the task estimated, or work outside what was asked for. A pause names the
-count that produced it and can always be lifted, because a stop nobody can argue with
-is one people work around by uninstalling.
+**Hand over more.** `memnox next` reads what you have already approved and names the
+things you have said yes to often enough that being asked again is the tool wasting your
+attention. One refusal stops a recommendation, and destructive or outward actions never
+rise past supervised however routine they became. It prints counts, never hours.
 
-## What you could hand over next
-
-```sh
-memnox next
-```
-
-Reads what you have already approved and names the things you have said yes to often
-enough that being asked again is the tool wasting your attention. One refusal stops a
-recommendation, and destructive or outward actions never rise past supervised however
-routine they became.
-
-It prints counts, never hours. "Six hours a week you could get back" is a number
-nobody can check.
-
-## On a server
-
-`memnox run` puts the seams in front of an agent it starts. Nothing starts an agent
-running under systemd or in a container, and neither reads a shell profile:
+**On a server**, nothing starts an agent through a shell profile, so Memnox prints the
+lines a unit file or a container needs:
 
 ```sh
-memnox env --format systemd    # the lines a unit file needs
+memnox env --format systemd
 memnox env --format docker
 ```
 
-With a workspace, a question raised on a box nobody can reach travels up on the
-heartbeat and the answer comes back on the next one. Leases and budgets are counted
-across the fleet rather than once per machine, and when the control plane cannot be
-reached, each degrades to the local answer rather than blocking work.
+With a workspace (`memnox login`), a question raised on a box nobody can reach travels up
+on the heartbeat and the answer comes back on the next one. Leases and budgets are counted
+across the fleet, and when the control plane cannot be reached each degrades to the local
+answer rather than blocking work.
 
-## It starts in observe
-
-A tool that denies something important on its first day gets uninstalled on its first
-day. Observe records the real verdict and applies nothing:
+**The handful worth knowing:**
 
 ```sh
-memnox config get mode         # observe
-memnox timeline                # look at a few days
-memnox protect --enforce       # when the verdicts look right
+memnox status     # where this machine stands
+memnox rewind     # undo what an agent did to your files
+memnox doctor     # check the wiring, and prove it holds
+memnox stop       # turn protection off on purpose and on the record, e.g. --for 30m
+memnox start      # turn it back on, in the mode it was stopped in
+memnox update     # the latest version, with the wiring pointed at it
 ```
+
+`memnox help --all` lists every command.
 
 ## Three promises
 
@@ -490,31 +509,6 @@ payload.
 **It comes off cleanly.** `memnox uninstall` removes the interceptors, the hooks and
 the wrapping. `--purge` takes the history and rules too. A tool that cannot be removed
 is one people never install.
-
-## Install
-
-```sh
-npm install -g memnox     # or just use npx
-```
-
-Node 22 or newer, on macOS or Linux. On Windows, run it inside WSL, and
-[ADR 0001](docs/adr/0001-windows-support.md) says why.
-
-After `memnox setup`, Memnox lives in your agent session, and the terminal needs a
-handful of commands:
-
-```sh
-memnox setup      # put this machine under Memnox, once
-memnox status     # where this machine stands
-memnox rewind     # undo what an agent did to your files
-memnox doctor     # check the wiring, and prove it holds
-memnox stop       # turn protection off on purpose and on the record, e.g. --for 30m
-memnox start      # turn it back on, in the mode it was stopped in
-memnox update     # the latest version, with the wiring pointed at it
-```
-
-`memnox login` connects the machine to your team. Everything else happens in your agent
-session, and `memnox help --all` lists every command.
 
 ## Documentation
 
@@ -530,12 +524,12 @@ session, and `memnox help --all` lists every command.
 
 ## What it deliberately does not do
 
-No code review. No diff scanning. No risk score, because a single number is unarguable,
-and an unarguable number is one nobody acts on. There are counts by severity and a band
-that names every rule that fired.
+No code review. No risk score, because a single number is unarguable, and an unarguable
+number is one nobody acts on. There are counts by severity and a band that names every
+rule that fired.
 
 Memnox rules on an action an agent says it intends to take. It does not do the work,
-and it has no opinion about yours.
+and it has no opinion about yours beyond what your repository already does.
 
 ## Contributing
 
