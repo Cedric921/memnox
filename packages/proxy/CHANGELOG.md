@@ -1,5 +1,29 @@
 # @memnox/proxy
 
+## 0.13.10
+
+### Patch Changes
+
+- 3a5201f: "Allow once" now lets the call through. A write outside the project is ruled on twice, by the rules and by the project boundary, and the first took the answer off the question, so the boundary found nothing and refused the retry, telling the agent a yes in the conversation could not allow it. A once answer now leaves a single use the boundary spends on that retry, good until the question would have expired, and the next write asks again.
+- 572a008: The project boundary now holds for shell commands as well as the file tools. A line that changes something is ruled as a write to every place it reaches: where it `cd`s or `pushd`es, the directory a `git -C` names, and, when it runs code Memnox cannot read, such as `python3 - <<EOF` or `node -e`, every absolute path written in it. Editing another repository by `cd`ing there first or through an interpreter used to go through without anybody being asked; now it asks as a write there would. Working inside the project and reading anywhere stay unasked.
+- 7a88a5c: The first agent in a repository now records how its code is written, as a code fingerprint every agent after it is held to and told about at the start of each session. Only a first fingerprint is taken without a person, so it can only tighten, and it is read from what git tracks, never from ignored, built, vendored or oversized files.
+- 7a88a5c: A rule can now carry a content convention, and a write that adds a line matching it is refused, such as a `console.log` left in source. The lines are read where the call is made and never recorded, since a ledger row carries names and never contents, and a write whose lines cannot be read is not matched.
+- e349d75: A yes for the rest of the session to writing a file now covers the whole git repository that file is in, so an agent working across a project is not asked again folder by folder. A write anywhere outside that repository still asks, and a file in no repository, or in one that is the whole home directory, keeps the yes to its own folder, so one answer never reaches `~/.zshrc`, `~/.ssh` or another project.
+- 7a88a5c: The hooks now read the results of every agent's MCP calls for instructions, and claim its outward calls the way the proxy does, so two agents about to send the same message or work the same issue meet even through MCP servers the proxy cannot sit in front of.
+- 7a88a5c: A repository's own MCP servers, from its `.mcp.json`, now go through the Memnox proxy too, without the team's committed file ever being rewritten: each server a person approved in Claude Code is placed behind the proxy in Claude Code's local scope, which only this machine reads.
+- 7a88a5c: `memnox setup` now runs from any directory and picks up each repository in its first session. The baseline rules live in the machine's own file, merged rather than written over, so a second run never undoes somebody's edits, and the copies earlier setups left in whatever directory they ran in, which applied to the whole machine, are no longer read unless somebody changed them.
+- 7a88a5c: Every write the ledger records now names, by id, the settled decisions it bears on, found the way a brief finds them for the paths it touches. The control plane can then ask whoever answers for a decision to look at a change that touches it, and a common word no longer lists every decision there is.
+- Updated dependencies [3a5201f]
+- Updated dependencies [572a008]
+- Updated dependencies [7a88a5c]
+- Updated dependencies [7a88a5c]
+- Updated dependencies [e349d75]
+- Updated dependencies [7a88a5c]
+- Updated dependencies [7a88a5c]
+- Updated dependencies [7a88a5c]
+- Updated dependencies [7a88a5c]
+  - @memnox/core@0.13.10
+
 ## 0.13.9
 
 ### Patch Changes
