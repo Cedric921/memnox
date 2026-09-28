@@ -23,6 +23,7 @@ import { claimAll, type EditHookContext } from './edit-claims';
 import { answerPicker } from './held-picker';
 import { checkpointBeforeFirstWrite } from './checkpoint-seam';
 import { canAskPerson } from './edit-hook';
+import { fingerprintHold } from './fingerprint-hold';
 import { fieldsOf } from './hook-payload';
 import { answerPause } from './edit-pause';
 import { keepSessionSummary } from './session-summary-row';
@@ -68,11 +69,8 @@ async function main(): Promise<void> {
   const ruled = args.includes(TOOL_POLICY_FLAG)
     ? await answerPolicy(payload, context)
     : null;
-  if (ruled !== null && ruled.ruling.effect === DECISION_EFFECT.DENY)
-    return emit(ruled.reply);
-  // Held for a person, so their question is what is shown, and nothing is claimed until they answer.
-  if (ruled !== null && ruled.ruling.effect === DECISION_EFFECT.ASK && !ruled.asked)
-    return emit(ruled.reply);
+  const stopped = ruled === null ? null : await stoppedHere(ruled, context);
+  if (stopped !== null) return emit(stopped.reply);
   const reply =
     ruled === null ? null : await replyInSession(payload, ruled, context, process.env);
 
@@ -115,6 +113,33 @@ const CURSOR_ASKING: readonly unknown[] = [
   CURSOR_EVENT.BEFORE_SHELL,
   CURSOR_EVENT.BEFORE_MCP,
 ];
+
+/** The reply that ends the call before anything is claimed, or null where it goes on. */
+async function stoppedHere(
+  ruled: ToolAnswer,
+  context: EditHookContext,
+): Promise<{ reply: ToolReply | null } | null> {
+  if (ruled.ruling.effect === DECISION_EFFECT.DENY) return { reply: ruled.reply };
+  // Held for a person, so their question is what is shown, and nothing is claimed until they answer.
+  if (ruled.ruling.effect === DECISION_EFFECT.ASK && !ruled.asked)
+    return { reply: ruled.reply };
+  // Before any lease, so a write sent back to record the fingerprint claims nothing.
+  const recordFirst = await heldForFingerprint(ruled, context);
+  return recordFirst === null ? null : { reply: { stdout: recordFirst } };
+}
+
+/** Best effort: a hold that failed to work out lets the write through as it would have gone. */
+async function heldForFingerprint(
+  ruled: ToolAnswer,
+  context: EditHookContext,
+): Promise<string | null> {
+  try {
+    return await fingerprintHold(ruled, context);
+  } catch (err) {
+    log(`fingerprint hold failed, letting the write through: ${String(err)}`);
+    return null;
+  }
+}
 
 function personThere(payload: unknown, agent: string): boolean {
   const hook = fieldsOf(payload);

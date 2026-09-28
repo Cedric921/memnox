@@ -101,28 +101,58 @@ export async function answerSessionStart(
   const repository = (deps.rootOf ?? repositoryRootOf)(cwd);
   // Picked up the first time an agent works here, so the daemon wraps its MCP servers.
   if (repository !== null) rememberRepository(deps.home, repository);
+  const fingerprint = await fingerprintHere(repository);
   const text = [
     boundaryContext({ mode, rules, containment }),
     await memoryLine(deps.home),
-    await fingerprintLines(repository),
+    fingerprint.told,
   ]
     .filter((each) => each !== '')
     .join('\n');
-  return text === '' ? '' : `${addedContext(EDIT_HOOK_EVENT.SESSION_START, text)}\n`;
+  if (text === '') return '';
+  return `${sessionStartReply(text, fingerprint.notice)}\n`;
+}
+
+/** What the agent is told about the fingerprint, and what its person sees said about it. */
+interface FingerprintHere {
+  told: string;
+  notice: string | null;
 }
 
 /**
  * How the repository writes code, said once a session before the agent writes any of it,
  * or, where it states none yet, the ask to record it, which the first agent here does once.
+ * The person is shown a line too, since what only the agent is told looks like nothing.
  */
-async function fingerprintLines(root: string | null): Promise<string> {
-  if (root === null) return '';
+async function fingerprintHere(root: string | null): Promise<FingerprintHere> {
+  if (root === null) return { told: '', notice: null };
   const fingerprint = await readCodeFingerprint(root).catch(() => null);
-  if (fingerprint === null) return RECORD_FINGERPRINT;
-  return describeFingerprint(fingerprint) ?? '';
+  if (fingerprint === null)
+    return { told: RECORD_FINGERPRINT, notice: NO_FINGERPRINT_YET };
+  const checks = fingerprint.checks.length;
+  return {
+    told: describeFingerprint(fingerprint) ?? '',
+    notice:
+      checks === 0
+        ? null
+        : `Memnox: ${checks} check(s) from this repository's code fingerprint are enforced on every write.`,
+  };
 }
 
-const RECORD_FINGERPRINT = `This repository does not yet state how its code is written. Before your first change here, read enough of it to see, and record it with the memnox-session "fingerprint" tool: call it without arguments for what to write. It is done once, for every agent after you.`;
+const RECORD_FINGERPRINT = `This repository does not yet state how its code is written. Before your first change here, read enough of it to see, and record it with the memnox-session "fingerprint" tool: call it without arguments for what to write. It is done once, for every agent after you, and your first write here is held until you have.`;
+
+const NO_FINGERPRINT_YET = `Memnox: this repository has no code fingerprint yet. The agent records one before its first change here, or ask it now: "record this repository's conventions with the memnox fingerprint tool".`;
+
+/** The context for the agent, and a line its person sees, in the reply every host reads. */
+function sessionStartReply(text: string, notice: string | null): string {
+  return JSON.stringify({
+    ...(notice === null ? {} : { systemMessage: notice }),
+    hookSpecificOutput: {
+      hookEventName: EDIT_HOOK_EVENT.SESSION_START,
+      additionalContext: text,
+    },
+  });
+}
 
 /** Said once a session, so an agent knows to ask what was settled before it plans a change. */
 async function memoryLine(home: string): Promise<string> {

@@ -317,6 +317,9 @@ describe("the repository's code fingerprint, when a session starts", () => {
 
     expect(text).toContain('- naming.files: kebab-case');
     expect(text).toContain('- enforced: use the logger (src/**)');
+    expect((JSON.parse(said) as { systemMessage?: string }).systemMessage).toContain(
+      '1 check(s)',
+    );
   });
 
   it('asks the agent to record one, once, where the repository states none', async () => {
@@ -327,6 +330,15 @@ describe("the repository's code fingerprint, when a session starts", () => {
 
     expect(text).toContain('does not yet state how its code is written');
     expect(text).toContain('"fingerprint" tool');
+  });
+
+  // What only the agent is told looks like nothing to its person, so they are told as well.
+  it('tells the person too, with what to ask for', async () => {
+    const said = await answerSessionStart({ sessionId: 's1' }, await machine());
+
+    expect((JSON.parse(said) as { systemMessage?: string }).systemMessage).toContain(
+      'no code fingerprint yet',
+    );
   });
 });
 
