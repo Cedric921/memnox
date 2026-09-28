@@ -2,12 +2,14 @@ import { describe, expect, it } from 'vitest';
 
 import {
   checksBreakingExisting,
+  checksCoveringNothing,
   DECISION_EFFECT,
   describeFingerprint,
   fingerprintPolicies,
   LocalGate,
   MOST_GUIDANCE_LINES,
   parseCodeFingerprint,
+  pathsChecked,
   proposalFrom,
   saysSomething,
   withoutChecks,
@@ -164,6 +166,40 @@ enforce:
 
     expect(kept.checks.map((check) => check.name)).toEqual(['no-then']);
     expect(kept.guidance).toEqual(['naming.files: kebab-case']);
+  });
+
+  it('names a check whose files cover nothing the repository has', () => {
+    const guessed = parseCodeFingerprint(`${PROPOSED}  - name: no-sleep
+    files: ["app/**"]
+    forbid: ["*sleep(*"]
+    reason: no sleeping
+`);
+    const paths = files.map((file) => file.path);
+
+    expect(checksCoveringNothing(guessed, ROOT, paths)).toEqual(['no-sleep']);
+  });
+
+  // Each check keeps its own exclusions, so one check's `!` never hides a file from another.
+  it('reads only the files some check covers, each by its own globs', () => {
+    const fingerprint = parseCodeFingerprint(`
+enforce:
+  - name: no-any
+    files: ["src/**", "!src/legacy/**"]
+    forbid: ["*: any*"]
+    reason: no any
+  - name: no-debugger
+    files: ["src/legacy/**"]
+    forbid: ["*debugger*"]
+    reason: no debugger
+`);
+    const paths = ['src/a.ts', 'src/legacy/b.ts', 'docs/c.md'].map(
+      (path) => `${ROOT}/${path}`,
+    );
+
+    expect(pathsChecked(fingerprint, ROOT, paths)).toEqual([
+      `${ROOT}/src/a.ts`,
+      `${ROOT}/src/legacy/b.ts`,
+    ]);
   });
 
   it('takes the fences off an answer and reads it as the gate would', () => {

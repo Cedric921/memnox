@@ -4,8 +4,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-import { CODE_FINGERPRINT_FILE, parseCodeFingerprint } from '@memnox/core';
+import {
+  CODE_FINGERPRINT_FILE,
+  FINGERPRINT_PROMPT,
+  parseCodeFingerprint,
+} from '@memnox/core';
 
+import { answerText } from '../src/session-tools/bounded';
 import { fingerprintTool } from '../src/session-tools/fingerprint-tool';
 import type { SessionToolDeps } from '../src/session-tools/read-tools';
 
@@ -61,12 +66,12 @@ const recorded = async (root: string) =>
   parseCodeFingerprint(await readFile(join(root, CODE_FINGERPRINT_FILE), 'utf8'));
 
 describe('the fingerprint tool', () => {
-  it('says what to write when called without it', async () => {
-    const answer = (await fingerprintTool(depsIn(await repository()), {})) as {
-      said: string;
-    };
+  it('says what to write when called without it, whole, as the agent reads it', async () => {
+    const answer = JSON.parse(
+      answerText(await fingerprintTool(depsIn(await repository()), {})),
+    ) as { said: string };
 
-    expect(answer.said).toContain('`enforce` list');
+    expect(answer.said).toBe(FINGERPRINT_PROMPT);
   });
 
   it('records it, dropping a check the code already breaks and saying where', async () => {
@@ -87,6 +92,76 @@ describe('the fingerprint tool', () => {
     const file = await recorded(root);
     expect(file.checks.map((check) => check.name)).toEqual(['no-fmt-println']);
     expect(file.guidance).toContain('naming.files: snake_case');
+  });
+
+  it('tests a repository nobody has committed to yet against its untracked code', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'memnox-fingerprint-untracked-'));
+    execFileSync('git', ['init', '-q'], { cwd: root, stdio: 'ignore' });
+    await mkdir(join(root, 'internal'), { recursive: true });
+    await writeFile(
+      join(root, 'internal', 'serve.go'),
+      'func Serve() {\n\tpanic("todo")\n}\n',
+    );
+
+    const answer = (await fingerprintTool(depsIn(root), { yaml: PROPOSED })) as {
+      dropped: string[];
+    };
+
+    expect(answer.dropped[0]).toContain('internal/serve.go');
+  });
+
+  it('never takes a vendored directory for the code, even where nothing ignores it', async () => {
+    const root = await repository();
+    const vendored = join(root, 'internal', 'node_modules', 'lib');
+    await mkdir(vendored, { recursive: true });
+    await writeFile(join(vendored, 'print.go'), 'fmt.Println("vendored")\n');
+
+    const answer = (await fingerprintTool(depsIn(root), { yaml: PROPOSED })) as {
+      enforced: string[];
+    };
+
+    expect(answer.enforced).toEqual(['no-fmt-println: log through the logger']);
+  });
+
+  it('drops a check whose files name nothing the repository has', async () => {
+    const root = await repository();
+    const guessed = `${PROPOSED}  - name: no-sleep
+    files: ["cmd/**"]
+    forbid: ["*time.sleep(*"]
+    reason: no sleeping in commands
+`;
+
+    const answer = (await fingerprintTool(depsIn(root), { yaml: guessed })) as {
+      enforced: string[];
+      dropped: string[];
+    };
+
+    expect(answer.enforced).toEqual(['no-fmt-println: log through the logger']);
+    expect(answer.dropped).toContainEqual(
+      expect.stringContaining('no-sleep: its files name nothing'),
+    );
+    expect((await recorded(root)).checks.map((check) => check.name)).toEqual([
+      'no-fmt-println',
+    ]);
+  });
+
+  it('records nothing in a repository with no code of its own, since it could only guess', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'memnox-fingerprint-empty-'));
+    execFileSync('git', ['init', '-q'], { cwd: root, stdio: 'ignore' });
+    await mkdir(join(root, 'node_modules', 'lib'), { recursive: true });
+    await writeFile(
+      join(root, 'node_modules', 'lib', 'index.js'),
+      'module.exports = 1;\n',
+    );
+
+    const answer = (await fingerprintTool(depsIn(root), { yaml: PROPOSED })) as {
+      recorded: boolean;
+      said: string;
+    };
+
+    expect(answer.recorded).toBe(false);
+    expect(answer.said).toContain('no code of its own');
+    await expect(readFile(join(root, CODE_FINGERPRINT_FILE))).rejects.toThrow();
   });
 
   it("never changes a repository's fingerprint once it states one, so none is loosened", async () => {

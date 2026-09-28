@@ -8,15 +8,20 @@ import { dirname, join } from 'node:path';
 
 import {
   checksBreakingExisting,
+  checksCoveringNothing,
   CODE_FINGERPRINT_FILE,
   FINGERPRINT_PROMPT,
+  pathsChecked,
   proposalFrom,
   saysSomething,
   withoutChecks,
+  type BrokenCheck,
+  type CodeFingerprint,
   type ExistingFile,
 } from '@memnox/core';
 import { repositoryRootOf } from '@memnox/interceptors';
 
+import { OwnText } from './bounded';
 import { textArg, type SessionToolDeps, type ToolArgs } from './read-tools';
 
 /** Files a proposal is tested against, so a monorepo cannot hold the agent for minutes. */
@@ -45,7 +50,7 @@ export async function fingerprintTool(
     };
   }
   const yaml = textArg(args, 'yaml');
-  if (yaml === undefined) return { said: FINGERPRINT_PROMPT };
+  if (yaml === undefined) return { said: new OwnText(FINGERPRINT_PROMPT) };
   return record(root, file, yaml);
 }
 
@@ -59,49 +64,99 @@ async function record(root: string, file: string, yaml: string): Promise<unknown
       issues: proposal.fingerprint.issues,
     };
   }
-  const broken = checksBreakingExisting(
-    proposal.fingerprint,
-    root,
-    await trackedFiles(root),
-  );
-  const dropped = new Set(broken.map((each) => each.name));
+  const paths = await ownPaths(root);
+  if (paths.length === 0) {
+    return {
+      recorded: false,
+      said: 'This repository has no code of its own yet, so a fingerprint could only be a guess and nothing was recorded.',
+    };
+  }
+  const { fingerprint } = proposal;
+  const checked = pathsChecked(fingerprint, root, paths);
+  const tested: Tested = {
+    fingerprint,
+    empty: checksCoveringNothing(fingerprint, root, paths),
+    broken: checksBreakingExisting(fingerprint, root, await readFiles(checked)),
+    checked: checked.length,
+  };
   await mkdir(dirname(file), { recursive: true });
-  await writeFile(file, withoutChecks(proposal.yaml, dropped), 'utf8');
+  await writeFile(file, withoutChecks(proposal.yaml, droppedOf(tested)), 'utf8');
+  return recordedAnswer(tested);
+}
+
+/** A proposal tested against the code, and what the test found. */
+interface Tested {
+  fingerprint: CodeFingerprint;
+  /** Checks whose files name nothing the repository has. */
+  empty: string[];
+  broken: BrokenCheck[];
+  /** How many files some check covers, read or not. */
+  checked: number;
+}
+
+function droppedOf(tested: Tested): Set<string> {
+  return new Set([...tested.empty, ...tested.broken.map((each) => each.name)]);
+}
+
+/** What the agent is told was recorded, dropped and left untested, so it can say so. */
+function recordedAnswer(tested: Tested): unknown {
+  const { fingerprint, empty, broken, checked } = tested;
+  const dropped = droppedOf(tested);
+  const reasons = [
+    ...empty.map(
+      (name) =>
+        `${name}: its files name nothing this repository has, so it describes code that is not here`,
+    ),
+    ...broken.map(
+      (each) =>
+        `${each.name}: the code already has ${each.lines} such line(s), first in ${each.first}, so it does not describe this repository`,
+    ),
+  ];
   return {
     recorded: CODE_FINGERPRINT_FILE,
-    told: `${proposal.fingerprint.guidance.length} convention(s), said to every agent at the start of a session`,
-    enforced: proposal.fingerprint.checks
+    told: `${fingerprint.guidance.length} convention(s), said to every agent at the start of a session`,
+    enforced: fingerprint.checks
       .filter((check) => !dropped.has(check.name))
       .map((check) => `${check.name}: ${check.reason}`),
-    ...(broken.length === 0
+    ...(reasons.length === 0 ? {} : { dropped: reasons }),
+    ...(checked <= MOST_FILES_READ
       ? {}
       : {
-          dropped: broken.map(
-            (each) =>
-              `${each.name}: the code already has ${each.lines} such line(s), first in ${each.first}, so it does not describe this repository`,
-          ),
+          untested: `${checked - MOST_FILES_READ} of the ${checked} files the checks cover were not read, so a kept check may still match code there`,
         }),
-    ...(proposal.fingerprint.issues.length === 0
-      ? {}
-      : { skipped: proposal.fingerprint.issues }),
+    ...(fingerprint.issues.length === 0 ? {} : { skipped: fingerprint.issues }),
     next: TELL_PERSON,
   };
 }
 
-/** What git tracks, so nothing ignored, built or vendored is taken for the team's code. */
-async function trackedFiles(root: string): Promise<ExistingFile[]> {
+/** Directories that hold somebody else's code even where no `.gitignore` says so. */
+const VENDORED = new Set(['node_modules', 'vendor', 'dist', 'build', 'target', '.venv']);
+
+/**
+ * What git tracks and what it would track, since a repository nobody has committed to yet is
+ * all untracked; ignored and vendored files are never taken for the team's code.
+ */
+async function ownPaths(root: string): Promise<string[]> {
   const listed = await new Promise<string>((settle) => {
     execFile(
       'git',
-      ['ls-files', '-z'],
+      ['ls-files', '-z', '--cached', '--others', '--exclude-standard'],
       { cwd: root, maxBuffer: MOST_LISTING_BYTES },
-      // No listing tests nothing and keeps every check: the gate still reads only what is added.
+      // No listing is no code to describe, which is said rather than guessed past.
       (error, out) => settle(error === null ? out : ''),
     );
   });
+  return listed
+    .split('\0')
+    .filter(Boolean)
+    .filter((relative) => !relative.split('/').some((part) => VENDORED.has(part)))
+    .filter((relative) => relative !== CODE_FINGERPRINT_FILE)
+    .map((relative) => join(root, relative));
+}
+
+async function readFiles(paths: readonly string[]): Promise<ExistingFile[]> {
   const files: ExistingFile[] = [];
-  for (const relative of listed.split('\0').filter(Boolean).slice(0, MOST_FILES_READ)) {
-    const path = join(root, relative);
+  for (const path of paths.slice(0, MOST_FILES_READ)) {
     const lines = await linesOf(path);
     if (lines !== null) files.push({ path, lines });
   }

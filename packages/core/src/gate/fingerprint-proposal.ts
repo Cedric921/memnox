@@ -23,7 +23,7 @@ export const FINGERPRINT_PROMPT = [
   '  forbid: patterns an added line must not match. `*` is the only wildcard and matches anything, matching is case insensitive and covers the whole line, so write `*console.log(*` rather than `console.log(`. No regular expressions.',
   '  reason: the convention, in one line',
   '  instead: what to write instead, in one line',
-  'Leave out anything a single line cannot show, such as function length or layering. A check that matches code the repository already has is dropped, so keep each one precise.',
+  'Leave out anything a single line cannot show, such as function length or layering. A check that matches code the repository already has, or whose files name nothing it has, is dropped, so keep each one precise.',
 ].join('\n');
 
 /** How much of an agent's answer is read, since a fingerprint is a page and never a book. */
@@ -98,6 +98,36 @@ export function checksBreakingExisting(
     });
   }
   return broken;
+}
+
+/**
+ * The checks whose files name nothing the repository has. Such a check describes code that
+ * is not here, usually a guessed directory, and would only ever fire on code yet to come.
+ */
+export function checksCoveringNothing(
+  fingerprint: CodeFingerprint,
+  root: string,
+  paths: readonly string[],
+): string[] {
+  const policies = fingerprintPolicies(fingerprint, root);
+  return fingerprint.checks
+    .filter((_check, index) => {
+      const targets = policies[index]?.match.targets;
+      return targets !== undefined && !paths.some((path) => matchesAny(targets, path));
+    })
+    .map((check) => check.name);
+}
+
+/** The paths at least one check covers, since a file no check names cannot break one. */
+export function pathsChecked(
+  fingerprint: CodeFingerprint,
+  root: string,
+  paths: readonly string[],
+): string[] {
+  const targets = fingerprintPolicies(fingerprint, root).map(
+    (policy) => policy.match.targets,
+  );
+  return paths.filter((path) => targets.some((each) => matchesAny(each, path)));
 }
 
 /** The answer as written, with the dropped checks taken out and everything else kept. */

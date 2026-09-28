@@ -38,6 +38,14 @@ export function masked(text: string): string {
   );
 }
 
+/**
+ * Text Memnox wrote itself, such as a tool's instructions, which carries nothing from the
+ * ledger and is useless cut: masked all the same, and held only to the answer's own cap.
+ */
+export class OwnText {
+  constructor(readonly text: string) {}
+}
+
 function clippedText(text: string): string {
   const safe = masked(text);
   if (safe.length <= MOST_FIELD_CHARS) return safe;
@@ -54,6 +62,7 @@ const LEFT_OUT = /^(\d+) earlier row\(s\) left out$/;
 /** Every string masked and clipped and every list capped, all the way down. */
 export function bounded(value: unknown): unknown {
   if (typeof value === 'string') return clippedText(value);
+  if (value instanceof OwnText) return masked(value.text);
   if (Array.isArray(value)) {
     const kept = value.slice(-MOST_ROWS).map(bounded);
     return value.length > MOST_ROWS
