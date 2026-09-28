@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import {
+  decisionsBearingOn,
   describeFact,
   factsAbout,
   newestFacts,
@@ -225,5 +226,36 @@ describe('what arrives from the control plane', () => {
       }),
     );
     expect((await readWorkspaceMemoryCached(home))?.facts).toHaveLength(2);
+  });
+});
+
+/* The write is where the pricing page gets redesigned some other way, so the decisions its
+   path bears on ride with it and whoever answers for one can be asked to look. */
+describe('the decisions a write bears on', () => {
+  const PRICING = fact({
+    id: 'f_pricing',
+    statement: 'The pricing page shows three plans and the annual discount.',
+    subject: 'pricing page',
+  });
+
+  it('names a decision whose subject the path is about', () => {
+    expect(decisionsBearingOn(memory([PRICING, REDIS]), 'web/pages/pricing.tsx')).toEqual(
+      ['f_pricing'],
+    );
+  });
+
+  it('leaves out an owner or a rule, which are not a choice somebody made', () => {
+    expect(decisionsBearingOn(memory([OWNER]), 'src/payments/charge.ts')).toEqual([]);
+  });
+
+  it('names nothing for a path no decision is about', () => {
+    expect(decisionsBearingOn(memory([PRICING]), 'docs/readme.md')).toEqual([]);
+  });
+
+  it('is bounded, so one common word cannot list every decision', () => {
+    const many = Array.from({ length: 20 }, (_, n) =>
+      fact({ id: `f_${n}`, subject: 'pricing', statement: `Pricing choice ${n}.` }),
+    );
+    expect(decisionsBearingOn(memory(many), 'web/pricing.tsx')).toHaveLength(8);
   });
 });

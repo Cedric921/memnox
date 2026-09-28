@@ -55,6 +55,8 @@ describe('the event store', () => {
       exitCode: 1,
       durationMs: 42,
       outputDigest: 'cafe',
+      conditionsInForce: ['freeze'],
+      decisionIds: ['f_pricing', 'f_plans'],
     });
     await db.append(original);
 

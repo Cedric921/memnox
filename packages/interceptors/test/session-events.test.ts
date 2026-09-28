@@ -5,6 +5,7 @@ import {
   SESSION_MOMENT,
   sessionAnswer,
   sessionEventOf,
+  withDecisions,
 } from '../src/session-events';
 
 const AT = '2026-09-22T10:00:00.000Z';
@@ -182,5 +183,51 @@ describe('Gemini CLI and Windsurf at their pauses', () => {
       target: 'a.ts',
     });
     expect(sessionAnswer(pause, 'note')).toBe('');
+  });
+});
+
+describe('the decisions a write is recorded against', () => {
+  const memory = {
+    hash: 'm1',
+    withheld: 0,
+    syncedAt: AT,
+    facts: [
+      {
+        id: 'f_pricing',
+        kind: 'decision',
+        statement: 'The pricing page shows three plans.',
+        subject: 'pricing page',
+      },
+    ],
+  };
+
+  function rowsFor(tool: string, path: string): ReturnType<typeof activityOf> {
+    const event = sessionEventOf({
+      hook_event_name: 'PostToolUse',
+      session_id: 's',
+      cwd: '/repo',
+      tool_name: tool,
+      tool_input: { file_path: `/repo/${path}` },
+    });
+    if (event === null) throw new Error('not read');
+    return activityOf(event, 'claude-code', undefined, AT);
+  }
+
+  it('marks an edit with the decisions its path bears on', () => {
+    const [row] = withDecisions(rowsFor('Edit', 'web/pages/pricing.tsx'), memory);
+
+    expect(row?.decisionIds).toEqual(['f_pricing']);
+  });
+
+  it('leaves a read unmarked, because reading decided nothing', () => {
+    const [row] = withDecisions(rowsFor('Read', 'web/pages/pricing.tsx'), memory);
+
+    expect(row?.decisionIds).toBeUndefined();
+  });
+
+  it('leaves an edit no decision is about unmarked', () => {
+    const [row] = withDecisions(rowsFor('Edit', 'docs/readme.md'), memory);
+
+    expect(row).not.toHaveProperty('decisionIds');
   });
 });

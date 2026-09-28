@@ -53,5 +53,8 @@ export const WORKSPACE_MEMORY_SYNCED_FILE = 'memory-synced.json';
 /** Settled facts handed over at one prompt or before one write. */
 export const MOST_FACTS_PER_CALL = 3;
 
+/** Settled decisions one write is recorded as bearing on, so a common word cannot list them all. */
+export const MOST_DECISIONS_PER_WRITE = 8;
+
 /** Settled facts a session tool answers with, so one lookup never fills a window. */
 export const MOST_FACTS_ANSWERED = 12;

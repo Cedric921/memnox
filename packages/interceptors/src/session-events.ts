@@ -3,6 +3,7 @@ import { isAbsolute, relative } from 'node:path';
 import {
   ACTOR_TYPE,
   DECISION_EFFECT,
+  decisionsBearingOn,
   digest,
   ENFORCEMENT_MODE,
   EVENT_SCHEMA_VERSION,
@@ -11,6 +12,7 @@ import {
   TOOL_CLASS,
   type MemnoxEvent,
   type ToolClass,
+  type WorkspaceMemory,
 } from '@memnox/core';
 
 import {
@@ -255,6 +257,21 @@ export function activityOf(
       target: file.path === undefined ? undefined : shown(file.path, root, event.cwd),
     }),
   );
+}
+
+/**
+ * Each write marked with the settled decisions its path bears on, as the brief found them,
+ * so the control plane can ask whoever answers for one to look. A read decided nothing.
+ */
+export function withDecisions(
+  rows: readonly MemnoxEvent[],
+  memory: WorkspaceMemory,
+): MemnoxEvent[] {
+  return rows.map((row) => {
+    if (row.operation !== FILE_EDIT.operation || row.target === undefined) return row;
+    const decisionIds = decisionsBearingOn(memory, row.target);
+    return decisionIds.length === 0 ? row : { ...row, decisionIds };
+  });
 }
 
 function filesTouched(event: SessionEvent): FileTouch[] {

@@ -36,6 +36,7 @@ export const IMMUTABLE_COLUMNS = [
   'costUsd',
   'bundleHash',
   'conditionsInForce',
+  'decisionIds',
 ] as const;
 
 /** The column a held call's release fills in, and the only one that may change. */
@@ -140,6 +141,15 @@ export const MIGRATIONS: readonly Migration[] = [
     // the row around it. `IS NOT` rather than `<>`, because it is null-safe.
     version: 4,
     sql: `
+      DROP TRIGGER IF EXISTS events_no_update;
+      ${appendOnlyTrigger()}
+    `,
+  },
+  {
+    // The decisions a write bore on, and the trigger again so the new column is guarded too.
+    version: 5,
+    sql: `
+      ALTER TABLE events ADD COLUMN decisionIds TEXT;
       DROP TRIGGER IF EXISTS events_no_update;
       ${appendOnlyTrigger()}
     `,

@@ -106,6 +106,12 @@ export interface MemnoxEvent {
   /** Ids of the conditions in force at the verdict, as ids because a label is derivable from one. */
   conditionsInForce?: readonly string[];
 
+  /**
+   * Ids of the settled decisions a file write bears on, as this machine's memory matched them,
+   * so whoever answers for one can be asked to look at what was written.
+   */
+  decisionIds?: readonly string[];
+
   /** A hash of the arguments. The arguments themselves never reach a row. */
   argsDigest?: string;
 

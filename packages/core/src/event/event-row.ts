@@ -38,6 +38,7 @@ export function eventToRow(event: MemnoxEvent): EventRow {
       event.conditionsInForce === undefined || event.conditionsInForce.length === 0
         ? null
         : event.conditionsInForce.join(CONDITION_SEPARATOR),
+    decisionIds: joined(event.decisionIds),
     argsDigest: event.argsDigest ?? null,
     execution: event.execution ?? null,
     exitCode: event.exitCode ?? null,
@@ -115,6 +116,13 @@ function copyOptionalFields(row: EventRow, event: MemnoxEvent): void {
   const conditions = textOf(row, 'conditionsInForce');
   if (conditions !== undefined)
     event.conditionsInForce = conditions.split(CONDITION_SEPARATOR);
+  const decisions = textOf(row, 'decisionIds');
+  if (decisions !== undefined) event.decisionIds = decisions.split(CONDITION_SEPARATOR);
+}
+
+// Null rather than empty, so a row that bears on nothing reads back without the field.
+function joined(ids: readonly string[] | undefined): string | null {
+  return ids === undefined || ids.length === 0 ? null : ids.join(CONDITION_SEPARATOR);
 }
 
 function ruleOf(row: EventRow): EventRuleRef | undefined {

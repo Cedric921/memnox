@@ -99,6 +99,8 @@ function actionOf(event: MemnoxEvent): Record<string, unknown> {
     // The local ledger keeps the target whole for `why`; what leaves the machine is masked.
     ...(event.target === undefined ? {} : { resourceRef: redactSecrets(event.target) }),
     ...(event.argsDigest === undefined ? {} : { argsDigest: event.argsDigest }),
+    // Ids only: the control plane holds the decisions and asks whoever answers for one.
+    ...(event.decisionIds === undefined ? {} : { decisionIds: [...event.decisionIds] }),
   };
 }
 

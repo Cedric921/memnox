@@ -6,6 +6,7 @@ import {
   markActivity,
   MINUTE_MS,
   NOTE_KIND,
+  readWorkspaceMemory,
   renderNotes,
   SECOND_MS,
   SqliteEventStore,
@@ -20,6 +21,7 @@ import {
   activityOf,
   SESSION_MOMENT,
   sessionAnswer,
+  withDecisions,
   type SessionEvent,
 } from './session-events';
 
@@ -71,9 +73,12 @@ async function recordActivity(
   pause: SessionEvent,
   context: EditHookContext,
 ): Promise<void> {
-  const rows = activityOf(pause, context.agent, undefined, context.now().toISOString());
-  if (rows.length === 0) return;
+  const done = activityOf(pause, context.agent, undefined, context.now().toISOString());
+  if (done.length === 0) return;
   try {
+    // No memory pulled yet means nothing settled to bear on, not a reason to lose the row.
+    const memory = await readWorkspaceMemory(context.home).catch(() => null);
+    const rows = memory === null ? done : withDecisions(done, memory);
     const ledger = SqliteEventStore.forHome(context.home);
     try {
       for (const row of rows) await ledger.append(row);

@@ -4,6 +4,8 @@
  * ranks it, so the choosing happens here, by shared words, with every match naming its words.
  */
 
+import { MOST_DECISIONS_PER_WRITE } from './context.constants';
+
 /** One settled thing, as the control plane's `GET :ws/memory` sends it. */
 export interface WorkspaceFact {
   id: string;
@@ -90,6 +92,21 @@ export function factsAbout(memory: WorkspaceMemory, query: FactQuery): FactFound
     .map((fact) => matchOf(fact, terms, paths))
     .filter((found): found is FactFound => found !== null)
     .sort(byStrength);
+}
+
+/** The kind a team's own choice is filed under, as opposed to a rule, an owner or an approver. */
+const DECISION_KIND = 'decision';
+
+/**
+ * The decisions a write to this path bears on, as ids, found the way a brief finds them.
+ * Recorded on the write so the control plane can ask whoever answers for one to look, since
+ * matching them again there would be the relevance layer it deliberately does not have.
+ */
+export function decisionsBearingOn(memory: WorkspaceMemory, path: string): string[] {
+  return factsAbout(memory, { paths: [path] })
+    .filter((found) => found.fact.kind === DECISION_KIND)
+    .slice(0, MOST_DECISIONS_PER_WRITE)
+    .map((found) => found.fact.id);
 }
 
 /** The newest facts, for a lookup that named nothing in particular. */

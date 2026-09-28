@@ -76,6 +76,7 @@ export const EVENT_SCHEMA = {
     policyHash: { type: 'string' },
     bundleHash: { type: 'string' },
     conditionsInForce: { type: 'array', items: { type: 'string' } },
+    decisionIds: { type: 'array', items: { type: 'string' } },
     argsDigest: { type: 'string' },
     execution: { enum: Object.values(EXECUTION) },
     exitCode: { type: 'integer' },

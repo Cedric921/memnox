@@ -91,6 +91,17 @@ describe('the batch a machine sends', () => {
     expect(payload['exitCode']).toBeUndefined();
   });
 
+  it('sends the decisions a write bore on as ids, and nothing where it bore on none', () => {
+    const marked = draftFrom(event({ decisionIds: ['f_pricing'] })).payload as Record<
+      string,
+      unknown
+    >;
+    const plain = draftFrom(event()).payload as Record<string, unknown>;
+
+    expect(marked['decisionIds']).toEqual(['f_pricing']);
+    expect(plain).not.toHaveProperty('decisionIds');
+  });
+
   it('sends the outcome when there was one', () => {
     const payload = draftFrom(event({ exitCode: 1, durationMs: 20 })).payload as Record<
       string,
