@@ -33,6 +33,7 @@ import { SESSION_MOMENT, type SessionEvent } from './session-events';
 import { learnFromAnswer, rememberQuestion } from './prompt-answers';
 import { authorizerFor, type ToolAnswer } from './tool-hook';
 import { taintFromResult } from './result-taint';
+import { brokenByShell } from './shell-written';
 import { DEFAULT_AGENT_NAME } from './tool-hook.constants';
 import type { ToolReply } from './tool-policy';
 
@@ -123,7 +124,10 @@ export async function beforePause(
     if (pause.moment === SESSION_MOMENT.AFTER_TOOL) {
       await learnFromAnswer(payload, { ...context, env });
       await markIfInstructed(payload, context, env);
-      return await answersArrived({ ...clockOf(context, sessionId), waitMs: 0 });
+      const broken = await brokenByShell(payload, context).catch(() => null);
+      const arrived = await answersArrived({ ...clockOf(context, sessionId), waitMs: 0 });
+      const said = [broken, arrived].filter((each): each is string => each !== null);
+      return said.length === 0 ? null : said.join('\n\n');
     }
     if (pause.moment === SESSION_MOMENT.TURN_END) {
       // Claude Code's Stop hook is written with a timeout that covers the long wait.

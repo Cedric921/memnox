@@ -24,6 +24,7 @@ import { answerPicker } from './held-picker';
 import { checkpointBeforeFirstWrite } from './checkpoint-seam';
 import { canAskPerson } from './edit-hook';
 import { fingerprintHold } from './fingerprint-hold';
+import { keepBeforeShell } from './shell-written';
 import { fieldsOf } from './hook-payload';
 import { answerPause } from './edit-pause';
 import { keepSessionSummary } from './session-summary-row';
@@ -71,6 +72,7 @@ async function main(): Promise<void> {
     : null;
   const stopped = ruled === null ? null : await stoppedHere(ruled, context);
   if (stopped !== null) return emit(stopped.reply);
+  if (ruled !== null) await keepTreeBeforeShell(payload, ruled, context);
   const reply =
     ruled === null ? null : await replyInSession(payload, ruled, context, process.env);
 
@@ -126,6 +128,19 @@ async function stoppedHere(
   // Before any lease, so a write sent back to record the fingerprint claims nothing.
   const recordFirst = await heldForFingerprint(ruled, context);
   return recordFirst === null ? null : { reply: { stdout: recordFirst } };
+}
+
+/** Best effort: a tree not kept only means this command's lines go unchecked afterwards. */
+async function keepTreeBeforeShell(
+  payload: unknown,
+  ruled: ToolAnswer,
+  context: EditHookContext,
+): Promise<void> {
+  try {
+    await keepBeforeShell(payload, ruled, context);
+  } catch (err) {
+    log(`keeping the tree before a command failed: ${String(err)}`);
+  }
 }
 
 /** Best effort: a hold that failed to work out lets the write through as it would have gone. */
