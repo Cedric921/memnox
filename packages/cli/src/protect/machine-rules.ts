@@ -3,14 +3,16 @@ import { dirname, join } from 'node:path';
 import {
   MEMNOX_HOME,
   POLICY_DOMAIN,
+  orgPolicyPathFor,
   POLICY_FILE_EXTENSION,
   policiesFrom,
   readPolicyDocumentFile,
+  readPolicyRegistry,
   recommendedAnswers,
-  writePolicyDocumentFile,
   type Policy,
   type PolicyDomain,
 } from '@memnox/core';
+import { forgetPolicyFiles, policyRegistryPath } from '../policy-registry';
 import { mergeRules } from './merge-rules';
 
 /**
@@ -54,22 +56,27 @@ export async function writeMachineRules(
 }
 
 /**
- * Takes a machine rule out of a repository's file where an earlier setup put it there
- * and nobody has changed it since, so the rule is counted and enforced once. A rule
- * somebody edited is theirs, and stays. True when the file was rewritten.
+ * Stops reading the copies of the baseline earlier setups wrote into whatever directory they
+ * ran in. Each was registered for the whole machine, so every copy applied everywhere; the
+ * baseline is now the machine file's alone. A file anybody changed is theirs, and stays read.
  */
-export async function moveOutOfProject(
-  path: string,
-  rules: readonly Policy[],
-): Promise<boolean> {
-  const document = await readPolicyDocumentFile(path);
-  if (document === null) return false;
-  const kept = document.policies.filter(
-    (policy) => !rules.some((rule) => isSameRule(policy, rule)),
-  );
-  if (kept.length === document.policies.length) return false;
-  await writePolicyDocumentFile(path, { ...document, policies: kept });
-  return true;
+export async function retireBaselineCopies(
+  home: string,
+  baseline: readonly Policy[],
+): Promise<string[]> {
+  const keep = new Set([machinePolicyPath(home), orgPolicyPathFor(home)]);
+  const retired: string[] = [];
+  for (const file of await readPolicyRegistry(policyRegistryPath(home))) {
+    if (keep.has(file)) continue;
+    const document = await readPolicyDocumentFile(file).catch(() => null);
+    if (document === null || document.policies.length === 0) continue;
+    const onlyBaseline = document.policies.every((policy) =>
+      baseline.some((rule) => isSameRule(policy, rule)),
+    );
+    if (onlyBaseline) retired.push(file);
+  }
+  if (retired.length > 0) await forgetPolicyFiles(home, retired);
+  return retired;
 }
 
 /** The rule setup wrote: same name, same effect, same actions, same targets. */

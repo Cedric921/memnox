@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { ownProcessEnv, POLICY_FILE_EXTENSION, rememberRepository } from '@memnox/core';
+import { ownProcessEnv, rememberRepository } from '@memnox/core';
 import { installInterceptors, INTERCEPT_BINARY } from '@memnox/interceptors';
 import { wrapEveryServer } from './mcp/wrap-servers';
 import { installClaudeHook } from './protect/claude-hook';
@@ -9,10 +9,9 @@ import {
   installGeminiHook,
   installWindsurfHook,
 } from './protect/agent-hooks';
-import { mergeRules } from './protect/merge-rules';
 import {
   baselineRules,
-  moveOutOfProject,
+  retireBaselineCopies,
   writeMachineRules,
 } from './protect/machine-rules';
 import { installService, type InstallResult } from './daemon/service';
@@ -54,13 +53,16 @@ export interface Wiring {
   mcpUnwrapped?: true;
   /** Agents that can now ask Memnox from inside a session, through the session server. */
   sessionTools?: string[];
+  /** Baseline copies an earlier setup wrote into a directory, no longer read. */
+  retired?: string[];
 }
 
 export interface WiringSeams {
   interceptors?: typeof installInterceptors;
   service?: typeof installService;
-  /** Injected so a test writes no policy file into the directory it runs in. */
-  rules?: (home: string, cwd: string) => Promise<number>;
+  /** Injected so a test writes no policy file under a real home. */
+  rules?: (home: string) => Promise<number>;
+  retire?: (home: string) => Promise<string[]>;
   claudeHook?: (home: string) => Promise<boolean>;
   codexHook?: (home: string) => Promise<boolean>;
   cursorHook?: (home: string) => Promise<boolean>;
@@ -72,17 +74,20 @@ export interface WiringSeams {
 }
 
 /**
- * The baseline every machine starts with, merged rather than written over, or a second
- * run quietly undoes somebody's edits. The secret rules go to the machine's own file, so
- * they hold in every repository and not only the one setup ran in.
+ * The baseline every machine starts with, in the machine's own file and merged rather than
+ * written over, or a second run quietly undoes somebody's edits. Nothing is written where
+ * setup was run, so it can be run from anywhere and every repository is held the same.
  */
-async function writeBaseline(home: string, cwd: string): Promise<number> {
+async function writeBaseline(home: string): Promise<number> {
   const { machine, project } = baselineRules();
-  await writeMachineRules(home, machine);
-  const path = `${cwd}/memnox.policies${POLICY_FILE_EXTENSION}`;
-  await moveOutOfProject(path, machine);
-  await mergeRules(path, project, home);
+  await writeMachineRules(home, [...machine, ...project]);
   return machine.length + project.length;
+}
+
+/** The copies earlier setups left behind, no longer read now the baseline is the machine's. */
+function retireCopies(home: string): Promise<string[]> {
+  const { machine, project } = baselineRules();
+  return retireBaselineCopies(home, [...machine, ...project]);
 }
 
 export async function wireMachine(
@@ -94,11 +99,13 @@ export async function wireMachine(
     home,
     INTERCEPT_BINARY,
   );
-  const rules = await (seams.rules ?? writeBaseline)(home, cwd);
+  const rules = await (seams.rules ?? writeBaseline)(home);
+  const retired = await (seams.retire ?? retireCopies)(home);
   const service = await (seams.service ?? installService)(home);
   const claudeHook = await (seams.claudeHook ?? installClaudeHook)(home);
   const editHooks = await installEditHooks(home, seams);
-  const mcp = await (seams.mcp ?? wrapEveryServer)(home, cwd);
+  // The machine's own configs: a repository's is wrapped once a session there is watched.
+  const mcp = await (seams.mcp ?? wrapEveryServer)(home, home);
   const session = await (seams.session ?? wireSessionTools)(home);
   // Agents here work in this repository, so the daemon watches it for unhooked edits.
   const root = repositoryOf(cwd);
@@ -120,6 +127,7 @@ export async function wireMachine(
     mcpServers: mcp.wrapped,
     ...(mcp.skipped ? { mcpUnwrapped: true as const } : {}),
     sessionTools: session.held,
+    ...(retired.length === 0 ? {} : { retired }),
     ...(service.warning === undefined ? {} : { daemonNote: service.warning }),
   };
 }

@@ -222,6 +222,12 @@ async function wireAndRender(deps: SetupDeps): Promise<Wiring> {
     'Wired this machine',
     `${wired.interceptors} interceptors, ${wired.rules} rules, ${describeDaemon(wired)}${describeEditors(wired)}${describeMcp(wired)}`,
   );
+  // Said, since a file that stops being read without a word is a rule somebody thinks holds.
+  if (wired.retired !== undefined) {
+    deps.context.flow.aside(
+      `No longer read, since they only held the baseline, which now lives in ~/.memnox: ${wired.retired.join(', ')}. Delete them when you like.`,
+    );
+  }
   return wired;
 }
 

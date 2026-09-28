@@ -14,7 +14,10 @@ import {
   decisionsCovering,
   decisionsMentioned,
   describeDecision,
+  describeFingerprint,
   ENFORCEMENT_MODE,
+  readCodeFingerprint,
+  rememberRepository,
   markShown,
   MOST_DECISIONS_PER_CALL,
   notYetShown,
@@ -95,14 +98,31 @@ export async function answerSessionStart(
   });
   const root = containment === null ? undefined : containment.root;
   const { rules } = await rulesFor(deps, root);
+  const repository = (deps.rootOf ?? repositoryRootOf)(cwd);
+  // Picked up the first time an agent works here, so the daemon wraps its MCP servers.
+  if (repository !== null) rememberRepository(deps.home, repository);
   const text = [
     boundaryContext({ mode, rules, containment }),
     await memoryLine(deps.home),
+    await fingerprintLines(repository),
   ]
     .filter((each) => each !== '')
     .join('\n');
   return text === '' ? '' : `${addedContext(EDIT_HOOK_EVENT.SESSION_START, text)}\n`;
 }
+
+/**
+ * How the repository writes code, said once a session before the agent writes any of it,
+ * or, where it states none yet, the ask to record it, which the first agent here does once.
+ */
+async function fingerprintLines(root: string | null): Promise<string> {
+  if (root === null) return '';
+  const fingerprint = await readCodeFingerprint(root).catch(() => null);
+  if (fingerprint === null) return RECORD_FINGERPRINT;
+  return describeFingerprint(fingerprint) ?? '';
+}
+
+const RECORD_FINGERPRINT = `This repository does not yet state how its code is written. Before your first change here, read enough of it to see, and record it with the memnox-session "fingerprint" tool: call it without arguments for what to write. It is done once, for every agent after you.`;
 
 /** Said once a session, so an agent knows to ask what was settled before it plans a change. */
 async function memoryLine(home: string): Promise<string> {

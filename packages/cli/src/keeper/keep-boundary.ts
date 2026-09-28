@@ -7,6 +7,7 @@ import {
   protectionStopped,
   watchablePaths,
   watchedRepositories,
+  watchListPath,
 } from '@memnox/core';
 import { EDIT_HOOK_BINARY } from '@memnox/interceptors';
 import { watchConfigPaths } from '../config-watch';
@@ -284,7 +285,8 @@ export class BoundaryKeeper {
     this.running = true;
     const watcher =
       this.options.watcher === undefined
-        ? watchConfigPaths(watchablePaths(this.home))
+        ? // The watch list too, so a repository a session just opened is wrapped in seconds.
+          watchConfigPaths([...watchablePaths(this.home), watchListPath(this.home)])
         : this.options.watcher();
     this.closeWatch = () => watcher.close();
     void this.loop((ms) => watcher.next(ms));

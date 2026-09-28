@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -31,6 +31,8 @@ import {
   type SeenSet,
   type SessionSignals,
   writeProtectionStop,
+  watchedRepositories,
+  watchListPath,
 } from '@memnox/core';
 import { HookAuthorizer } from '../src/hook-authorizer';
 import {
@@ -286,6 +288,67 @@ describe('what the workspace settled, where the agent meets it', () => {
     const said = await answerSessionStart({ sessionId: 's1' }, deps);
 
     expect(said).not.toContain('Your workspace');
+  });
+});
+
+/* The repository's own conventions, told before the agent writes any code, so the first
+   refusal is not how it learns them. */
+describe("the repository's code fingerprint, when a session starts", () => {
+  it('is told once, with what is enforced named as such', async () => {
+    const deps = await machine();
+    await mkdir(join(deps.cwd, '.memnox'), { recursive: true });
+    await writeFile(
+      join(deps.cwd, '.memnox', 'code-fingerprint.yaml'),
+      [
+        'naming:',
+        '  files: kebab-case',
+        'enforce:',
+        '  - name: no-console',
+        '    files: ["src/**"]',
+        '    forbid: ["*console.*"]',
+        '    reason: use the logger',
+      ].join('\n'),
+    );
+
+    const said = await answerSessionStart({ sessionId: 's1' }, deps);
+    const text = (
+      JSON.parse(said) as { hookSpecificOutput: { additionalContext: string } }
+    ).hookSpecificOutput.additionalContext;
+
+    expect(text).toContain('- naming.files: kebab-case');
+    expect(text).toContain('- enforced: use the logger (src/**)');
+  });
+
+  it('asks the agent to record one, once, where the repository states none', async () => {
+    const said = await answerSessionStart({ sessionId: 's1' }, await machine());
+    const text = (
+      JSON.parse(said) as { hookSpecificOutput: { additionalContext: string } }
+    ).hookSpecificOutput.additionalContext;
+
+    expect(text).toContain('does not yet state how its code is written');
+    expect(text).toContain('"fingerprint" tool');
+  });
+});
+
+/* A repository is picked up the first time an agent works in it, wherever setup ran, so
+   the daemon puts its MCP servers behind the proxy before the next session starts them. */
+describe('the repository, when a session starts', () => {
+  it('is added to what the daemon watches', async () => {
+    const deps = await machine();
+    await mkdir(join(deps.cwd, '.git'), { recursive: true });
+    expect(watchedRepositories(deps.home)).toEqual([]);
+
+    await answerSessionStart({ sessionId: 's1' }, deps);
+
+    expect(watchedRepositories(deps.home)).toEqual([deps.cwd]);
+  });
+
+  it('gives the daemon a list to watch before any session has written one', async () => {
+    const deps = await machine();
+
+    const path = watchListPath(deps.home);
+
+    expect(JSON.parse(await readFile(path, 'utf8'))).toEqual([]);
   });
 });
 

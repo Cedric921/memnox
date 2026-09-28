@@ -2,6 +2,9 @@ import { mkdir, mkdtemp, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { readPolicyRegistry, writePolicyDocumentFile } from '@memnox/core';
+import { baselineRules, machinePolicyPath } from '../src/protect/machine-rules';
+import { policyRegistryPath, registerPolicyFile } from '../src/policy-registry';
 import { wireMachine, WIRED, type WiringSeams } from '../src/setup-wiring';
 
 /**
@@ -115,6 +118,23 @@ describe('wiring a machine that has just been set up', () => {
     expect(wired.mcpUnwrapped).toBeUndefined();
   });
 
+  /* A repository's `.mcp.json` is the daemon's to wrap once a session there adds it, so
+     where setup happened to be run decides nothing. */
+  it('wraps the machine configs only, never the directory it was run from', async () => {
+    const where = await home();
+    const asked: [string, string][] = [];
+
+    await wireMachine(where, '/tmp/project', {
+      ...nothing,
+      mcp: async (machineHome, project) => {
+        asked.push([machineHome, project]);
+        return { wrapped: 0, skipped: false };
+      },
+    });
+
+    expect(asked).toEqual([[where, where]]);
+  });
+
   it('says so rather than wrapping onto a proxy that is not on PATH', async () => {
     const wired = await wireMachine(await home(), '/tmp/project', {
       ...nothing,
@@ -147,7 +167,7 @@ describe('wiring a machine that has just been set up', () => {
     expect(wired.daemonNote).toBe('launchctl refused');
   });
 
-  it('writes a baseline that denies the destructive work', async () => {
+  it('writes a baseline that denies the destructive work, into the machine file alone', async () => {
     const where = await home();
     const project = await mkdtemp(join(tmpdir(), 'memnox-project-'));
     // The real rule writer, so what setup produces is what a rule file holds.
@@ -157,8 +177,10 @@ describe('wiring a machine that has just been set up', () => {
     });
 
     expect(wired.rules).toBeGreaterThan(0);
-    const written = await readFile(join(project, 'memnox.policies.toml'), 'utf8');
+    const written = await readFile(machinePolicyPath(where), 'utf8');
     expect(written).toContain('deny');
+    // Run from anywhere: nothing lands in the directory setup was run in.
+    await expect(readFile(join(project, 'memnox.policies.toml'))).rejects.toThrow();
   });
 
   it('adds to rules already there rather than replacing them', async () => {
@@ -167,13 +189,48 @@ describe('wiring a machine that has just been set up', () => {
     const seams: WiringSeams = { interceptors: wrappers, service: started };
 
     await wireMachine(where, project, seams);
-    const once = await readFile(join(project, 'memnox.policies.toml'), 'utf8');
+    const once = await readFile(machinePolicyPath(where), 'utf8');
     await wireMachine(where, project, seams);
-    const twice = await readFile(join(project, 'memnox.policies.toml'), 'utf8');
+    const twice = await readFile(machinePolicyPath(where), 'utf8');
 
     /* Running setup a second time is the ordinary case, and a baseline that
        replaced the file would be this command undoing somebody's edits. */
     expect(twice).toBe(once);
+  });
+
+  /* Earlier setups wrote the baseline into whichever directory they ran in and registered
+     it for the whole machine, so every copy applied everywhere. */
+  it('stops reading a copy an earlier setup left, and keeps one somebody changed', async () => {
+    const where = await home();
+    const { machine, project } = baselineRules();
+    const untouched = join(
+      await mkdtemp(join(tmpdir(), 'memnox-old-')),
+      'memnox.policies.toml',
+    );
+    const edited = join(
+      await mkdtemp(join(tmpdir(), 'memnox-team-')),
+      'memnox.policies.toml',
+    );
+    const kept = machine[0];
+    if (kept === undefined) throw new Error('the baseline has no machine rule');
+    await writePolicyDocumentFile(untouched, { version: 1, policies: project });
+    await writePolicyDocumentFile(edited, {
+      version: 1,
+      policies: [...project, { ...kept, name: 'team-rule' }],
+    });
+    await registerPolicyFile(where, untouched);
+    await registerPolicyFile(where, edited);
+
+    const wired = await wireMachine(where, where, {
+      interceptors: wrappers,
+      service: started,
+    });
+
+    expect(wired.retired).toEqual([untouched]);
+    const registered = await readPolicyRegistry(policyRegistryPath(where));
+    expect(registered).toContain(edited);
+    expect(registered).not.toContain(untouched);
+    expect(registered).toContain(machinePolicyPath(where));
   });
 });
 

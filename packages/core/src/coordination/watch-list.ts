@@ -16,6 +16,23 @@ function listPath(home: string): string {
   return join(home, MEMNOX_HOME, WATCH_FILE);
 }
 
+/**
+ * The list, created empty where no seam has written it yet, so the daemon can watch the
+ * file itself and wrap a repository's servers the moment a session adds it.
+ */
+export function watchListPath(home: string): string {
+  const path = listPath(home);
+  try {
+    if (!existsSync(path)) {
+      mkdirSync(join(home, MEMNOX_HOME), { recursive: true });
+      writeFileSync(path, '[]', 'utf8');
+    }
+  } catch {
+    // Unwritable home: the daemon still looks on its interval, only later.
+  }
+  return path;
+}
+
 function readWatched(home: string): string[] {
   try {
     const parsed: unknown = JSON.parse(readFileSync(listPath(home), 'utf8'));

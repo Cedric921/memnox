@@ -27,7 +27,7 @@ import {
   baselineRules,
 } from '../src/protect/machine-rules';
 import { policyFilesInForce, readRegisteredFiles } from '../src/policy-path';
-import { policyRegistryPath } from '../src/policy-registry';
+import { policyRegistryPath, registerPolicyFile } from '../src/policy-registry';
 import { wireMachine, type WiringSeams } from '../src/setup-wiring';
 
 /**
@@ -71,20 +71,20 @@ function readSecret(cwd: string, home: string) {
 }
 
 describe("the machine's own rules", () => {
-  it('puts the secret rules in ~/.memnox, registered, and the rest in the project', async () => {
+  it('puts the whole baseline in ~/.memnox, registered, and nothing in the project', async () => {
     const home = await machine();
     const project = await mkdtemp(join(tmpdir(), 'memnox-project-'));
 
     const wired = await wireMachine(home, project, offline);
 
     const machineRules = await readPolicyDocumentFile(machinePolicyPath(home));
-    expect(machineRules?.policies.map((rule) => rule.name)).toEqual(['filesystem-deny']);
-    const projectRules = await readPolicyDocumentFile(
-      join(project, 'memnox.policies.toml'),
+    expect(machineRules?.policies.map((rule) => rule.name)).toContain('filesystem-deny');
+    expect(machineRules?.policies).toHaveLength(
+      policiesFrom(recommendedAnswers()).length,
     );
-    expect(projectRules?.policies.map((rule) => rule.name)).not.toContain(
-      'filesystem-deny',
-    );
+    expect(
+      await readPolicyDocumentFile(join(project, 'memnox.policies.toml')),
+    ).toBeNull();
     expect(await readRegisteredFiles(home)).toContain(machinePolicyPath(home));
     expect(wired.rules).toBe(policiesFrom(recommendedAnswers()).length);
   });
@@ -96,14 +96,14 @@ describe("the machine's own rules", () => {
     await wireMachine(home, project, offline);
 
     const files = await readPolicyRegistry(policyRegistryPath(home));
-    expect(files).toHaveLength(2);
+    expect(files).toEqual([machinePolicyPath(home)]);
     const set = await loadPolicySet(
       await policyFilesInForce(home, undefined, () => false),
     );
     expect(set.policies).toHaveLength(policiesFrom(recommendedAnswers()).length);
   });
 
-  it('moves the rule an older setup wrote into the project, and keeps an edited one', async () => {
+  it('stops reading the copy an older setup wrote into a project, and keeps an edited one', async () => {
     const home = await machine();
     const project = await mkdtemp(join(tmpdir(), 'memnox-project-'));
     const path = join(project, 'memnox.policies.toml');
@@ -111,18 +111,19 @@ describe("the machine's own rules", () => {
       version: 1,
       policies: policiesFrom(recommendedAnswers()),
     });
+    await registerPolicyFile(home, path);
 
-    await wireMachine(home, project, offline);
-    const moved = await readPolicyDocumentFile(path);
-    expect(moved?.policies.map((rule) => rule.name)).not.toContain('filesystem-deny');
+    const wired = await wireMachine(home, project, offline);
+    expect(wired.retired).toEqual([path]);
+    expect(await readRegisteredFiles(home)).not.toContain(path);
 
     const [secret] = baselineRules().machine;
     if (secret === undefined) throw new Error('the baseline has a secret rule');
     const edited = { ...secret, match: { ...secret.match, targets: ['**/.netrc'] } };
     await writePolicyDocumentFile(path, { version: 1, policies: [edited] });
+    await registerPolicyFile(home, path);
     await wireMachine(home, project, offline);
-    const kept = await readPolicyDocumentFile(path);
-    expect(kept?.policies.map((rule) => rule.name)).toContain('filesystem-deny');
+    expect(await readRegisteredFiles(home)).toContain(path);
   });
 
   it('denies a secret read in a repository where setup never ran', async () => {
