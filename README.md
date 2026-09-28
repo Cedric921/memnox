@@ -222,7 +222,7 @@ before any rule is read, since an agent that could would approve itself.
 | Claude Code | every tool | its own permission prompt | yes |
 | Codex | every tool its hook reports | the conversation | yes |
 | Gemini CLI | every tool | the conversation | yes |
-| Cursor | commands, MCP calls, file reads and writes | its own prompt for commands and MCP calls | no, only what `memnox-session` says when it connects |
+| Cursor | commands, MCP calls, file reads and writes | its own prompt for commands and MCP calls | yes |
 | Windsurf | commands, MCP calls, file reads and writes | `memnox approve`, the workspace or your DM | no, only what `memnox-session` says when it connects |
 
 Switching to `memnox protect --enforce` reaches an open session on its next tool call.
@@ -238,10 +238,101 @@ breaks them in the first hour, and a reviewer catches it days later if at all. M
 turns them into a **code fingerprint** the first agent records and every agent after it
 is held to.
 
+### Why this is not another CLAUDE.md
+
+`CLAUDE.md`, `AGENTS.md`, `GEMINI.md` and `.cursor/rules` tell an agent what it should do.
+They are loaded into the model's context, and following them is the agent's job. Nothing
+happens when it does not, until a reviewer notices.
+
+```
+CLAUDE.md, AGENTS.md, .cursor/rules          .memnox/code-fingerprint.yaml
+             │                                            │
+             ▼                                            ▼
+   agent reads instructions                            Memnox
+             │                                            │
+             ▼                              ┌─────────────┼─────────────┐
+    agent edits the code                    ▼             ▼             ▼
+             │                          Claude Code     Cursor        Codex
+             ▼                              └─────────────┼─────────────┘
+   a reviewer finds out later                             ▼
+                                                  every write checked
+                                                          │
+                                              ┌───────────┴───────────┐
+                                              ▼                       ▼
+                                           allowed                 refused
+                                                          or sent back to fix
+```
+
+| | `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `.cursor/rules` | `.memnox/code-fingerprint.yaml` |
+|---|---|---|
+| **Who reads it** | one agent each, from its own file | every agent Memnox hooks, from one file |
+| **How it reaches the agent** | loaded into the model's context | told at session start, and checked on every write |
+| **When the agent ignores it** | nothing happens until review | the write is refused before it lands, or sent back to put right |
+| **When the agent switches to the shell** | nothing checks it | `cat <<EOF` and `echo` are refused before they run, `perl -pi` and `sed -i` are read after |
+| **Where it comes from** | written by hand, sometimes what somebody wished were true | read out of the code by the agent, each check tested against the code before it is kept |
+| **When it contradicts the code** | nobody knows | it cannot: a check the code already breaks is dropped, and the reason is said |
+| **Who may change it** | anyone, the agent included | a person; an agent records a first one and never changes it |
+| **When the team changes agents** | rewrite it for the next one | the same file holds the next one to the same checks |
+
+Keep those files. They are the right place for how you want an agent to work: which
+commands to run, how to write a pull request, what to ask before starting. The
+fingerprint is for how this repository is actually built, and it is the part that holds.
+
+**Three layers, and each answers a different question:**
+
+```
+CLAUDE.md, AGENTS.md, .cursor/rules   "What should I do?"             advice
+                 │
+                 ▼
+code-fingerprint.yaml                 "How is this repository built?"   knowledge
+                 │
+                 ▼
+Memnox rules and fingerprint checks   "What may I change?"              enforcement
+                 │
+                 ▼
+         allow · ask · refuse
+```
+
+The same rule at each layer, from the Java backend below:
+
+```
+AGENTS.md              Use the Action pattern for database writes.
+
+code-fingerprint.yaml  architecture.writes: every DB write goes through an Action,
+                       run via actionFactory.create(X.class).run(params)
+                       enforce: writes-only-in-actions
+
+The agent writes       orderRepository.update(...)  in http/OrderResource.java
+
+Memnox                 refused: all database writes go through Actions, which own
+                       transactions and event persistence.
+                       Instead: call actionFactory.create(XAction.class).run(params)
+```
+
+The first is advice, the second is knowledge, and the third is what actually stops it.
+
+Two limits, said plainly. Only the `enforce` checks are checked; everything else in the
+file is told to the agent at the start of a session, which is still more than a file it
+may never open. And a fingerprint check refuses rather than asks, because it describes
+what the code already does. A rule your team decides on purpose, rather than reads out of
+the code, belongs in your Memnox rules (`memnox protect`), where it can ask a person
+instead. That keeps a habit the code happens to have apart from a decision somebody made.
+
 **It is recorded once, by the agent you already run.** A session in a repository with no
-fingerprint says so on your screen. Type `/fingerprint` in Claude Code, or just ask for a
-change: the first write of the session is held until the agent has read the code and
-recorded one. Memnox calls no model of its own.
+fingerprint says so on your screen. Type the command `memnox setup` put into your agent,
+or just ask for a change: the first write of the session is held until the agent has read
+the code and recorded one. Memnox calls no model of its own.
+
+| Agent | Type | Written to |
+|---|---|---|
+| Claude Code | `/fingerprint` | `~/.claude/commands/fingerprint.md` |
+| Codex | `/prompts:fingerprint` | `~/.codex/prompts/fingerprint.md` |
+| Gemini CLI | `/fingerprint` | `~/.gemini/commands/fingerprint.toml` |
+| Cursor | `/fingerprint` | `~/.cursor/commands/fingerprint.md` |
+| Windsurf | `/fingerprint` | `~/.codeium/windsurf/global_workflows/fingerprint.md` |
+
+Each is written only where that agent has the `memnox-session` tools, never over a command
+of the same name you wrote, and taken out with the tools.
 
 ```
 SessionStart:startup says: Memnox: this repository has no code fingerprint yet. Type /fingerprint to record it now, or the agent records one before its first change here.
@@ -275,7 +366,7 @@ ways:
 |---|---|
 | The edit tool | Refused before it is written, with the reason and the `instead` |
 | A shell line that shows its text: `cat >> Resource.java <<EOF`, `echo`, `printf`, `tee` | Refused before it runs, with the same message |
-| A shell line that does not: `perl -pi`, `sed -i`, a script | Read after it runs, and the agent is told in the same turn to put it right |
+| A shell line that does not: `perl -pi`, `sed -i`, a script | Read after it runs, and the agent is told in the same turn to put it right; Windsurf, which reads nothing back after a tool, has its next call refused with the same words |
 
 ```
 Memnox: that command added lines this repository's code fingerprint forbids. A shell edit is held to the same checks as an edit, so put these right now, before going on:
