@@ -1,5 +1,17 @@
 # memnox
 
+## 0.13.11
+
+### Patch Changes
+
+- fc003ae: The code fingerprint now describes the code that is actually there. It is tested against untracked code as well as committed code, so a repository nobody has committed to yet is read rather than taken as empty, and vendored directories are skipped even where no `.gitignore` names them. A check whose files name nothing the repository has is dropped with the reason, a repository with no code of its own records nothing, and a proposal too large to read in full says how much went unread. The agent now receives the whole of what to write, which was cut short before it reached the `enforce` list.
+- 9216d9c: A shell line is no longer taken for one that writes everywhere it names because of a dollar it cannot expand. A `$` inside single quotes is text, so an awk program counting files reads as the read it is; a variable the line itself set to a plain path is read as that path; and awk is judged by its program, so only one with a redirect, a pipe, `system` or `getline` counts as writing. A variable that could hold anything else stays unknown and is ruled on as before.
+- Updated dependencies [fc003ae]
+- Updated dependencies [9216d9c]
+  - @memnox/interceptors@0.13.11
+  - @memnox/core@0.13.11
+  - @memnox/proxy@0.13.11
+
 ## 0.13.10
 
 ### Patch Changes
