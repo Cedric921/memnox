@@ -141,7 +141,7 @@ async function fingerprintHere(root: string | null): Promise<FingerprintHere> {
 
 const RECORD_FINGERPRINT = `This repository does not yet state how its code is written. Before your first change here, read enough of it to see, and record it with the memnox-session "fingerprint" tool: call it without arguments for what to write. It is done once, for every agent after you, and your first write here is held until you have.`;
 
-const NO_FINGERPRINT_YET = `Memnox: this repository has no code fingerprint yet. The agent records one before its first change here, or ask it now: "record this repository's conventions with the memnox fingerprint tool".`;
+const NO_FINGERPRINT_YET = `Memnox: this repository has no code fingerprint yet. Type /fingerprint to record it now, or the agent records one before its first change here.`;
 
 /** The context for the agent, and a line its person sees, in the reply every host reads. */
 function sessionStartReply(text: string, notice: string | null): string {
