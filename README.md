@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/logo.png" alt="Memnox" width="96">
+<img width="1920" height="1080" alt="memnox-architecture-dark-16x9" src="https://github.com/user-attachments/assets/21141ee8-06c4-4c99-a5af-a54fab10d4a8" />
 </p>
 
 <p align="center"><sub>BEFORE YOU LEAVE AN AGENT RUNNING</sub></p>
