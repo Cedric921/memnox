@@ -29,10 +29,16 @@
 
 ---
 
+**Memnox is an open source runtime that tells you what you can safely let your AI coding
+agent do next.** It rules on every tool call Claude Code, Codex, Cursor, Gemini CLI or
+Windsurf makes, before the call runs, with one of three verdicts: **allow**, **ask** or
+**deny**. It runs on your machine, needs no account, and no model decides anything.
+
 You already have agents that read your files, run your shell, push to your repositories
-and call your MCP servers. Memnox sits inside each of their sessions and rules on every
-tool call before it runs: what is allowed goes ahead, what is dangerous is refused with a
-way forward, and what needs a person asks you in the prompt you are already looking at.
+and call your MCP servers. Memnox sits inside each of their sessions: what is allowed goes
+ahead, what is denied is refused with a way forward, and what needs a person asks you in
+the prompt you are already looking at. Once you have said yes to the same thing often
+enough, `memnox next` names it as something you could stop being asked about.
 
 You do not learn a new tool to get that. You set it up once and keep working the way you
 work now.
@@ -168,6 +174,24 @@ refused before any rule is read, since an agent that could would approve itself.
 | Cursor | commands, MCP calls, file reads and writes | its own prompt for commands and MCP calls | yes |
 | Windsurf | commands, MCP calls, file reads and writes | `memnox approve`, the workspace or your DM | no, only what `memnox-session` says when it connects |
 
+### The five seams
+
+Below the hooks, five seams sit in the path an agent's action already takes, so an agent
+does not have to cooperate for them to see it. Each turns what the agent tried into an
+action a rule matches, and each answers allow, ask or deny.
+
+| Agent action | Seam | How it is put in the path | Action a rule matches | What it cannot see |
+|---|---|---|---|---|
+| Calls a tool on an MCP server | MCP proxy | `memnox mcp wrap` repoints every MCP config on the machine, keeping a backup | `mcp.*` | a tool that lies about its name in `tools/list`, which is classified by the lie |
+| Runs `git`, `docker`, `kubectl`, `gh`, `npm` and the rest of the 19 classified binaries | PATH interceptors | `memnox setup` puts them on the agent's PATH, and offers your login PATH too | `shell.execute`, and per verb, such as `git.push-force` | a binary called by absolute path around the PATH |
+| Sends an HTTP request | Egress proxy | `memnox run` starts it on loopback and points the agent at it | `http.request` | the body inside HTTPS, and a tool that ignores `HTTPS_PROXY` |
+| Asks git for a credential before reaching a remote | Git credential helper | `memnox-git-credential`, which holds no secret and can hand none out | `git.credential` | a push over SSH, which never asks git for a credential |
+| Opens `chromium`, `chromedriver`, `geckodriver`, `google-chrome` or `msedgedriver` | Browser driver | the PATH interceptors, which rule on the host rather than the script | `browser.navigate` | what the page does once the host is allowed |
+
+A verdict of deny names what to use instead. A verdict of ask holds the call for a
+person, and for the browser that is once per host per session. The
+[threat model](docs/threat-model.md) states each limit in full.
+
 A change to your rules reaches an open session on its next tool call. MCP servers the
 agent already started, and the note it read at the start, catch up when you restart the
 agent. [Everything from inside the session](docs/use-cases.md#20-everything-from-inside-the-session)
@@ -202,7 +226,7 @@ CLAUDE.md, AGENTS.md, .cursor/rules          .memnox/code-fingerprint.yaml
                                                           │
                                               ┌───────────┴───────────┐
                                               ▼                       ▼
-                                           allowed                 refused
+                                            allow                   deny
                                                           or sent back to fix
 ```
 
@@ -233,7 +257,7 @@ code-fingerprint.yaml                 "How is this repository built?"   knowledg
 Memnox rules and fingerprint checks   "What may I change?"              enforcement
                  │
                  ▼
-         allow · ask · refuse
+         allow · ask · deny
 ```
 
 The same rule at each layer, from the Java backend below:
@@ -247,7 +271,7 @@ code-fingerprint.yaml  architecture.writes: every DB write goes through an Actio
 
 The agent writes       orderRepository.update(...)  in http/OrderResource.java
 
-Memnox                 refused: all database writes go through Actions, which own
+Memnox                 deny: all database writes go through Actions, which own
                        transactions and event persistence.
                        Instead: call actionFactory.create(XAction.class).run(params)
 ```
@@ -256,7 +280,7 @@ The first is advice, the second is knowledge, and the third is what actually sto
 
 Two limits, said plainly. Only the `enforce` checks are checked; everything else in the
 file is told to the agent at the start of a session, which is still more than a file it
-may never open. And a fingerprint check refuses rather than asks, because it describes
+may never open. And a fingerprint check answers deny rather than ask, because it describes
 what the code already does. A rule your team decides on purpose, rather than reads out of
 the code, belongs in your Memnox rules (`memnox protect`), where it can ask a person
 instead. That keeps a habit the code happens to have apart from a decision somebody made.
@@ -509,6 +533,73 @@ payload.
 **It comes off cleanly.** `memnox uninstall` removes the interceptors, the hooks and
 the wrapping. `--purge` takes the history and rules too. A tool that cannot be removed
 is one people never install.
+
+## Questions people ask
+
+<details>
+<summary><b>How to make AI agents secure?</b></summary>
+
+Put a rule between each tool call and the thing it touches. Memnox hooks Claude Code,
+Codex, Cursor, Gemini CLI and Windsurf, holds five seams below them, and answers every
+call with allow, ask or deny before it runs, on your machine, with no account.
+</details>
+
+<details>
+<summary><b>What is an AI agent proxy?</b></summary>
+
+A process an agent's calls pass through, so something other than the agent decides
+whether each one proceeds. Memnox runs two: an MCP proxy in front of every MCP server,
+and an egress proxy for HTTP. Both run on your own machine.
+</details>
+
+<details>
+<summary><b>What are AI code safety rules?</b></summary>
+
+Rules an agent is held to rather than asked to follow. In Memnox they live in
+`memnox.policies.toml`, written by `memnox protect`, and in the `enforce` checks of the
+code fingerprint. Each matches an action and answers allow, ask or deny.
+</details>
+
+<details>
+<summary><b>What is a code fingerprint?</b></summary>
+
+`.memnox/code-fingerprint.yaml`: how this repository is built, recorded from the code by
+the first agent. Its `enforce` checks are tested against the code before they are kept,
+then applied to every write any agent makes, through its edit tool or the shell.
+</details>
+
+<details>
+<summary><b>What do allow, ask and deny mean?</b></summary>
+
+The only three verdicts. **Allow**: the call runs. **Ask**: it waits for a person, in the
+agent's own prompt, the conversation or your DM. **Deny**: it never runs, and the agent is
+told why and what to use instead, so it finishes the task.
+</details>
+
+<details>
+<summary><b>How to run AI agent safely?</b></summary>
+
+Start in observe, which records what every rule would have said and stops nothing. Read
+`memnox timeline`, then switch with `memnox protect --enforce`. Every denied call names
+its alternative, and `memnox rewind` puts the working tree back.
+[Coding agent permissions](https://docs.memnox.com/guides/agent-permissions) compares
+this with each agent's own permission modes.
+</details>
+
+<details>
+<summary><b>What can I safely let my agent do next?</b></summary>
+
+Run `memnox next`. It reads what you have already approved and names what you have said
+yes to often enough to stop being asked. One refusal removes a recommendation, and it
+prints counts, never hours.
+</details>
+
+<details>
+<summary><b>Does Memnox call an LLM?</b></summary>
+
+No. Every verdict comes from a rule table and a matcher, so a prompt cannot talk one
+around. Your code and your secrets never leave your machine.
+</details>
 
 ## Documentation
 
