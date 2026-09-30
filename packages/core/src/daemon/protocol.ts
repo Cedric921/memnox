@@ -35,6 +35,8 @@ export const DAEMON_METHOD = {
   ASK: 'ask',
   /** Stops the answer in flight, usually because the person started talking over it. */
   CANCEL: 'cancel',
+  /** Where a session's agent is on screen, so the Mac app can bring that window forward. */
+  LOCATE: 'locate',
 } as const;
 
 export type DaemonMethod = (typeof DAEMON_METHOD)[keyof typeof DAEMON_METHOD];
@@ -67,6 +69,18 @@ export interface DaemonRequest {
   point?: string;
   /** On ASK: what the person said, whole, in their own words. */
   said?: string;
+}
+
+/** Where a session runs, as LOCATE answers it. */
+export interface DaemonLocation {
+  sessionId: string;
+  agent: string;
+  /** False once the agent's process has ended, so nothing is shown that is gone. */
+  alive: boolean;
+  app?: string;
+  appPath?: string;
+  tty?: string;
+  cwd?: string;
 }
 
 /** Kinds an ASK chunk ends a turn with; anything else is more of the same turn. */
@@ -117,6 +131,8 @@ export interface DaemonResponse {
   event?: DaemonEvent;
   /** On WAITING. */
   waiting?: readonly DaemonEvent[];
+  /** On LOCATE. */
+  location?: DaemonLocation;
   /** On ASK, one per line; the turn ends with a chunk whose kind is in ASK_ENDS. */
   chunk?: DaemonAskChunk;
   /** On CONFIRM and REGISTER_KEY: what happened, in a word or two. */

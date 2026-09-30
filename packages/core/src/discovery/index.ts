@@ -45,3 +45,4 @@ export * from './mcp-keys';
 export * from './yaml-list';
 export * from './snapshot-changes';
 export * from './tool-pins';
+export * from './session-host';

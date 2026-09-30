@@ -3,6 +3,7 @@ import {
   DAEMON_EVENT,
   DAEMON_METHOD,
   isP256Point,
+  SessionHosts,
   UNNAMED_AGENT,
   type DaemonEvent,
   type DaemonRequest,
@@ -33,6 +34,7 @@ const VOICE_METHODS: readonly string[] = [
   DAEMON_METHOD.REGISTER_KEY,
   DAEMON_METHOD.ASK,
   DAEMON_METHOD.CANCEL,
+  DAEMON_METHOD.LOCATE,
 ];
 
 interface VoiceDeps {
@@ -104,6 +106,7 @@ export class VoiceSurface {
   private async answer(request: DaemonRequest): Promise<DaemonResponse> {
     const { home } = this.deps;
     const feed = this.feed;
+    if (request.method === DAEMON_METHOD.LOCATE) return this.locate(request);
     if (request.method === DAEMON_METHOD.WAITING) {
       return { id: request.id, ok: true, waiting: await feed.current(this.deps.now()) };
     }
@@ -137,6 +140,24 @@ export class VoiceSurface {
     return result.ok
       ? { id: request.id, ok: true, outcome: result.outcome }
       : { id: request.id, ok: false, error: result.error };
+  }
+
+  /** Where the session's agent runs, and whether it still does. */
+  private async locate(request: DaemonRequest): Promise<DaemonResponse> {
+    const sessionId = request.sessionId;
+    if (sessionId === undefined) {
+      return { id: request.id, ok: false, error: 'locate needs a session' };
+    }
+    const host = await new SessionHosts(this.deps.home).read(sessionId);
+    if (host === null) {
+      return {
+        id: request.id,
+        ok: false,
+        error: `nothing is known about where ${sessionId} runs`,
+      };
+    }
+    const { pid, seenAt, ...where } = host;
+    return { id: request.id, ok: true, location: { ...where, alive: isRunning(pid) } };
   }
 
   /** What the person said, answered by their own brain one chunk per line. */
@@ -202,4 +223,15 @@ function settled(subject: string, at: string): DaemonEvent {
     summary: 'no longer waiting on you',
     at,
   };
+}
+
+/** Signal zero asks whether the process exists without touching it. */
+function isRunning(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    // Not ours to signal still means it is there.
+    return (err as NodeJS.ErrnoException).code === 'EPERM';
+  }
 }

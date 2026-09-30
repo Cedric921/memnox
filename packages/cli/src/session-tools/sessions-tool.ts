@@ -3,6 +3,7 @@ import {
   LEDGER_SCAN_LIMIT,
   msToMinutes,
   PendingApprovals,
+  SessionHosts,
   SessionPauses,
   SessionTasks,
   summarizeSession,
@@ -69,6 +70,7 @@ async function describe(
   const summary = summarizeSession(events);
   const task = await new SessionTasks(deps.home).read(sessionId);
   const pause = await new SessionPauses(deps.home).read(sessionId);
+  const host = await new SessionHosts(deps.home).read(sessionId);
   const lastActive = summary?.ended ?? events[events.length - 1]?.at ?? '';
   return {
     session: sessionId,
@@ -83,5 +85,6 @@ async function describe(
     refused: summary?.blockedCount ?? 0,
     waitingOnYou: waiting.filter((each) => each.request.sessionId === sessionId).length,
     ...(pause === null ? {} : { paused: pause.reason }),
+    ...(host?.app === undefined ? {} : { runningIn: host.app }),
   };
 }

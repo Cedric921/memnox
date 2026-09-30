@@ -30,6 +30,7 @@ import { answerPause } from './edit-pause';
 import { keepSessionSummary } from './session-summary-row';
 import { answeredSessionStart, beforePause, replyInSession } from './in-session';
 import { log, readStdin } from './seam-runtime';
+import { noteSessionHost } from './session-host-note';
 import { sessionEventOf } from './session-events';
 import { answerToolCall, failedToolAnswer, type ToolAnswer } from './tool-hook';
 import { DEFAULT_AGENT_NAME, TOOL_POLICY_FLAG } from './tool-hook.constants';
@@ -63,6 +64,7 @@ async function main(): Promise<void> {
   if (ended !== null) return releaseSession(ended, context);
   // Stopped on purpose: no rule, lease or pause stands in the way until `memnox start`.
   if (await protectionStopped(context.home)) return;
+  await noteSessionHost(payload, context);
   if (await answeredSessionStart(payload, context, process.env)) return;
   if (await answeredPicker(payload, context)) return;
 

@@ -1,0 +1,95 @@
+import { execFileSync } from 'node:child_process';
+
+import {
+  agentProcessOf,
+  hostOf,
+  SessionHosts,
+  UNNAMED_SESSION,
+  type HostProcess,
+} from '@memnox/core';
+
+import type { EditHookContext } from './edit-claims';
+import { log } from './seam-runtime';
+import { sessionStartOf } from './session-context-hook';
+
+/**
+ * Where a session's agent runs on screen, noted by the hook at session start because the
+ * hook is the one Memnox process that runs inside the agent's own process tree.
+ */
+
+const PS_TIMEOUT_MS = 2000;
+
+/** Written down once per session, so "show me" knows which window the agent is in. */
+export async function noteSessionHost(
+  payload: unknown,
+  context: EditHookContext,
+  listing: () => string = psListing,
+): Promise<void> {
+  const start = sessionStartOf(payload);
+  if (start === null) return;
+  const sessionId =
+    context.runSession ?? (start.sessionId === '' ? UNNAMED_SESSION : start.sessionId);
+  try {
+    const chain = readableChain(process.ppid, listing);
+    const agent = agentProcessOf(chain);
+    await new SessionHosts(context.home).note({
+      sessionId,
+      agent: context.agent,
+      pid: agent?.pid ?? process.ppid,
+      ...hostOf(chain),
+      cwd: start.cwd ?? context.cwd,
+      seenAt: context.now().toISOString(),
+    });
+  } catch (err) {
+    // Showing the window is a convenience: a session is never held up for it.
+    log(`could not note where the session runs: ${String(err)}`);
+  }
+}
+
+/**
+ * The processes from `pid` upward, nearest first, from one `ps`. `comm` goes last so a path
+ * with spaces in it, such as `Visual Studio Code.app`, arrives whole.
+ */
+export function processChain(
+  pid: number,
+  listing: () => string = psListing,
+): HostProcess[] {
+  const table = new Map<number, HostProcess & { ppid: number }>();
+  for (const line of listing().split('\n')) {
+    const match = /^\s*(\d+)\s+(\d+)\s+(\S+)\s+(.*)$/.exec(line);
+    if (match === null) continue;
+    const [, own, parent, tty, command] = match;
+    table.set(Number(own), {
+      pid: Number(own),
+      ppid: Number(parent),
+      tty: tty ?? '',
+      command: (command ?? '').trim(),
+    });
+  }
+  const chain: HostProcess[] = [];
+  let current = table.get(pid);
+  while (current !== undefined && chain.length < 32) {
+    chain.push({ pid: current.pid, command: current.command, tty: current.tty });
+    if (current.ppid <= 1) break;
+    current = table.get(current.ppid);
+  }
+  return chain;
+}
+
+/** Empty when `ps` cannot be run, which leaves the session noted without its app. */
+function readableChain(pid: number, listing: () => string): HostProcess[] {
+  try {
+    return processChain(pid, listing);
+  } catch {
+    // A sandbox or a minimal system without ps: the pid and folder are still worth keeping.
+    return [];
+  }
+}
+
+function psListing(): string {
+  return execFileSync('ps', ['-A', '-o', 'pid=,ppid=,tty=,comm='], {
+    encoding: 'utf8',
+    timeout: PS_TIMEOUT_MS,
+    stdio: ['ignore', 'pipe', 'ignore'],
+  });
+}
