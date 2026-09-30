@@ -23,6 +23,14 @@ export const DAEMON_METHOD = {
   STATUS: 'status',
   /** Liveness, for `memnox doctor`. */
   PING: 'ping',
+  /** Keeps the connection open and writes one line per thing that starts waiting on a person. */
+  SUBSCRIBE: 'subscribe',
+  /** What is waiting on a person right now: held calls and proposals. */
+  WAITING: 'waiting',
+  /** A person's answer to a held call or a proposal; anything but a refusal carries a signature. */
+  CONFIRM: 'confirm',
+  /** The public half of the key a confirmation is signed with, trusted on first use. */
+  REGISTER_KEY: 'register-key',
 } as const;
 
 export type DaemonMethod = (typeof DAEMON_METHOD)[keyof typeof DAEMON_METHOD];
@@ -45,6 +53,38 @@ export interface DaemonRequest {
   driftOnly?: boolean;
   /** On RECORD: what it cost, when a surface can report one. Never estimated. */
   costUsd?: number;
+  /** On CONFIRM: the held call or proposal being answered. */
+  subject?: string;
+  /** On CONFIRM: a hold answer for a held call, or confirmed / declined for a proposal. */
+  answer?: string;
+  /** On CONFIRM: base64 DER ECDSA over the confirmation message. Absent on a refusal. */
+  signature?: string;
+  /** On REGISTER_KEY: the base64 X9.63 P-256 point. */
+  point?: string;
+}
+
+export const DAEMON_EVENT = {
+  /** A call is held until a person answers it. */
+  HELD: 'held',
+  /** Something suggested a change a person has to confirm. */
+  PROPOSAL: 'proposal',
+  /** The breaker stopped a session. */
+  PAUSED: 'paused',
+  /** Something told before is no longer waiting: answered elsewhere, or expired. */
+  SETTLED: 'settled',
+} as const;
+
+export type DaemonEventKind = (typeof DAEMON_EVENT)[keyof typeof DAEMON_EVENT];
+
+/** One thing a person may want to hear about, in words that can be spoken as they are. */
+export interface DaemonEvent {
+  kind: DaemonEventKind;
+  /** The id a CONFIRM names: a pending id, a proposal id, or the session that paused. */
+  subject: string;
+  agent: string;
+  summary: string;
+  at: string;
+  expiresAt?: string;
 }
 
 export interface DaemonResponse {
@@ -57,6 +97,12 @@ export interface DaemonResponse {
   limit?: string;
   /** Set when the breaker held the session. Different from a denial, and said so. */
   paused?: { signal: string; reason: string };
+  /** On SUBSCRIBE, one per line after the first acknowledgement. */
+  event?: DaemonEvent;
+  /** On WAITING. */
+  waiting?: readonly DaemonEvent[];
+  /** On CONFIRM and REGISTER_KEY: what happened, in a word or two. */
+  outcome?: string;
   error?: string;
 }
 

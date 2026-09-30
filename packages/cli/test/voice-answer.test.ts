@@ -1,0 +1,171 @@
+import { generateKeyPairSync, sign } from 'node:crypto';
+import { mkdtemp } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { describe, expect, it } from 'vitest';
+import {
+  ConfirmKeys,
+  confirmationMessage,
+  FileGrants,
+  HOLD_ANSWER,
+  HOLD_OUTCOME,
+  holdGrantSubject,
+  HoldService,
+  PendingApprovals,
+  RoutedHoldPrompt,
+  type HoldRequest,
+  type HoldResult,
+} from '@memnox/core';
+import { confirmAnswer } from '../src/daemon/confirm';
+
+/**
+ * The voice is one more route to the same held call, beside the terminal, `memnox approve`
+ * and the workspace DM. Whichever answers first releases the agent, and the rest are told.
+ */
+
+const HELD: HoldRequest = {
+  sessionId: 'ses_voice',
+  agent: 'claude-code',
+  operation: 'git.push',
+  target: 'main',
+  fingerprint: 'abc123def456',
+  reason: 'pushing to main needs a person',
+};
+
+const TEN_SECONDS = 10_000;
+
+interface Held {
+  home: string;
+  /** What the agent's session gets back once somebody answers. */
+  result: Promise<HoldResult>;
+  id: string;
+  signs: (subject: string, answer: string) => string;
+}
+
+/** An agent's call held exactly as a shell seam holds one, with no terminal to ask at. */
+async function held(): Promise<Held> {
+  const home = await mkdtemp(join(tmpdir(), 'memnox-voice-answer-'));
+  const { publicKey, privateKey } = generateKeyPairSync('ec', {
+    namedCurve: 'prime256v1',
+  });
+  const spki = publicKey.export({ format: 'der', type: 'spki' });
+  await new ConfirmKeys(home).register(
+    spki.subarray(spki.length - 65).toString('base64'),
+    new Date().toISOString(),
+  );
+  const approvals = new PendingApprovals(home);
+  const service = new HoldService(
+    new RoutedHoldPrompt({ approvals, pollMs: 10 }),
+    TEN_SECONDS,
+    new FileGrants(home),
+  );
+  const result = service.hold(HELD);
+  const id = await raised(approvals);
+  return {
+    home,
+    result,
+    id,
+    signs: (subject, answer) =>
+      sign(
+        'sha256',
+        Buffer.from(confirmationMessage(subject, answer)),
+        privateKey,
+      ).toString('base64'),
+  };
+}
+
+async function raised(approvals: PendingApprovals): Promise<string> {
+  for (let tries = 0; tries < 200; tries += 1) {
+    const [first] = await approvals.list(new Date().toISOString());
+    if (first !== undefined) return first.id;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error('the call was never held');
+}
+
+function now(): string {
+  return new Date().toISOString();
+}
+
+describe('answering a held call by voice', () => {
+  it('lets the agent carry on after a signed "allow once"', async () => {
+    const call = await held();
+    const said = await confirmAnswer(call.home, {
+      subject: call.id,
+      answer: HOLD_ANSWER.ONCE,
+      signature: call.signs(call.id, HOLD_ANSWER.ONCE),
+      at: now(),
+    });
+
+    expect(said).toEqual({ ok: true, outcome: HOLD_ANSWER.ONCE });
+    expect(await call.result).toMatchObject({
+      outcome: HOLD_OUTCOME.ALLOWED,
+      answer: HOLD_ANSWER.ONCE,
+    });
+  });
+
+  it('lets it carry on for the rest of the session, so the next identical call is not asked', async () => {
+    const call = await held();
+    await confirmAnswer(call.home, {
+      subject: call.id,
+      answer: HOLD_ANSWER.SESSION,
+      signature: call.signs(call.id, HOLD_ANSWER.SESSION),
+      at: now(),
+    });
+
+    expect(await call.result).toMatchObject({ outcome: HOLD_OUTCOME.ALLOWED });
+    expect(await new FileGrants(call.home).covers(holdGrantSubject(HELD))).toBe(true);
+  });
+
+  it('hands the agent a refusal on a spoken "deny", which needs no Touch ID', async () => {
+    const call = await held();
+    await confirmAnswer(call.home, {
+      subject: call.id,
+      answer: HOLD_ANSWER.DENY,
+      at: now(),
+    });
+
+    expect(await call.result).toMatchObject({ outcome: HOLD_OUTCOME.DENIED });
+  });
+
+  it('keeps the agent waiting on a spoken "allow" that carries no signature', async () => {
+    const call = await held();
+    const said = await confirmAnswer(call.home, {
+      subject: call.id,
+      answer: HOLD_ANSWER.ONCE,
+      at: now(),
+    });
+    expect(said.ok).toBe(false);
+
+    // Still answerable from the terminal or a DM, which is who settles it here.
+    await new PendingApprovals(call.home).answer(
+      call.id,
+      HOLD_ANSWER.DENY,
+      'the workspace',
+      now(),
+    );
+    expect(await call.result).toMatchObject({ outcome: HOLD_OUTCOME.DENIED });
+  });
+
+  it('leaves the DM and the terminal working, and tells the voice who answered first', async () => {
+    const call = await held();
+    await new PendingApprovals(call.home).answer(
+      call.id,
+      HOLD_ANSWER.ONCE,
+      'the workspace',
+      now(),
+    );
+
+    const late = await confirmAnswer(call.home, {
+      subject: call.id,
+      answer: HOLD_ANSWER.DENY,
+      at: now(),
+    });
+
+    expect(await call.result).toMatchObject({ outcome: HOLD_OUTCOME.ALLOWED });
+    // Answered already, or cleared by the released seam: either way the voice changed nothing.
+    expect(late.ok ? late.outcome : late.error).toMatch(
+      /already answered|no longer held/,
+    );
+  });
+});

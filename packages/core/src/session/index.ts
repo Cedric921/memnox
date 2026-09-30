@@ -6,6 +6,7 @@ export * from './budget-store';
 export * from './autonomy';
 export * from './operations';
 export * from './autopilot';
+export * from './unattended';
 export * from './replay';
 export * from './fleet-spend-store';
 export * from './breaker-pause';

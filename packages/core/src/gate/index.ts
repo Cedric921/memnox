@@ -18,3 +18,5 @@ export * from './self-protection';
 export * from './chat-approval';
 export * from './plain-ask';
 export * from './protected-paths';
+export * from './proposals';
+export * from './confirm-key';
