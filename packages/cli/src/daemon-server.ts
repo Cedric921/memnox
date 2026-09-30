@@ -181,7 +181,9 @@ export class MemnoxDaemon {
       return this.heldResponse(request) ?? { id: request.id, ok: true };
     }
     if (request.method === DAEMON_METHOD.EVALUATE) return this.evaluate(request);
-    return { id: request.id, ok: true };
+    if (request.method === DAEMON_METHOD.HOLD) return { id: request.id, ok: true };
+    // Refused rather than answered "ok", which a newer client would read as the method working.
+    return { id: request.id, ok: false, error: `no method ${request.method}` };
   }
 
   private now(): string {

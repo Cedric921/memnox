@@ -350,3 +350,13 @@ describe('asking the daemon in your own words', () => {
     await daemon.close();
   });
 });
+
+describe('a method the daemon does not know', () => {
+  it('is refused, so a newer client never mistakes silence for support', async () => {
+    const { daemon, path } = await running();
+    // Not a method the protocol names, which is the point of the test.
+    const response = await ask(path, { id: 99, method: 'teleport' as never });
+    expect(response).toMatchObject({ ok: false, error: 'no method teleport' });
+    await daemon.close();
+  });
+});
