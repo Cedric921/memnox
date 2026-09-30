@@ -1,6 +1,7 @@
 import { fileURLToPath } from 'node:url';
 import type { Brain } from './brain';
 import { ClaudeCodeBrain } from './claude-brain';
+import { readOwner } from './owner';
 
 /** This install's own operator server, started by the brain with the node running Memnox. */
 function operatorServer(): { command: string; args: string[] } {
@@ -12,5 +13,9 @@ function operatorServer(): { command: string; args: string[] } {
 
 /** The brain the person already pays for, so `ask` and the daemon think with the same one. */
 export function ownBrain(home: string): Brain {
-  return new ClaudeCodeBrain({ home, operator: operatorServer() });
+  return new ClaudeCodeBrain({
+    home,
+    operator: operatorServer(),
+    person: () => readOwner(home),
+  });
 }

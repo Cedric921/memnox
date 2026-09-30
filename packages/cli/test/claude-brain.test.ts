@@ -185,6 +185,24 @@ describe("the person's own Claude Code as the brain", () => {
     const argv = restarted?.argv ?? [];
     expect(argv[argv.indexOf('--resume') + 1]).toBe('conv-1');
   });
+
+  it('speaks to the person by the name they chose', async () => {
+    const setup = await fake();
+    const brain = new ClaudeCodeBrain({
+      home: setup.home,
+      command: setup.command,
+      operator: { command: '/usr/bin/true', args: [] },
+      env: { ...process.env, FAKE_LOG: setup.log },
+      person: async () => 'Moise',
+    });
+    await turn(brain, 'hello');
+    brain.close();
+    const [first] = await launches(setup.log);
+    const argv = first?.argv ?? [];
+    expect(argv[argv.indexOf('--append-system-prompt') + 1]).toContain(
+      'speaking out loud to Moise',
+    );
+  });
 });
 
 async function until(done: () => boolean): Promise<void> {

@@ -917,6 +917,11 @@ A refusal of a held call takes effect at once; anything that lets something
 happen, an allow or a new rule, waits for Touch ID on the Mac. It is never
 registered into a working agent's own session.
 
+It also speaks when something happens, through the daemon's `brief`: a held call is told
+with what its session has been doing and why it needs you, a paused session with where it
+got stuck, and when you come back to the Mac after a while, what finished, what got stuck
+and what is waiting. It speaks to you by the name you gave the Mac app.
+
 The conversation stays warm between questions and resumes for thirty minutes, so
 "and the other one?" works. A plan that has run out says so rather than going
 quiet. Cursor is not a brain: `cursor-agent -p` has write and shell access with

@@ -2,7 +2,10 @@ import {
   ConfirmKeys,
   DAEMON_EVENT,
   DAEMON_METHOD,
+  BRIEFING,
+  describePause,
   isP256Point,
+  SessionPauses,
   SessionHosts,
   UNNAMED_AGENT,
   type DaemonEvent,
@@ -10,6 +13,8 @@ import {
   type DaemonResponse,
 } from '@memnox/core';
 import type { Brain } from '../operator/brain';
+import { keepOwner } from '../operator/owner';
+import { backBrief, heldBrief, pausedBrief } from '../operator/voice-prompts';
 import { BrainTurns } from './brain-turns';
 import { confirmAnswer } from './confirm';
 import { write, type Peer } from './socket-write';
@@ -35,6 +40,7 @@ const VOICE_METHODS: readonly string[] = [
   DAEMON_METHOD.ASK,
   DAEMON_METHOD.CANCEL,
   DAEMON_METHOD.LOCATE,
+  DAEMON_METHOD.BRIEF,
 ];
 
 interface VoiceDeps {
@@ -66,6 +72,10 @@ export class VoiceSurface {
   }
 
   async respond(socket: Peer, request: DaemonRequest): Promise<void> {
+    // Kept for the next time the brain starts, so it speaks to them by the name they chose.
+    if (request.owner !== undefined)
+      await keepOwner(this.deps.home, request.owner).catch(() => undefined);
+    if (request.method === DAEMON_METHOD.BRIEF) return this.brief(socket, request);
     if (request.method === DAEMON_METHOD.SUBSCRIBE)
       return this.subscribe(socket, request.id);
     if (request.method === DAEMON_METHOD.ASK) return this.ask(socket, request);
@@ -158,6 +168,43 @@ export class VoiceSurface {
     }
     const { pid, seenAt, ...where } = host;
     return { id: request.id, ok: true, location: { ...where, alive: isRunning(pid) } };
+  }
+
+  /** Something that happened, told by the brain in its own words, streamed like an answer. */
+  private async brief(socket: Peer, request: DaemonRequest): Promise<void> {
+    const turns = this.turns;
+    const prompt = await this.briefFor(request);
+    if (turns === null || prompt === null) {
+      const error = turns === null ? 'no brain is configured' : 'nothing to brief about';
+      write(socket, { id: request.id, ok: false, error });
+      return;
+    }
+    await turns.ask(prompt, (chunk) =>
+      write(socket, { id: request.id, ok: true, chunk }),
+    );
+  }
+
+  private async briefFor(request: DaemonRequest): Promise<string | null> {
+    if (request.briefing === BRIEFING.BACK) {
+      return request.since === undefined ? null : backBrief(request.since);
+    }
+    const waiting = await this.feed.current(this.deps.now());
+    const event = waiting.find((each) => each.subject === request.subject);
+    if (request.briefing === BRIEFING.HELD)
+      return event === undefined ? null : heldBrief(event);
+    if (request.briefing === BRIEFING.PAUSED && request.subject !== undefined) {
+      const pause = await new SessionPauses(this.deps.home).read(request.subject);
+      return pause === null
+        ? null
+        : pausedBrief({
+            kind: DAEMON_EVENT.PAUSED,
+            subject: pause.sessionId,
+            agent: UNNAMED_AGENT,
+            summary: describePause(pause),
+            at: pause.pausedAt,
+          });
+    }
+    return null;
   }
 
   /** What the person said, answered by their own brain one chunk per line. */

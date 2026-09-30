@@ -37,6 +37,8 @@ export const DAEMON_METHOD = {
   CANCEL: 'cancel',
   /** Where a session's agent is on screen, so the Mac app can bring that window forward. */
   LOCATE: 'locate',
+  /** Something happened rather than was asked: the brain says it, streamed like ASK. */
+  BRIEF: 'brief',
 } as const;
 
 export type DaemonMethod = (typeof DAEMON_METHOD)[keyof typeof DAEMON_METHOD];
@@ -69,7 +71,22 @@ export interface DaemonRequest {
   point?: string;
   /** On ASK: what the person said, whole, in their own words. */
   said?: string;
+  /** On any voice request: the name the person asked to be called. */
+  owner?: string;
+  /** On BRIEF: held, paused or back. */
+  briefing?: string;
+  /** On BRIEF back: when the person went away. */
+  since?: string;
 }
+
+export const BRIEFING = {
+  /** A held call, told with what its session has been doing. */
+  HELD: 'held',
+  /** A session the breaker stopped. */
+  PAUSED: 'paused',
+  /** The person came back to their Mac. */
+  BACK: 'back',
+} as const;
 
 /** Where a session runs, as LOCATE answers it. */
 export interface DaemonLocation {

@@ -3,6 +3,7 @@ import { ENV_AGENT_NAME, LineBuffer, SESSION_VAR } from '@memnox/core';
 import { BRAIN_CHUNK, type Brain, type BrainChunk } from './brain';
 import { readStreamLine } from './claude-stream';
 import { Conversations } from './conversation';
+import { voicePrompt } from './voice-prompts';
 
 /**
  * The person's own Claude Code as the voice's brain, kept warm for a conversation. It runs
@@ -15,9 +16,6 @@ const OPERATOR_SERVER = 'memnox-operator';
 /** Whose record the brain's own session goes on, so it is never mistaken for work. */
 const OPERATOR_AGENT_NAME = 'memnox-operator';
 
-const VOICE_PROMPT =
-  'You are Memnox speaking out loud. Answer in at most three short sentences, the answer first, numbers said plainly, never a list read aloud. Read the machine with the memnox-operator tools before answering and never guess. Several sessions can be open at once, even for one agent: when the person could mean more than one, ask which. You can never allow anything yourself: an allow waits for the person to confirm with Touch ID on the Mac.';
-
 interface ClaudeBrainOptions {
   home: string;
   /** How the operator MCP server is started, which is this install's own binary. */
@@ -25,6 +23,8 @@ interface ClaudeBrainOptions {
   command?: string;
   env?: NodeJS.ProcessEnv;
   now?: () => Date;
+  /** The name to speak to them by, read when the brain starts. */
+  person?: () => Promise<string | undefined>;
 }
 
 export class ClaudeCodeBrain implements Brain {
@@ -81,12 +81,13 @@ export class ClaudeCodeBrain implements Brain {
   private async started(): Promise<ChildProcessWithoutNullStreams> {
     if (this.child !== null) return this.child;
     const resume = await this.conversations.resumable(this.name, this.now());
+    const person = await this.options.person?.();
     // A fresh queue per process, since the last one ended when its process did.
     const lines = new LineQueue();
     this.lines = lines;
     const child = spawn(
       this.options.command ?? 'claude',
-      claudeArgs(this.options, resume),
+      claudeArgs(this.options, resume, person),
       {
         env: brainEnv(this.options.env ?? process.env),
         stdio: ['pipe', 'pipe', 'pipe'],
@@ -121,7 +122,11 @@ export class ClaudeCodeBrain implements Brain {
 }
 
 /** The flags that make Claude Code a brain that reads and proposes and does nothing else. */
-function claudeArgs(options: ClaudeBrainOptions, resume: string | null): string[] {
+function claudeArgs(
+  options: ClaudeBrainOptions,
+  resume: string | null,
+  person: string | undefined,
+): string[] {
   const servers = {
     mcpServers: {
       [OPERATOR_SERVER]: {
@@ -147,7 +152,7 @@ function claudeArgs(options: ClaudeBrainOptions, resume: string | null): string[
     '--allowedTools',
     `mcp__${OPERATOR_SERVER}`,
     '--append-system-prompt',
-    VOICE_PROMPT,
+    voicePrompt(person),
     ...(resume === null ? [] : ['--resume', resume]),
   ];
 }
