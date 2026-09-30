@@ -12,6 +12,7 @@ import {
   type ProposalAnswer,
 } from '@memnox/core';
 import { mergeRules, WRITTEN_POLICY_FILE } from '../protect/merge-rules';
+import { recordAnswer } from './record-answer';
 
 /**
  * A person's answer arriving from the Mac app. Refusing never needs proof, since saying no
@@ -60,19 +61,19 @@ async function answerHeld(home: string, input: ConfirmInput): Promise<ConfirmRes
   const refusing = answer === HOLD_ANSWER.DENY;
   if (!refusing && !(await signed(home, input))) return unsigned();
 
-  const outcome = await new PendingApprovals(home).answer(
-    input.subject,
-    answer,
-    refusing ? BY_VOICE : BY_TOUCH_ID,
-    input.at,
-  );
-  if (outcome === null) return { ok: false, error: `${input.subject} is no longer held` };
+  const approvals = new PendingApprovals(home);
+  const held = await approvals.read(input.subject);
+  const by = refusing ? BY_VOICE : BY_TOUCH_ID;
+  const outcome = await approvals.answer(input.subject, answer, by, input.at);
+  if (outcome === null || held === null)
+    return { ok: false, error: `${input.subject} is no longer held` };
   if ('alreadyAnswered' in outcome) {
     return {
       ok: true,
       outcome: `already answered ${outcome.alreadyAnswered.answer ?? ''}`,
     };
   }
+  await recordAnswer(home, { request: held.request, answer, by, at: input.at });
   return { ok: true, outcome: answer };
 }
 
@@ -126,14 +127,25 @@ async function apply(
     await mergeRules(change.file, change.rules, home);
     return { ok: true, outcome: PROPOSAL_ANSWER.CONFIRMED };
   }
-  const outcome = await new PendingApprovals(home).answer(
+  const approvals = new PendingApprovals(home);
+  const held = await approvals.read(change.pendingId);
+  const outcome = await approvals.answer(
     change.pendingId,
     change.answer,
     BY_TOUCH_ID,
     at,
   );
-  if (outcome === null)
+  if (outcome === null || held === null)
     return { ok: false, error: `${change.pendingId} is no longer held` };
+  if ('answered' in outcome) {
+    await recordAnswer(home, {
+      request: held.request,
+      answer: change.answer,
+      by: BY_TOUCH_ID,
+      ...(proposal.said === undefined ? {} : { said: proposal.said }),
+      at,
+    });
+  }
   return { ok: true, outcome: PROPOSAL_ANSWER.CONFIRMED };
 }
 

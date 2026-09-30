@@ -11,6 +11,7 @@ import {
   type PendingApproval,
   type Policy,
 } from '@memnox/core';
+import { recordAnswer } from '../daemon/record-answer';
 import { readRegisteredFiles } from '../policy-path';
 import { WRITTEN_POLICY_FILE } from '../protect/merge-rules';
 import { textArg, type SessionToolDeps, type ToolArgs } from './read-tools';
@@ -32,6 +33,9 @@ const SPOKEN_ANSWERS: readonly string[] = [
   HOLD_ANSWER.SESSION,
   HOLD_ANSWER.DENY,
 ];
+
+/** Who the ledger says refused, since the operator only passed on what the person said. */
+const BY_VOICE = 'person (voice)';
 
 const RULE_EFFECTS: readonly string[] = Object.values(DECISION_EFFECT);
 
@@ -55,9 +59,16 @@ export async function proposeAnswerTool(
     await new PendingApprovals(deps.home).answer(
       call,
       HOLD_ANSWER.DENY,
-      'person (voice)',
+      BY_VOICE,
       moment,
     );
+    await recordAnswer(deps.home, {
+      request: pending.request,
+      answer: HOLD_ANSWER.DENY,
+      by: BY_VOICE,
+      ...(said === '' ? {} : { said }),
+      at: moment,
+    });
     return {
       answered: call,
       answer,
@@ -79,6 +90,7 @@ async function proposeAllow(
   const proposal = await new Proposals(deps.home).propose({
     change: { kind: PROPOSAL_KIND.ANSWER, pendingId: pending.id, answer },
     rationale: said === '' ? `${answer} for ${pending.id}` : said,
+    ...(said === '' ? {} : { said }),
     proposedBy: OPERATOR_AGENT,
     at: moment,
     ttlMs: Date.parse(pending.expiresAt) - Date.parse(moment),

@@ -35,6 +35,8 @@ export interface Proposal {
   change: ProposedChange;
   /** Why, in the words the person heard, so the confirmation is of the same thing. */
   rationale: string;
+  /** What the person said out loud, when they said something, kept for the ledger row. */
+  said?: string;
   proposedBy: string;
   proposedAt: string;
   expiresAt: string;
@@ -49,6 +51,7 @@ export type ProposalOutcome =
 export interface ProposeInput {
   change: ProposedChange;
   rationale: string;
+  said?: string;
   proposedBy: string;
   at: string;
   ttlMs: number;
@@ -74,6 +77,7 @@ export class Proposals {
       id: proposalIdFor(input.change, input.at),
       change: input.change,
       rationale: input.rationale,
+      ...(input.said === undefined ? {} : { said: input.said }),
       proposedBy: input.proposedBy,
       proposedAt: input.at,
       expiresAt: new Date(Date.parse(input.at) + input.ttlMs).toISOString(),

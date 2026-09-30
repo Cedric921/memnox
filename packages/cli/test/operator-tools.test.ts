@@ -164,6 +164,10 @@ describe('answering a held call from what the person said', () => {
     expect((await new PendingApprovals(deps.home).read(held.id))?.answer).toBe(
       HOLD_ANSWER.DENY,
     );
+    const store = SqliteEventStore.forHome(deps.home);
+    const rows = await store.query({ sessionId: HELD.sessionId, limit: 10 });
+    store.close();
+    expect(rows[0]?.reason).toContain('saying "no, not on main"');
   });
 
   it("only proposes an allow, keeping the person's words, and leaves the call held", async () => {

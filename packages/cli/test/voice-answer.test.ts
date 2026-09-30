@@ -12,11 +12,15 @@ import {
   holdGrantSubject,
   HoldService,
   PendingApprovals,
+  PROPOSAL_ANSWER,
+  PROPOSAL_KIND,
+  Proposals,
   RoutedHoldPrompt,
   type HoldRequest,
   type HoldResult,
 } from '@memnox/core';
 import { confirmAnswer } from '../src/daemon/confirm';
+import { withEvents } from '../src/event-store';
 
 /**
  * The voice is one more route to the same held call, beside the terminal, `memnox approve`
@@ -166,6 +170,57 @@ describe('answering a held call by voice', () => {
     // Answered already, or cleared by the released seam: either way the voice changed nothing.
     expect(late.ok ? late.outcome : late.error).toMatch(
       /already answered|no longer held/,
+    );
+  });
+
+  it('writes the answer into the agent session, naming the person', async () => {
+    const call = await held();
+    await confirmAnswer(call.home, {
+      subject: call.id,
+      answer: HOLD_ANSWER.ONCE,
+      signature: call.signs(call.id, HOLD_ANSWER.ONCE),
+      at: now(),
+    });
+    await call.result;
+    const rows = await withEvents(call.home, (store) =>
+      store.query({ sessionId: HELD.sessionId, limit: 10 }),
+    );
+    expect(rows).toContainEqual(
+      expect.objectContaining({
+        actorType: 'human',
+        operation: 'git.push',
+        effect: 'allow',
+        authorizedBy: 'person (Touch ID)',
+      }),
+    );
+  });
+
+  it('keeps what the person said when an allow came through a proposal', async () => {
+    const call = await held();
+    const proposal = await new Proposals(call.home).propose({
+      change: {
+        kind: PROPOSAL_KIND.ANSWER,
+        pendingId: call.id,
+        answer: HOLD_ANSWER.ONCE,
+      },
+      rationale: 'yeah push it, just this once',
+      said: 'yeah push it, just this once',
+      proposedBy: 'agt_memnox-operator',
+      at: now(),
+      ttlMs: TEN_SECONDS,
+    });
+    await confirmAnswer(call.home, {
+      subject: proposal.id,
+      answer: PROPOSAL_ANSWER.CONFIRMED,
+      signature: call.signs(proposal.id, PROPOSAL_ANSWER.CONFIRMED),
+      at: now(),
+    });
+    expect(await call.result).toMatchObject({ outcome: HOLD_OUTCOME.ALLOWED });
+    const rows = await withEvents(call.home, (store) =>
+      store.query({ sessionId: HELD.sessionId, limit: 10 }),
+    );
+    expect(rows.find((each) => each.actorType === 'human')?.reason).toContain(
+      'saying "yeah push it, just this once"',
     );
   });
 });
