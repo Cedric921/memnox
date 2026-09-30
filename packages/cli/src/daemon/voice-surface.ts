@@ -15,6 +15,7 @@ import {
 import type { Brain } from '../operator/brain';
 import { keepOwner, readOwner } from '../operator/owner';
 import { backBrief, heldBrief, pausedBrief } from '../operator/voice-prompts';
+import { readVocabulary } from '../operator/vocabulary';
 import { BrainTurns } from './brain-turns';
 import { confirmAnswer } from './confirm';
 import { write, type Peer } from './socket-write';
@@ -42,6 +43,7 @@ const VOICE_METHODS: readonly string[] = [
   DAEMON_METHOD.LOCATE,
   DAEMON_METHOD.BRIEF,
   DAEMON_METHOD.WARM,
+  DAEMON_METHOD.VOCABULARY,
 ];
 
 interface VoiceDeps {
@@ -124,23 +126,13 @@ export class VoiceSurface {
     const { home } = this.deps;
     const feed = this.feed;
     if (request.method === DAEMON_METHOD.LOCATE) return this.locate(request);
+    if (request.method === DAEMON_METHOD.VOCABULARY) {
+      return { id: request.id, ok: true, words: await readVocabulary(this.deps.home) };
+    }
     if (request.method === DAEMON_METHOD.WAITING) {
       return { id: request.id, ok: true, waiting: await feed.current(this.deps.now()) };
     }
-    if (request.method === DAEMON_METHOD.REGISTER_KEY) {
-      if (request.point === undefined || !isP256Point(request.point)) {
-        return { id: request.id, ok: false, error: 'register-key needs a P-256 point' };
-      }
-      const outcome = await new ConfirmKeys(home).register(
-        request.point,
-        this.deps.now(),
-      );
-      if ('registered' in outcome)
-        return { id: request.id, ok: true, outcome: 'registered' };
-      // Said, never replaced: the app compares and tells the person when it is not theirs.
-      const same = outcome.alreadyRegistered.point === request.point;
-      return { id: request.id, ok: same, outcome: same ? 'registered' : 'another key' };
-    }
+    if (request.method === DAEMON_METHOD.REGISTER_KEY) return this.registerKey(request);
     if (request.subject === undefined || request.answer === undefined) {
       return {
         id: request.id,
@@ -157,6 +149,22 @@ export class VoiceSurface {
     return result.ok
       ? { id: request.id, ok: true, outcome: result.outcome }
       : { id: request.id, ok: false, error: result.error };
+  }
+
+  /** The Mac app's key, trusted on first use and never replaced from here. */
+  private async registerKey(request: DaemonRequest): Promise<DaemonResponse> {
+    if (request.point === undefined || !isP256Point(request.point)) {
+      return { id: request.id, ok: false, error: 'register-key needs a P-256 point' };
+    }
+    const outcome = await new ConfirmKeys(this.deps.home).register(
+      request.point,
+      this.deps.now(),
+    );
+    if ('registered' in outcome)
+      return { id: request.id, ok: true, outcome: 'registered' };
+    // Said, never replaced: the app compares and tells the person when it is not theirs.
+    const same = outcome.alreadyRegistered.point === request.point;
+    return { id: request.id, ok: same, outcome: same ? 'registered' : 'another key' };
   }
 
   /** Where the session's agent runs, and whether it still does. */

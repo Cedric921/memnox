@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { MEMNOX_HOME } from '@memnox/core';
 import type { Brain } from './brain';
 import { ClaudeCodeBrain } from './claude-brain';
+import { readVocabulary } from './vocabulary';
 
 /** This install's own operator server, started by the brain with the node running Memnox. */
 function operatorServer(): { command: string; args: string[] } {
@@ -25,5 +26,6 @@ export function ownBrain(home: string): Brain {
     model: process.env[VOICE_MODEL_VAR] ?? DEFAULT_VOICE_MODEL,
     effort: 'low',
     cwd: join(home, MEMNOX_HOME),
+    vocabulary: () => readVocabulary(home),
   });
 }

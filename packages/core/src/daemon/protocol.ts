@@ -41,6 +41,8 @@ export const DAEMON_METHOD = {
   BRIEF: 'brief',
   /** The person started talking: start the brain now so the answer skips the cold start. */
   WARM: 'warm',
+  /** The names this machine uses, for the recognizer to listen for. */
+  VOCABULARY: 'vocabulary',
 } as const;
 
 export type DaemonMethod = (typeof DAEMON_METHOD)[keyof typeof DAEMON_METHOD];
@@ -162,6 +164,8 @@ export interface DaemonResponse {
   waiting?: readonly DaemonEvent[];
   /** On LOCATE. */
   location?: DaemonLocation;
+  /** On VOCABULARY. */
+  words?: readonly string[];
   /** On ASK, one per line; the turn ends with a chunk whose kind is in ASK_ENDS. */
   chunk?: DaemonAskChunk;
   /** On CONFIRM and REGISTER_KEY: what happened, in a word or two. */

@@ -28,6 +28,8 @@ interface ClaudeBrainOptions {
   effort?: string;
   /** Where the process starts: somewhere with no project, so no project memory is read. */
   cwd?: string;
+  /** The names this machine uses, read when the brain starts, so misheard ones are understood. */
+  vocabulary?: () => Promise<string[]>;
 }
 
 export class ClaudeCodeBrain implements Brain {
@@ -93,12 +95,13 @@ export class ClaudeCodeBrain implements Brain {
       this.now(),
       this.version(),
     );
+    const words = (await this.options.vocabulary?.().catch(() => [])) ?? [];
     // A fresh queue per process, since the last one ended when its process did.
     const lines = new LineQueue();
     this.lines = lines;
     const child = spawn(
       this.options.command ?? 'claude',
-      claudeArgs(this.options, resume),
+      claudeArgs(this.options, resume, words),
       {
         env: brainEnv(this.options.env ?? process.env),
         ...(this.options.cwd === undefined ? {} : { cwd: this.options.cwd }),
@@ -141,7 +144,11 @@ export class ClaudeCodeBrain implements Brain {
 }
 
 /** The flags that make Claude Code a brain that reads and proposes and does nothing else. */
-function claudeArgs(options: ClaudeBrainOptions, resume: string | null): string[] {
+function claudeArgs(
+  options: ClaudeBrainOptions,
+  resume: string | null,
+  words: readonly string[],
+): string[] {
   const servers = {
     mcpServers: {
       [OPERATOR_SERVER]: {
@@ -166,17 +173,24 @@ function claudeArgs(options: ClaudeBrainOptions, resume: string | null): string[
     JSON.stringify(servers),
     '--allowedTools',
     `mcp__${OPERATOR_SERVER}`,
+    ...voiceFlags(options, words),
+    ...(resume === null ? [] : ['--resume', resume]),
+  ];
+}
+
+/** How the brain talks: its own instructions, no settings of the person's, and a quick model. */
+function voiceFlags(options: ClaudeBrainOptions, words: readonly string[]): string[] {
+  return [
     // Replaces Claude Code's own coding prompt rather than adding to it, since that one asks
     // for thorough written answers and a voice needs one spoken sentence.
     '--system-prompt',
-    voicePrompt(),
+    voicePrompt(words),
     // Only a project's settings, and the brain starts where there is no project: no hooks on
     // every tool call, and nothing of the person's own memory or instructions rides along.
     '--setting-sources',
     'project',
     ...(options.model === undefined ? [] : ['--model', options.model]),
     ...(options.effort === undefined ? [] : ['--effort', options.effort]),
-    ...(resume === null ? [] : ['--resume', resume]),
   ];
 }
 

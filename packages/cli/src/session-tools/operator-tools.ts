@@ -3,6 +3,7 @@ import { readUnattended } from '../commands/unattended.command';
 import { WaitingFeed } from '../daemon/waiting-feed';
 import { DEFAULT_AGENT } from '../next/boundary-report';
 import { changesTool, readingFor } from './changes-tool';
+import { readReach } from '../operator/vocabulary';
 import { proposeAnswerTool, proposeRuleTool } from './propose-tools';
 import { sessionsTool } from './sessions-tool';
 import {
@@ -60,6 +61,10 @@ export const OPERATOR_TOOLS: readonly ToolDefinition[] = [
       agent: AGENT_ARG,
       hours: { type: 'string', description: 'how far back to look; 24 when left out' },
     },
+  ),
+  readTool(
+    'reach',
+    'What the agents on this machine can use: the agents themselves, each MCP server and which agents start it, and the CLIs Memnox watches, which any agent with a shell can run, and which of those are signed in, so an agent running them acts as the person. Answer "is Claude Code connected to Railway" from here.',
   ),
   readTool(
     'waiting',
@@ -160,6 +165,8 @@ export async function callOperatorTool(
       return statusTool(deps);
     case 'sessions':
       return sessionsTool(deps, args);
+    case 'reach':
+      return readReach(deps.home);
     case 'waiting':
       return new WaitingFeed(deps.home).current(deps.now().toISOString());
     case 'unattended':

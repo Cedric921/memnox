@@ -1,0 +1,105 @@
+import { readdir } from 'node:fs/promises';
+import { basename, join } from 'node:path';
+import {
+  agentShown,
+  discover,
+  interceptorDirFor,
+  MEMNOX_HOME,
+  NodeMachineReader,
+  NodeSnapshotStore,
+  type EnvironmentSnapshot,
+} from '@memnox/core';
+import { readNames } from '../agents/names';
+
+/**
+ * The names this machine actually uses: its agents, the CLIs Memnox watches, its MCP servers
+ * and the folders its sessions work in. The recognizer is hinted with them and the brain is
+ * told them, so "clothes code on right away" is understood as Claude Code on Railway.
+ */
+
+/** How a CLI is said out loud, where that is not simply its name. */
+const SPOKEN_CLI: Readonly<Record<string, string>> = {
+  gh: 'GitHub CLI',
+  kubectl: 'kubectl',
+  psql: 'Postgres',
+  mongosh: 'MongoDB',
+  railway: 'Railway',
+  vercel: 'Vercel',
+  docker: 'Docker',
+  npm: 'npm',
+  pnpm: 'pnpm',
+  yarn: 'Yarn',
+  pip3: 'pip',
+  git: 'git',
+};
+
+/** Shells and utilities an interceptor wraps that nobody names out loud. */
+const UNSPOKEN: readonly string[] = ['curl', 'dd', 'rm', 'ssh', 'claude'];
+
+interface Reach {
+  agents: string[];
+  /** Each MCP server, and which agents start it. */
+  mcpServers: { name: string; agents: string[] }[];
+  /** CLIs on this machine that Memnox watches, which any agent with a shell can run. */
+  clis: string[];
+  /** CLIs signed in here, so any agent with a shell that runs them acts as the person. */
+  signedIn: { cli: string; can: string }[];
+}
+
+/** What the agents here can use, from the last scan and the CLIs Memnox watches. */
+export async function readReach(home: string): Promise<Reach> {
+  const snapshot = await new NodeSnapshotStore(join(home, MEMNOX_HOME))
+    .latest()
+    .catch(() => null);
+  const names = await readNames(home);
+  const agentName = (id: string, kind: string): string => names[id] ?? agentShown(kind);
+  return {
+    agents: (snapshot?.agents ?? []).map((agent) => agentName(agent.id, agent.kind)),
+    mcpServers: (snapshot?.servers ?? []).map((server) => ({
+      name: server.name,
+      agents: server.agentIds.map((id) => agentName(id, kindOf(snapshot, id))),
+    })),
+    clis: (await watchedClis(home)).map((cli) => SPOKEN_CLI[cli] ?? cli),
+    signedIn: await signedInOf(home),
+  };
+}
+
+/**
+ * CLIs signed in on this machine, read live with the scan's own detectors and without
+ * starting any MCP server, since the saved snapshot keeps only a few credential paths.
+ */
+async function signedInOf(home: string): Promise<{ cli: string; can: string }[]> {
+  const report = await discover(new NodeMachineReader(home), {
+    now: new Date().toISOString(),
+  }).catch(() => null);
+  return (report?.authenticated ?? []).map((each) => ({
+    cli: SPOKEN_CLI[each.name] ?? each.name,
+    can: each.headline,
+  }));
+}
+
+/** Every name worth recognising, once each, for the recognizer and the brain alike. */
+export async function readVocabulary(
+  home: string,
+  places: readonly string[] = [],
+): Promise<string[]> {
+  const reach = await readReach(home);
+  const words = [
+    'Memnox',
+    ...reach.agents,
+    ...reach.clis,
+    ...reach.signedIn.map((each) => each.cli),
+    ...reach.mcpServers.map((server) => server.name.replace(/[-_]/g, ' ')),
+    ...places.map((place) => basename(place).replace(/[-_]/g, ' ')),
+  ];
+  return [...new Set(words.filter((word) => word.trim() !== ''))];
+}
+
+async function watchedClis(home: string): Promise<string[]> {
+  const found = await readdir(interceptorDirFor(home)).catch(() => []);
+  return found.filter((name) => !UNSPOKEN.includes(name)).sort();
+}
+
+function kindOf(snapshot: EnvironmentSnapshot | null, id: string): string {
+  return snapshot?.agents.find((agent) => agent.id === id)?.kind ?? id;
+}
