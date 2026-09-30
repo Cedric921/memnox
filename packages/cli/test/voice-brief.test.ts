@@ -63,6 +63,13 @@ describe('how the voice speaks', () => {
     expect(prompt).toContain('never allow anything yourself');
   });
 
+  it('stays warm when it mishears, and waits out a sentence cut off halfway', () => {
+    const prompt = voicePrompt();
+    expect(prompt).toContain('never clipped or bossy');
+    expect(prompt).toContain('they have not finished');
+    expect(prompt).toContain('Sorry, I missed that.');
+  });
+
   it('lets a held call, and only a held call, start with their name', () => {
     const event: DaemonEvent = {
       kind: 'held',
