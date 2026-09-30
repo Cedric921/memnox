@@ -33,6 +33,8 @@ export const DAEMON_METHOD = {
   REGISTER_KEY: 'register-key',
   /** What the person said, answered by their own agent CLI one chunk per line as it streams. */
   ASK: 'ask',
+  /** Stops the answer in flight, usually because the person started talking over it. */
+  CANCEL: 'cancel',
 } as const;
 
 export type DaemonMethod = (typeof DAEMON_METHOD)[keyof typeof DAEMON_METHOD];
@@ -68,7 +70,7 @@ export interface DaemonRequest {
 }
 
 /** Kinds an ASK chunk ends a turn with; anything else is more of the same turn. */
-export const ASK_ENDS: readonly string[] = ['done', 'limited', 'failed'];
+export const ASK_ENDS: readonly string[] = ['done', 'limited', 'failed', 'cancelled'];
 
 /** One piece of an answer: words to speak, a tool being read, or how the turn ended. */
 export interface DaemonAskChunk {

@@ -13,6 +13,8 @@ export const BRAIN_CHUNK = {
   /** The person's plan ran out, which is said out loud rather than failed silently. */
   LIMITED: 'limited',
   FAILED: 'failed',
+  /** The person stopped it, usually by talking over it. Not a failure, and said as none. */
+  CANCELLED: 'cancelled',
 } as const;
 
 export type BrainChunkKind = (typeof BRAIN_CHUNK)[keyof typeof BRAIN_CHUNK];
@@ -32,4 +34,6 @@ export interface Brain {
   ask(said: string): AsyncIterable<BrainChunk>;
   /** Ends the warm process; the next ask resumes the same conversation. */
   close(): void;
+  /** Stops the turn in flight, which then ends with CANCELLED; the conversation survives it. */
+  cancel(): void;
 }

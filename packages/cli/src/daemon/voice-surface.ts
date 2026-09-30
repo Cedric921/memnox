@@ -32,6 +32,7 @@ const VOICE_METHODS: readonly string[] = [
   DAEMON_METHOD.CONFIRM,
   DAEMON_METHOD.REGISTER_KEY,
   DAEMON_METHOD.ASK,
+  DAEMON_METHOD.CANCEL,
 ];
 
 interface VoiceDeps {
@@ -66,6 +67,15 @@ export class VoiceSurface {
     if (request.method === DAEMON_METHOD.SUBSCRIBE)
       return this.subscribe(socket, request.id);
     if (request.method === DAEMON_METHOD.ASK) return this.ask(socket, request);
+    if (request.method === DAEMON_METHOD.CANCEL) {
+      const stopped = this.turns?.cancel() ?? false;
+      write(socket, {
+        id: request.id,
+        ok: true,
+        outcome: stopped ? 'cancelled' : 'nothing to cancel',
+      });
+      return;
+    }
     const response = await this.answer(request).catch((err: unknown): DaemonResponse => ({
       id: request.id,
       ok: false,

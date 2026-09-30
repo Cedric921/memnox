@@ -10,6 +10,7 @@ export class BrainTurns {
   private brain: Brain | null = null;
   private idle: ReturnType<typeof setTimeout> | null = null;
   private turns: Promise<void> = Promise.resolve();
+  private busy = false;
 
   constructor(
     private readonly start: () => Brain,
@@ -23,6 +24,13 @@ export class BrainTurns {
     return turn;
   }
 
+  /** Stops the turn in flight, if there is one; the turns queued behind it still run. */
+  cancel(): boolean {
+    if (this.brain === null || !this.busy) return false;
+    this.brain.cancel();
+    return true;
+  }
+
   close(): void {
     if (this.idle !== null) clearTimeout(this.idle);
     this.idle = null;
@@ -34,12 +42,14 @@ export class BrainTurns {
     if (this.idle !== null) clearTimeout(this.idle);
     const brain = this.brain ?? this.start();
     this.brain = brain;
+    this.busy = true;
     try {
       for await (const chunk of brain.ask(said)) send(chunk);
     } catch (err) {
       // Said as the end of the turn, so the voice has something to say rather than silence.
       send({ kind: BRAIN_CHUNK.FAILED, text: String(err) });
     } finally {
+      this.busy = false;
       this.idle = setTimeout(() => this.close(), this.idleMs);
       this.idle.unref();
     }

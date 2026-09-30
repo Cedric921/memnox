@@ -302,6 +302,7 @@ describe('asking the daemon in your own words', () => {
       yield { kind: BRAIN_CHUNK.DONE };
     },
     close: () => undefined,
+    cancel: () => undefined,
   };
 
   it('streams the answer one chunk per line, ending on done', async () => {

@@ -14,6 +14,7 @@ function brainSaying(chunks: BrainChunk[], heard: string[] = []): Brain {
       yield* chunks;
     },
     close: () => undefined,
+    cancel: () => undefined,
   };
 }
 

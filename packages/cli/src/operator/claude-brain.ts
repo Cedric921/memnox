@@ -32,22 +32,24 @@ export class ClaudeCodeBrain implements Brain {
   private child: ChildProcessWithoutNullStreams | null = null;
   private lines = new LineQueue();
   private readonly conversations: Conversations;
+  /** Set by cancel, so the process ending reads as stopped rather than as a crash. */
+  private cancelled = false;
 
   constructor(private readonly options: ClaudeBrainOptions) {
     this.conversations = new Conversations(options.home);
   }
 
   async *ask(said: string): AsyncIterable<BrainChunk> {
+    this.cancelled = false;
     const child = await this.started();
     child.stdin.write(`${JSON.stringify(userTurn(said))}\n`);
     let spoke = false;
     for (;;) {
       const line = await this.lines.next();
       if (line === null) {
-        yield {
-          kind: BRAIN_CHUNK.FAILED,
-          text: 'Claude Code stopped before it answered',
-        };
+        yield this.cancelled
+          ? { kind: BRAIN_CHUNK.CANCELLED }
+          : { kind: BRAIN_CHUNK.FAILED, text: 'Claude Code stopped before it answered' };
         return;
       }
       const read = readStreamLine(line, spoke);
@@ -63,6 +65,17 @@ export class ClaudeCodeBrain implements Brain {
   close(): void {
     this.child?.stdin.end();
     this.child = null;
+  }
+
+  /**
+   * Ends the process rather than asking it to stop, because its conversation is saved as it
+   * goes and resumes on the next ask: a half-said answer is all that is lost.
+   */
+  cancel(): void {
+    const child = this.child;
+    if (child === null) return;
+    this.cancelled = true;
+    child.kill('SIGTERM');
   }
 
   private async started(): Promise<ChildProcessWithoutNullStreams> {

@@ -7,6 +7,7 @@ import { BRAIN_CHUNK, type Brain, type BrainChunk } from '../src/operator/brain'
 class SlowBrain implements Brain {
   readonly name = 'claude';
   closed = 0;
+  cancelled = 0;
   constructor(private readonly log: string[]) {}
 
   async *ask(said: string): AsyncIterable<BrainChunk> {
@@ -19,6 +20,10 @@ class SlowBrain implements Brain {
 
   close(): void {
     this.closed += 1;
+  }
+
+  cancel(): void {
+    this.cancelled += 1;
   }
 }
 
@@ -84,6 +89,7 @@ describe('one warm brain behind the daemon', () => {
           throw new Error('claude crashed');
         },
         close: () => undefined,
+        cancel: () => undefined,
       }),
       60_000,
     );
@@ -91,5 +97,18 @@ describe('one warm brain behind the daemon', () => {
     await turns.ask('hello', collect(heard));
     turns.close();
     expect(heard).toEqual([{ kind: BRAIN_CHUNK.FAILED, text: 'Error: claude crashed' }]);
+  });
+
+  it('stops the turn in flight when asked, and says so when nothing is running', async () => {
+    const brain = new SlowBrain([]);
+    const turns = new BrainTurns(() => brain, 60_000);
+    expect(turns.cancel()).toBe(false);
+
+    const running = turns.ask('long answer', () => undefined);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(turns.cancel()).toBe(true);
+    await running;
+    turns.close();
+    expect(brain.cancelled).toBe(1);
   });
 });

@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { chmod, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -25,6 +26,7 @@ process.stdin.on('data', (chunk) => {
     const said = JSON.parse(each).message.content[0].text;
     const out = (value) => process.stdout.write(JSON.stringify(value) + '\\n');
     out({ type: 'system', subtype: 'init', session_id: 'conv-1' });
+    if (said === 'talk for ever') continue;
     out({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'mcp__memnox-operator__sessions' }] } });
     out({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Turn ' + turn + ': ' + said + '.' } } });
     out({ type: 'result', is_error: false, result: 'x', session_id: 'conv-1' });
@@ -156,4 +158,37 @@ describe("the person's own Claude Code as the brain", () => {
     const chunks = await turn(brain, 'hello');
     expect(chunks.at(-1)?.kind).toBe(BRAIN_CHUNK.FAILED);
   });
+
+  it('stops mid answer when cancelled, and the next question resumes the conversation', async () => {
+    const setup = await fake();
+    const brain = brainFor(setup);
+    const chunks: BrainChunk[] = [];
+    const turn = (async () => {
+      for await (const chunk of brain.ask('talk for ever')) chunks.push(chunk);
+    })();
+    // Cancelled once the conversation has begun, which is when there is something to resume.
+    await until(() =>
+      existsSync(join(setup.home, '.memnox', 'voice', 'conversation.json')),
+    );
+    brain.cancel();
+    await turn;
+    expect(chunks.at(-1)).toEqual({ kind: BRAIN_CHUNK.CANCELLED });
+
+    const next = await (async () => {
+      const out: BrainChunk[] = [];
+      for await (const chunk of brain.ask('and now')) out.push(chunk);
+      return out;
+    })();
+    brain.close();
+    expect(next.at(-1)).toEqual({ kind: BRAIN_CHUNK.DONE });
+    const [, restarted] = await launches(setup.log);
+    const argv = restarted?.argv ?? [];
+    expect(argv[argv.indexOf('--resume') + 1]).toBe('conv-1');
+  });
 });
+
+async function until(done: () => boolean): Promise<void> {
+  for (let tries = 0; tries < 300 && !done(); tries += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
