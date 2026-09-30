@@ -115,6 +115,16 @@ export interface DaemonEvent {
   summary: string;
   at: string;
   expiresAt?: string;
+  /** On HELD, the facts a person hears, so the voice words them rather than reading a line. */
+  agentName?: string;
+  /** What it wants to do, as a phrase: "push to main". */
+  what?: string;
+  /** Why it was held rather than run. */
+  why?: string;
+  /** The task the session was given, in the person's words. */
+  task?: string;
+  /** The folder the session works in, by name. */
+  place?: string;
 }
 
 export interface DaemonResponse {
