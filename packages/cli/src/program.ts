@@ -28,6 +28,7 @@ import { registerClaimsCommand } from './commands/claims.command';
 import { registerBudgetCommand } from './commands/budget.command';
 import { registerNextCommand } from './commands/next.command';
 import { registerUnattendedCommand } from './commands/unattended.command';
+import { registerAskCommand } from './commands/ask.command';
 import { registerReportCommand } from './commands/report.command';
 import { registerSkillsCommand } from './commands/skills.command';
 import { registerEnvCommand } from './commands/env.command';
@@ -131,6 +132,7 @@ function registerCommands(program: Command, context: CliContext): void {
   registerBudgetCommand(program, context);
   registerNextCommand(program, context);
   registerUnattendedCommand(program, context);
+  registerAskCommand(program, context);
   registerReportCommand(program, context);
   registerSkillsCommand(program, context);
   registerEnvCommand(program, context);

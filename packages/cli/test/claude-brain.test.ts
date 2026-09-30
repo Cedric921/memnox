@@ -1,0 +1,159 @@
+import { chmod, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { describe, expect, it } from 'vitest';
+import { BRAIN_CHUNK, type BrainChunk } from '../src/operator/brain';
+import { ClaudeCodeBrain } from '../src/operator/claude-brain';
+
+/**
+ * A stand-in `claude` that records how it was started and answers every turn the way
+ * Claude Code's stream does, so none of this needs anybody's subscription.
+ */
+const FAKE_CLAUDE = `#!/usr/bin/env node
+const fs = require('node:fs');
+const log = process.env.FAKE_LOG;
+fs.appendFileSync(log, JSON.stringify({ argv: process.argv.slice(2), agent: process.env.MEMNOX_AGENT_NAME ?? null, session: process.env.MEMNOX_SESSION ?? null }) + '\\n');
+let turn = 0;
+let pending = '';
+process.stdin.on('data', (chunk) => {
+  pending += chunk;
+  const lines = pending.split('\\n');
+  pending = lines.pop();
+  for (const each of lines) {
+    if (each.trim() === '') continue;
+    turn += 1;
+    const said = JSON.parse(each).message.content[0].text;
+    const out = (value) => process.stdout.write(JSON.stringify(value) + '\\n');
+    out({ type: 'system', subtype: 'init', session_id: 'conv-1' });
+    out({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'mcp__memnox-operator__sessions' }] } });
+    out({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Turn ' + turn + ': ' + said + '.' } } });
+    out({ type: 'result', is_error: false, result: 'x', session_id: 'conv-1' });
+  }
+});
+`;
+
+async function fake(): Promise<{ home: string; command: string; log: string }> {
+  const home = await mkdtemp(join(tmpdir(), 'memnox-brain-'));
+  const command = join(home, 'claude');
+  await writeFile(command, FAKE_CLAUDE);
+  await chmod(command, 0o755);
+  return { home, command, log: join(home, 'launches.jsonl') };
+}
+
+function brainFor(setup: {
+  home: string;
+  command: string;
+  log: string;
+}): ClaudeCodeBrain {
+  return new ClaudeCodeBrain({
+    home: setup.home,
+    command: setup.command,
+    operator: { command: '/usr/bin/true', args: [] },
+    env: { ...process.env, FAKE_LOG: setup.log, MEMNOX_SESSION: 'ses_somebody_else' },
+  });
+}
+
+async function turn(brain: ClaudeCodeBrain, said: string): Promise<BrainChunk[]> {
+  const chunks: BrainChunk[] = [];
+  for await (const chunk of brain.ask(said)) chunks.push(chunk);
+  return chunks;
+}
+
+async function launches(
+  log: string,
+): Promise<{ argv: string[]; agent: string | null; session: string | null }[]> {
+  return (await readFile(log, 'utf8'))
+    .trim()
+    .split('\n')
+    .map(
+      (each) =>
+        JSON.parse(each) as {
+          argv: string[];
+          agent: string | null;
+          session: string | null;
+        },
+    );
+}
+
+describe("the person's own Claude Code as the brain", () => {
+  it('starts with every built-in tool off and only the operator server', async () => {
+    const setup = await fake();
+    const brain = brainFor(setup);
+    await turn(brain, 'what is claude doing');
+    brain.close();
+
+    const [first] = await launches(setup.log);
+    const argv = first?.argv ?? [];
+    expect(argv[argv.indexOf('--tools') + 1]).toBe('');
+    expect(argv).toContain('--strict-mcp-config');
+    expect(argv[argv.indexOf('--allowedTools') + 1]).toBe('mcp__memnox-operator');
+    expect(JSON.parse(argv[argv.indexOf('--mcp-config') + 1] ?? '{}')).toEqual({
+      mcpServers: { 'memnox-operator': { command: '/usr/bin/true', args: [] } },
+    });
+    expect(argv).not.toContain('--resume');
+  });
+
+  it('is recorded as the operator and never as the session of whoever started it', async () => {
+    const setup = await fake();
+    const brain = brainFor(setup);
+    await turn(brain, 'hello');
+    brain.close();
+
+    const [first] = await launches(setup.log);
+    expect(first?.agent).toBe('memnox-operator');
+    expect(first?.session).toBeNull();
+  });
+
+  it('streams a turn: the tool it read, the words, then the end', async () => {
+    const setup = await fake();
+    const brain = brainFor(setup);
+    const chunks = await turn(brain, 'what is waiting');
+    brain.close();
+
+    expect(chunks).toEqual([
+      { kind: BRAIN_CHUNK.TOOL, tool: 'mcp__memnox-operator__sessions' },
+      { kind: BRAIN_CHUNK.TEXT, text: 'Turn 1: what is waiting.' },
+      { kind: BRAIN_CHUNK.DONE },
+    ]);
+  });
+
+  it('stays warm across turns, so a follow up is one process and one conversation', async () => {
+    const setup = await fake();
+    const brain = brainFor(setup);
+    await turn(brain, 'what is waiting');
+    const second = await turn(brain, 'and the other one');
+    brain.close();
+
+    expect(second).toContainEqual({
+      kind: BRAIN_CHUNK.TEXT,
+      text: 'Turn 2: and the other one.',
+    });
+    expect(await launches(setup.log)).toHaveLength(1);
+  });
+
+  it('resumes the conversation after a restart, so context survives a quiet minute', async () => {
+    const setup = await fake();
+    const first = brainFor(setup);
+    await turn(first, 'what is waiting');
+    first.close();
+
+    const again = brainFor(setup);
+    await turn(again, 'and the other one');
+    again.close();
+
+    const [, second] = await launches(setup.log);
+    const argv = second?.argv ?? [];
+    expect(argv[argv.indexOf('--resume') + 1]).toBe('conv-1');
+  });
+
+  it('fails a turn plainly when there is no claude to run', async () => {
+    const setup = await fake();
+    const brain = new ClaudeCodeBrain({
+      home: setup.home,
+      command: join(setup.home, 'no-such-claude'),
+      operator: { command: '/usr/bin/true', args: [] },
+    });
+    const chunks = await turn(brain, 'hello');
+    expect(chunks.at(-1)?.kind).toBe(BRAIN_CHUNK.FAILED);
+  });
+});

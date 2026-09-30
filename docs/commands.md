@@ -885,6 +885,35 @@ Capabilities no rule covers are counted separately and never filed under "runs
 on its own". It refuses to call a boundary ready when something destructive
 would run unasked, or when more of what the agent can do is unruled than ruled.
 
+### `memnox unattended [--agent <name>] [--json]`
+Whether an agent can be left running, as one screen: how many of its actions run
+on their own, wait for you, never happen or have no rule, and then every reason
+not to walk away yet, in the order to deal with them. Observe mode comes first,
+since nothing below it would be stopped; then something destructive running
+unasked, calls waiting on you, paused sessions and spent budgets. Each line is a
+count or a fact, never a score.
+
+### `memnox ask "<anything>"`
+Ask about your agents in your own words, and get the answer your voice would
+hear. The words go whole to your own Claude Code, logged in as you already are,
+started with every built-in tool switched off and one MCP server,
+`memnox-operator`. Memnox holds no model credential, and there is no keyword
+matching between what you say and what happens.
+
+`memnox-operator` reads the machine: every session lately (`sessions`, so two
+Claude sessions are two rows and it asks which you mean), what is waiting on you,
+whether an agent can be left, why something was refused, a session step by step,
+and what a session changed in the code since its first write (`changes`, read
+against the milestone taken before that write). It writes nothing but proposals.
+A refusal of a held call takes effect at once; anything that lets something
+happen, an allow or a new rule, waits for Touch ID on the Mac. It is never
+registered into a working agent's own session.
+
+The conversation stays warm between questions and resumes for thirty minutes, so
+"and the other one?" works. A plan that has run out says so rather than going
+quiet. Cursor is not a brain: `cursor-agent -p` has write and shell access with
+no way to narrow it.
+
 ### `memnox report`
 What your agents did in a window and what of it was redone: actions, succeeded,
 failed, blocked, held, and where the same work went twice.

@@ -62,3 +62,11 @@ export function underHome(path: string, home: string): string {
   if (rest !== '' && rest[0] !== '/' && rest[0] !== '\\') return path;
   return `~${rest}`;
 }
+
+const VOICE_DIR = 'voice';
+const CONVERSATION_FILE = 'conversation.json';
+
+/** The brain's conversation, kept so a follow up minutes later resumes rather than starts over. */
+export function conversationPath(home: string): string {
+  return join(home, MEMNOX_HOME, VOICE_DIR, CONVERSATION_FILE);
+}
