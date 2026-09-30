@@ -31,6 +31,8 @@ export const DAEMON_METHOD = {
   CONFIRM: 'confirm',
   /** The public half of the key a confirmation is signed with, trusted on first use. */
   REGISTER_KEY: 'register-key',
+  /** What the person said, answered by their own agent CLI one chunk per line as it streams. */
+  ASK: 'ask',
 } as const;
 
 export type DaemonMethod = (typeof DAEMON_METHOD)[keyof typeof DAEMON_METHOD];
@@ -61,6 +63,18 @@ export interface DaemonRequest {
   signature?: string;
   /** On REGISTER_KEY: the base64 X9.63 P-256 point. */
   point?: string;
+  /** On ASK: what the person said, whole, in their own words. */
+  said?: string;
+}
+
+/** Kinds an ASK chunk ends a turn with; anything else is more of the same turn. */
+export const ASK_ENDS: readonly string[] = ['done', 'limited', 'failed'];
+
+/** One piece of an answer: words to speak, a tool being read, or how the turn ended. */
+export interface DaemonAskChunk {
+  kind: string;
+  text?: string;
+  tool?: string;
 }
 
 export const DAEMON_EVENT = {
@@ -101,6 +115,8 @@ export interface DaemonResponse {
   event?: DaemonEvent;
   /** On WAITING. */
   waiting?: readonly DaemonEvent[];
+  /** On ASK, one per line; the turn ends with a chunk whose kind is in ASK_ENDS. */
+  chunk?: DaemonAskChunk;
   /** On CONFIRM and REGISTER_KEY: what happened, in a word or two. */
   outcome?: string;
   error?: string;

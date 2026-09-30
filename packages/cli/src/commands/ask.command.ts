@@ -1,9 +1,8 @@
 import { homedir } from 'node:os';
-import { fileURLToPath } from 'node:url';
 import type { Command } from 'commander';
 import type { CliContext } from '../cli-context';
 import { BRAIN_CHUNK, type Brain, type BrainChunk } from '../operator/brain';
-import { ClaudeCodeBrain } from '../operator/claude-brain';
+import { ownBrain } from '../operator/own-brain';
 
 /**
  * `memnox ask "<anything>"`: the voice without the voice. The same brain, the same tools and
@@ -19,7 +18,7 @@ export function registerAskCommand(
   context: CliContext,
   overrides: Partial<AskDeps> = {},
 ): void {
-  const deps: AskDeps = { brain: defaultBrain, ...overrides };
+  const deps: AskDeps = { brain: () => ownBrain(homedir()), ...overrides };
   program
     .command('ask')
     .description(
@@ -83,14 +82,4 @@ class SentenceBuffer {
     if (this.text.trim() !== '') this.say(this.text.trim());
     this.text = '';
   }
-}
-
-function defaultBrain(): Brain {
-  return new ClaudeCodeBrain({
-    home: homedir(),
-    operator: {
-      command: process.execPath,
-      args: [fileURLToPath(new URL('./bin/operator.js', import.meta.url))],
-    },
-  });
 }

@@ -13,6 +13,7 @@ import {
 } from '@memnox/core';
 import { EGRESS_LOOPBACK } from '@memnox/interceptors';
 import { EditWatcher } from '../edit-watcher';
+import { ownBrain } from '../operator/own-brain';
 import type { CliContext } from '../cli-context';
 import { MemnoxDaemon } from '../daemon-server';
 import { withEvents } from '../event-store';
@@ -226,6 +227,7 @@ async function buildLoop(
     ...(gate === undefined ? {} : { gate }),
     ...spending,
     pauses: new SessionPauses(home),
+    brain: () => ownBrain(home),
     // Commentary rather than rail steps, because it writes for as long as the process lives.
     log: (message) => context.out.note(message),
   });

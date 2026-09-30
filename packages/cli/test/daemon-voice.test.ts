@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
+  ASK_ENDS,
   confirmationMessage,
   DAEMON_EVENT,
   DAEMON_METHOD,
@@ -25,6 +26,7 @@ import {
   type Policy,
 } from '@memnox/core';
 import { MemnoxDaemon } from '../src/daemon-server';
+import { BRAIN_CHUNK, type Brain } from '../src/operator/brain';
 
 const NOW = '2026-09-30T10:00:00.000Z';
 const TWO_MINUTES = 120_000;
@@ -290,3 +292,60 @@ async function until(done: () => boolean, timeoutMs = 2_000): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
 }
+
+describe('asking the daemon in your own words', () => {
+  const brain: Brain = {
+    name: 'claude',
+    async *ask(said: string) {
+      yield { kind: BRAIN_CHUNK.TOOL, tool: 'mcp__memnox-operator__sessions' };
+      yield { kind: BRAIN_CHUNK.TEXT, text: `You asked: ${said}.` };
+      yield { kind: BRAIN_CHUNK.DONE };
+    },
+    close: () => undefined,
+  };
+
+  it('streams the answer one chunk per line, ending on done', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'memnox-voice-ask-'));
+    const daemon = new MemnoxDaemon({
+      now: () => NOW,
+      log: () => {},
+      brain: () => brain,
+    });
+    await daemon.listen(home);
+
+    const heard: DaemonResponse[] = [];
+    await new Promise<void>((resolve, reject) => {
+      const socket = connect(socketPathFor(home), () =>
+        socket.write(
+          encode({ id: 11, method: DAEMON_METHOD.ASK, said: 'what is claude doing' }),
+        ),
+      );
+      const reader = new LineBuffer();
+      socket.setEncoding('utf8');
+      socket.on('data', (chunk: string) => {
+        for (const line of reader.push(chunk)) {
+          const response = decodeResponse(line);
+          if (response === null) continue;
+          heard.push(response);
+          if (ASK_ENDS.includes(response.chunk?.kind ?? '')) {
+            socket.end();
+            resolve();
+          }
+        }
+      });
+      socket.on('error', reject);
+    });
+
+    expect(heard.map((each) => each.chunk?.kind)).toEqual(['tool', 'text', 'done']);
+    expect(heard[1]?.chunk?.text).toBe('You asked: what is claude doing.');
+    expect(heard.every((each) => each.id === 11)).toBe(true);
+    await daemon.close();
+  });
+
+  it('refuses an ask with nothing said, or with no brain configured', async () => {
+    const { daemon, path } = await running();
+    const response = await ask(path, { id: 12, method: DAEMON_METHOD.ASK, said: 'hi' });
+    expect(response).toMatchObject({ ok: false, error: 'no brain is configured' });
+    await daemon.close();
+  });
+});

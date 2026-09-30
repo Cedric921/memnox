@@ -7,7 +7,6 @@ import {
   DAEMON_METHOD,
   DECISION_EFFECT,
   describePause,
-  encode,
   decodeRequest,
   LineBuffer,
   SessionLimits,
@@ -19,10 +18,7 @@ import {
   socketPathFor,
   TOOL_CLASS,
   ViolationMemory,
-  ConfirmKeys,
   DAEMON_EVENT,
-  isP256Point,
-  type DaemonEvent,
   type BreakerBreach,
   type Budget,
   type FleetSpend,
@@ -34,8 +30,9 @@ import {
   UNNAMED_AGENT,
   UNNAMED_SESSION,
 } from '@memnox/core';
-import { confirmAnswer } from './daemon/confirm';
-import { WaitingFeed } from './daemon/waiting-feed';
+import { write } from './daemon/socket-write';
+import { isVoiceMethod, VoiceSurface } from './daemon/voice-surface';
+import type { Brain } from './operator/brain';
 
 /**
  * The daemon: one process holding the rules, so a seam pays a connect rather than a file
@@ -57,18 +54,12 @@ interface DaemonDeps {
   now?: () => string;
   /** How often subscribers are checked for something new to hear about. */
   feedIntervalMs?: number;
+  /** The person's own agent CLI, started on the first ASK and kept warm between them. */
+  brain?: () => Brain;
+  /** How long a quiet brain is kept before its process is let go; the conversation resumes. */
+  brainIdleMs?: number;
   log: (message: string) => void;
 }
-
-/** Often enough that a held call is spoken while the agent is still waiting on it. */
-const FEED_INTERVAL_MS = 500;
-
-/** Methods that read or write files, so they are answered after an await rather than inline. */
-const ASYNC_METHODS: readonly string[] = [
-  DAEMON_METHOD.WAITING,
-  DAEMON_METHOD.CONFIRM,
-  DAEMON_METHOD.REGISTER_KEY,
-];
 
 /** The shorter of the two platform limits, so one number is right on both. */
 const SOCKET_PATH_LIMIT = 103;
@@ -85,11 +76,7 @@ export class MemnoxDaemon {
   /** Charged as they happen, on top of what the ledger already held at startup. */
   private readonly charged: MemnoxEvent[] = [];
   private server: Server | null = null;
-  private home: string | null = null;
-  /** Each subscriber with what it has already been told, so nobody hears a thing twice or never. */
-  private readonly subscribers = new Map<Socket, Set<string>>();
-  private feed: WaitingFeed | null = null;
-  private feedTimer: ReturnType<typeof setInterval> | null = null;
+  private voice: VoiceSurface | null = null;
 
   constructor(private readonly deps: DaemonDeps) {
     this.limits = deps.limits ?? new SessionLimits();
@@ -114,8 +101,18 @@ export class MemnoxDaemon {
 
     const server = createServer((socket) => this.serve(socket));
     this.server = server;
-    this.home = home;
-    this.feed = new WaitingFeed(home);
+    this.voice = new VoiceSurface({
+      home,
+      now: () => this.now(),
+      log: this.deps.log,
+      ...(this.deps.feedIntervalMs === undefined
+        ? {}
+        : { feedIntervalMs: this.deps.feedIntervalMs }),
+      ...(this.deps.brain === undefined ? {} : { brain: this.deps.brain }),
+      ...(this.deps.brainIdleMs === undefined
+        ? {}
+        : { brainIdleMs: this.deps.brainIdleMs }),
+    });
 
     await new Promise<void>((resolve, reject) => {
       server.once('error', reject);
@@ -129,10 +126,7 @@ export class MemnoxDaemon {
   async close(): Promise<void> {
     const server = this.server;
     if (server === null) return;
-    if (this.feedTimer !== null) clearInterval(this.feedTimer);
-    this.feedTimer = null;
-    for (const socket of this.subscribers.keys()) socket.destroy();
-    this.subscribers.clear();
+    this.voice?.close();
     await new Promise<void>((resolve) => server.close(() => resolve()));
     this.server = null;
   }
@@ -152,7 +146,7 @@ export class MemnoxDaemon {
         answered = answered.then(() => this.respond(line, socket));
       }
     });
-    socket.on('close', () => this.subscribers.delete(socket));
+    socket.on('close', () => this.voice?.drop(socket));
     socket.on('error', (err) => {
       // A client that hung up mid-write is ordinary; it must never take the daemon down.
       this.deps.log(`client dropped: ${String(err)}`);
@@ -165,18 +159,19 @@ export class MemnoxDaemon {
       write(socket, { id: 0, ok: false, error: 'not a request this daemon understands' });
       return;
     }
-    if (request.method === DAEMON_METHOD.SUBSCRIBE) {
-      await this.subscribe(socket, request.id);
-      return;
-    }
-    const response = ASYNC_METHODS.includes(request.method)
-      ? await this.answerAsync(request).catch((err: unknown): DaemonResponse => ({
+    if (isVoiceMethod(request.method)) {
+      if (this.voice === null) {
+        write(socket, {
           id: request.id,
           ok: false,
-          error: String(err),
-        }))
-      : this.answer(request);
-    write(socket, response);
+          error: 'the daemon is not listening yet',
+        });
+        return;
+      }
+      await this.voice.respond(socket, request);
+      return;
+    }
+    write(socket, this.answer(request));
   }
 
   private answer(request: DaemonRequest): DaemonResponse {
@@ -187,95 +182,6 @@ export class MemnoxDaemon {
     }
     if (request.method === DAEMON_METHOD.EVALUATE) return this.evaluate(request);
     return { id: request.id, ok: true };
-  }
-
-  private async answerAsync(request: DaemonRequest): Promise<DaemonResponse> {
-    const home = this.home;
-    const feed = this.feed;
-    if (home === null || feed === null) {
-      return { id: request.id, ok: false, error: 'the daemon is not listening yet' };
-    }
-    if (request.method === DAEMON_METHOD.WAITING) {
-      return { id: request.id, ok: true, waiting: await feed.current(this.now()) };
-    }
-    if (request.method === DAEMON_METHOD.REGISTER_KEY) {
-      if (request.point === undefined || !isP256Point(request.point)) {
-        return { id: request.id, ok: false, error: 'register-key needs a P-256 point' };
-      }
-      const outcome = await new ConfirmKeys(home).register(request.point, this.now());
-      if ('registered' in outcome)
-        return { id: request.id, ok: true, outcome: 'registered' };
-      // Said, never replaced: the app compares and tells the person when it is not theirs.
-      const same = outcome.alreadyRegistered.point === request.point;
-      return { id: request.id, ok: same, outcome: same ? 'registered' : 'another key' };
-    }
-    if (request.subject === undefined || request.answer === undefined) {
-      return {
-        id: request.id,
-        ok: false,
-        error: 'confirm needs a subject and an answer',
-      };
-    }
-    const result = await confirmAnswer(home, {
-      subject: request.subject,
-      answer: request.answer,
-      at: this.now(),
-      ...(request.signature === undefined ? {} : { signature: request.signature }),
-    });
-    return result.ok
-      ? { id: request.id, ok: true, outcome: result.outcome }
-      : { id: request.id, ok: false, error: result.error };
-  }
-
-  /** Everything already waiting first, then each new thing as it appears. */
-  private async subscribe(socket: Socket, id: number): Promise<void> {
-    const feed = this.feed;
-    if (feed === null) {
-      write(socket, { id, ok: false, error: 'the daemon is not listening yet' });
-      return;
-    }
-    const told = new Set<string>();
-    this.subscribers.set(socket, told);
-    write(socket, { id, ok: true });
-    for (const event of await feed.current(this.now())) {
-      told.add(event.subject);
-      write(socket, { id, ok: true, event });
-    }
-    if (this.feedTimer !== null) return;
-    this.feedTimer = setInterval(
-      () => void this.pushWaiting(),
-      this.deps.feedIntervalMs ?? FEED_INTERVAL_MS,
-    );
-    // A subscriber is not a reason to keep a daemon alive that was asked to stop.
-    this.feedTimer.unref();
-  }
-
-  private async pushWaiting(): Promise<void> {
-    if (this.subscribers.size === 0 || this.feed === null) return;
-    try {
-      const waiting = await this.feed.current(this.now());
-      const still = new Set(waiting.map((event) => event.subject));
-      for (const [socket, told] of this.subscribers) {
-        for (const event of waiting) {
-          if (told.has(event.subject)) continue;
-          told.add(event.subject);
-          write(socket, { id: 0, ok: true, event });
-        }
-        // Said, so a question answered in a terminal or a DM stops being asked out loud.
-        for (const subject of [...told]) {
-          if (still.has(subject)) continue;
-          told.delete(subject);
-          write(socket, { id: 0, ok: true, event: settled(subject, this.now()) });
-        }
-      }
-    } catch (err) {
-      this.deps.log(`could not read what is waiting: ${String(err)}`);
-    }
-  }
-
-  private broadcast(event: DaemonEvent): void {
-    for (const socket of this.subscribers.keys())
-      write(socket, { id: 0, ok: true, event });
   }
 
   private now(): string {
@@ -351,7 +257,7 @@ export class MemnoxDaemon {
     };
     this.held.set(sessionId, pause);
     this.deps.log(`paused ${sessionId}: ${breach.reason}`);
-    this.broadcast({
+    this.voice?.broadcast({
       kind: DAEMON_EVENT.PAUSED,
       subject: sessionId,
       agent: UNNAMED_AGENT,
@@ -461,21 +367,6 @@ export class MemnoxDaemon {
       ...(verdict.alternative === undefined ? {} : { alternative: verdict.alternative }),
     };
   }
-}
-
-function settled(subject: string, at: string): DaemonEvent {
-  return {
-    kind: DAEMON_EVENT.SETTLED,
-    subject,
-    agent: UNNAMED_AGENT,
-    summary: 'no longer waiting on you',
-    at,
-  };
-}
-
-/** A client that hung up before its answer is ordinary, so nothing is written to it. */
-function write(socket: Socket, response: DaemonResponse): void {
-  if (!socket.destroyed) socket.write(encode(response));
 }
 
 interface HoldInput {
