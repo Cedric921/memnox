@@ -29,6 +29,7 @@ import { registerBudgetCommand } from './commands/budget.command';
 import { registerNextCommand } from './commands/next.command';
 import { registerUnattendedCommand } from './commands/unattended.command';
 import { registerAskCommand } from './commands/ask.command';
+import { registerVoiceCommand } from './commands/voice.command';
 import { registerReportCommand } from './commands/report.command';
 import { registerSkillsCommand } from './commands/skills.command';
 import { registerEnvCommand } from './commands/env.command';
@@ -115,6 +116,13 @@ function registerTerminalCommands(program: Command, context: CliContext): void {
   registerUpdateCommand(program, context);
 }
 
+/** What the voice answers through, which a person can also type: can I leave, ask, the key. */
+function registerVoiceCommands(program: Command, context: CliContext): void {
+  registerUnattendedCommand(program, context);
+  registerAskCommand(program, context);
+  registerVoiceCommand(program, context);
+}
+
 function registerCommands(program: Command, context: CliContext): void {
   registerTerminalCommands(program, context);
   registerAgentsCommand(program, context);
@@ -131,8 +139,7 @@ function registerCommands(program: Command, context: CliContext): void {
   registerClaimsCommand(program, context);
   registerBudgetCommand(program, context);
   registerNextCommand(program, context);
-  registerUnattendedCommand(program, context);
-  registerAskCommand(program, context);
+  registerVoiceCommands(program, context);
   registerReportCommand(program, context);
   registerSkillsCommand(program, context);
   registerEnvCommand(program, context);

@@ -893,6 +893,14 @@ since nothing below it would be stopped; then something destructive running
 unasked, calls waiting on you, paused sessions and spent budgets. Each line is a
 count or a fact, never a score.
 
+### `memnox voice` / `memnox voice forget-key`
+`memnox voice` shows the key the Mac app signs its confirmations with: when it was
+registered and how it ends, never the whole of it. The first key to register is
+trusted and the daemon never replaces it, so `forget-key` is how a person clears it,
+for a new Mac or a reinstalled app. It asks first and defaults to no, because the next
+key to register is the one trusted; open the app straight after. An agent is refused
+it, like every command that loosens what agents may do.
+
 ### `memnox ask "<anything>"`
 Ask about your agents in your own words, and get the answer your voice would
 hear. The words go whole to your own Claude Code, logged in as you already are,
