@@ -33,7 +33,8 @@
     "memnox-git-credential": "dist/bin/git-credential.js",
     "memnox-egress": "dist/bin/egress.js",
     "memnox-edit-hook": "dist/bin/edit-hook.js",
-    "memnox-session": "dist/bin/session.js"
+    "memnox-session": "dist/bin/session.js",
+    "memnox-operator": "dist/bin/operator.js"
   },
   "engines": {
     "node": ">=22"

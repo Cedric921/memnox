@@ -16,7 +16,7 @@ import { briefTool, memoryTool } from './memory-tools';
 import { fingerprintTool } from './fingerprint-tool';
 
 /** A tool as `tools/list` describes it; the annotations are how a host decides to ask. */
-interface ToolDefinition {
+export interface ToolDefinition {
   name: string;
   description: string;
   inputSchema: {
@@ -45,7 +45,7 @@ export const NEVER_OFFERED: readonly string[] = [
   'enrol',
 ];
 
-function readTool(
+export function readTool(
   name: string,
   description: string,
   properties: ToolDefinition['inputSchema']['properties'] = {},
@@ -58,7 +58,7 @@ function readTool(
   };
 }
 
-const SESSION_ARG = {
+export const SESSION_ARG = {
   type: 'string',
   description: "a session id; this agent's own latest when left out",
 } as const;

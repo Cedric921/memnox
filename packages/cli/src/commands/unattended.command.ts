@@ -50,7 +50,7 @@ export function registerUnattendedCommand(
     });
 }
 
-async function readUnattended(
+export async function readUnattended(
   home: string,
   project: string,
   agent: string,

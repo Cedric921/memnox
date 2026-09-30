@@ -12,6 +12,7 @@ export default defineConfig({
     'src/bin/egress.ts',
     'src/bin/edit-hook.ts',
     'src/bin/session.ts',
+    'src/bin/operator.ts',
   ],
   format: ['esm'],
   clean: true,

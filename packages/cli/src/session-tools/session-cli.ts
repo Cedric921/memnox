@@ -17,6 +17,7 @@ import { readStatus } from '../commands/status.command';
 import { fetchBrief } from '../sync/memory';
 import type { SessionToolDeps } from './read-tools';
 import type { RewindSeams } from './rewind-tool';
+import { OPERATOR_CATALOGUE } from './operator-tools';
 import { serveSession } from './session-server';
 
 /** Whose sessions to read when the launch line names nobody. */
@@ -82,20 +83,40 @@ function depsFor(argv: readonly string[], env: NodeJS.ProcessEnv): SessionToolDe
   };
 }
 
+function seamsFor(env: NodeJS.ProcessEnv): Omit<RewindSeams, 'confirm'> {
+  return {
+    build: milestonesIn,
+    unattended: () => isUnattended(env),
+    terminal: hasTerminal,
+  };
+}
+
 /** Serves on this process's stdio until the host closes it. */
 export function runSessionServer(
   argv: readonly string[],
   env: NodeJS.ProcessEnv,
 ): Promise<void> {
-  const seams: Omit<RewindSeams, 'confirm'> = {
-    build: milestonesIn,
-    unattended: () => isUnattended(env),
-    terminal: hasTerminal,
-  };
   return serveSession({
     input: process.stdin,
     output: process.stdout,
     deps: depsFor(argv, env),
-    seams,
+    seams: seamsFor(env),
+  });
+}
+
+/**
+ * `memnox-operator`: the same wire with the voice's tools, launched by the person's own
+ * agent CLI as the only tools it has, and never registered into a working agent's session.
+ */
+export function runOperatorServer(
+  argv: readonly string[],
+  env: NodeJS.ProcessEnv,
+): Promise<void> {
+  return serveSession({
+    input: process.stdin,
+    output: process.stdout,
+    deps: depsFor(argv, env),
+    seams: seamsFor(env),
+    catalogue: OPERATOR_CATALOGUE,
   });
 }
