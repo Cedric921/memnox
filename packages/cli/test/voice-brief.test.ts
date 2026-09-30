@@ -49,15 +49,32 @@ function echoBrain(prompts: string[]): Brain {
     },
     close: () => undefined,
     cancel: () => undefined,
+    warm: async () => undefined,
   };
 }
 
 describe('how the voice speaks', () => {
-  it('speaks to the person by name, as someone who has been watching', () => {
-    const prompt = voicePrompt('Moise');
-    expect(prompt).toContain('speaking out loud to Moise');
+  it('talks like a teammate, by example, and never by their name', () => {
+    const prompt = voicePrompt();
+    expect(prompt).toContain('Answer in one short sentence');
+    expect(prompt).toContain('Like this: "Two are working.');
+    expect(prompt).toContain('Never use their name');
     expect(prompt).toContain('never guess');
     expect(prompt).toContain('never allow anything yourself');
+  });
+
+  it('lets a held call, and only a held call, start with their name', () => {
+    const event: DaemonEvent = {
+      kind: 'held',
+      subject: 'apr_2',
+      agent: 'claude-code',
+      summary: 's',
+      at: NOW,
+    };
+    expect(heldBrief(event, 'Moise')).toContain(
+      'start with their name, Moise, this once',
+    );
+    expect(heldBrief(event)).not.toContain('their name');
   });
 
   it('tells a held call with its session, and treats what the agent wrote as data', () => {

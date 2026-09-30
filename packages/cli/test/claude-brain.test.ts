@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { chmod, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -186,22 +186,44 @@ describe("the person's own Claude Code as the brain", () => {
     expect(argv[argv.indexOf('--resume') + 1]).toBe('conv-1');
   });
 
-  it('speaks to the person by the name they chose', async () => {
+  it('talks on the fast model, and never hands the brain their name', async () => {
     const setup = await fake();
     const brain = new ClaudeCodeBrain({
       home: setup.home,
       command: setup.command,
       operator: { command: '/usr/bin/true', args: [] },
       env: { ...process.env, FAKE_LOG: setup.log },
-      person: async () => 'Moise',
+      model: 'haiku',
+      effort: 'low',
     });
     await turn(brain, 'hello');
     brain.close();
     const [first] = await launches(setup.log);
     const argv = first?.argv ?? [];
-    expect(argv[argv.indexOf('--append-system-prompt') + 1]).toContain(
-      'speaking out loud to Moise',
+    expect(argv[argv.indexOf('--model') + 1]).toBe('haiku');
+    expect(argv[argv.indexOf('--effort') + 1]).toBe('low');
+    expect(argv[argv.indexOf('--system-prompt') + 1]).toContain('Never use their name');
+    expect(argv).not.toContain('--append-system-prompt');
+    expect(argv[argv.indexOf('--setting-sources') + 1]).toBe('project');
+  });
+
+  it('starts fresh rather than resume a conversation begun under other instructions', async () => {
+    const setup = await fake();
+    await mkdir(join(setup.home, '.memnox', 'voice'), { recursive: true });
+    await writeFile(
+      join(setup.home, '.memnox', 'voice', 'conversation.json'),
+      JSON.stringify({
+        brain: 'claude',
+        sessionId: 'conv-old',
+        lastAt: new Date().toISOString(),
+        version: 'instructions-from-before',
+      }),
     );
+    const brain = brainFor(setup);
+    await turn(brain, 'hello');
+    brain.close();
+    const [first] = await launches(setup.log);
+    expect(first?.argv).not.toContain('--resume');
   });
 });
 

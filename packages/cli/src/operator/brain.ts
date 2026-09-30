@@ -36,4 +36,6 @@ export interface Brain {
   close(): void;
   /** Stops the turn in flight, which then ends with CANCELLED; the conversation survives it. */
   cancel(): void;
+  /** Starts the process before the question arrives, so the first answer skips the cold start. */
+  warm(): Promise<void>;
 }

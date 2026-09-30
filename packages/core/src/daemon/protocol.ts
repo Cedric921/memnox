@@ -39,6 +39,8 @@ export const DAEMON_METHOD = {
   LOCATE: 'locate',
   /** Something happened rather than was asked: the brain says it, streamed like ASK. */
   BRIEF: 'brief',
+  /** The person started talking: start the brain now so the answer skips the cold start. */
+  WARM: 'warm',
 } as const;
 
 export type DaemonMethod = (typeof DAEMON_METHOD)[keyof typeof DAEMON_METHOD];

@@ -13,7 +13,7 @@ import {
   type DaemonResponse,
 } from '@memnox/core';
 import type { Brain } from '../operator/brain';
-import { keepOwner } from '../operator/owner';
+import { keepOwner, readOwner } from '../operator/owner';
 import { backBrief, heldBrief, pausedBrief } from '../operator/voice-prompts';
 import { BrainTurns } from './brain-turns';
 import { confirmAnswer } from './confirm';
@@ -41,6 +41,7 @@ const VOICE_METHODS: readonly string[] = [
   DAEMON_METHOD.CANCEL,
   DAEMON_METHOD.LOCATE,
   DAEMON_METHOD.BRIEF,
+  DAEMON_METHOD.WARM,
 ];
 
 interface VoiceDeps {
@@ -76,6 +77,12 @@ export class VoiceSurface {
     if (request.owner !== undefined)
       await keepOwner(this.deps.home, request.owner).catch(() => undefined);
     if (request.method === DAEMON_METHOD.BRIEF) return this.brief(socket, request);
+    if (request.method === DAEMON_METHOD.WARM) {
+      // Answered at once and warmed behind it, since the person is still talking.
+      write(socket, { id: request.id, ok: true, outcome: 'warming' });
+      void this.turns?.warm();
+      return;
+    }
     if (request.method === DAEMON_METHOD.SUBSCRIBE)
       return this.subscribe(socket, request.id);
     if (request.method === DAEMON_METHOD.ASK) return this.ask(socket, request);
@@ -190,8 +197,11 @@ export class VoiceSurface {
     }
     const waiting = await this.feed.current(this.deps.now());
     const event = waiting.find((each) => each.subject === request.subject);
-    if (request.briefing === BRIEFING.HELD)
-      return event === undefined ? null : heldBrief(event);
+    if (request.briefing === BRIEFING.HELD) {
+      return event === undefined
+        ? null
+        : heldBrief(event, await readOwner(this.deps.home));
+    }
     if (request.briefing === BRIEFING.PAUSED && request.subject !== undefined) {
       const pause = await new SessionPauses(this.deps.home).read(request.subject);
       return pause === null

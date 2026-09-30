@@ -303,6 +303,7 @@ describe('asking the daemon in your own words', () => {
     },
     close: () => undefined,
     cancel: () => undefined,
+    warm: async () => undefined,
   };
 
   it('streams the answer one chunk per line, ending on done', async () => {

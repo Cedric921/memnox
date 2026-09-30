@@ -1,5 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { ENV_AGENT_NAME, LineBuffer, SESSION_VAR } from '@memnox/core';
+import { ENV_AGENT_NAME, LineBuffer, SESSION_VAR, shortDigest } from '@memnox/core';
 import { BRAIN_CHUNK, type Brain, type BrainChunk } from './brain';
 import { readStreamLine } from './claude-stream';
 import { Conversations } from './conversation';
@@ -23,8 +23,11 @@ interface ClaudeBrainOptions {
   command?: string;
   env?: NodeJS.ProcessEnv;
   now?: () => Date;
-  /** The name to speak to them by, read when the brain starts. */
-  person?: () => Promise<string | undefined>;
+  /** A model built for quick talk rather than the person's default, which is built for depth. */
+  model?: string;
+  effort?: string;
+  /** Where the process starts: somewhere with no project, so no project memory is read. */
+  cwd?: string;
 }
 
 export class ClaudeCodeBrain implements Brain {
@@ -62,6 +65,11 @@ export class ClaudeCodeBrain implements Brain {
     }
   }
 
+  /** Starts the process ahead of the question, so the answer does not wait on a cold start. */
+  async warm(): Promise<void> {
+    await this.started();
+  }
+
   close(): void {
     this.child?.stdin.end();
     this.child = null;
@@ -80,16 +88,20 @@ export class ClaudeCodeBrain implements Brain {
 
   private async started(): Promise<ChildProcessWithoutNullStreams> {
     if (this.child !== null) return this.child;
-    const resume = await this.conversations.resumable(this.name, this.now());
-    const person = await this.options.person?.();
+    const resume = await this.conversations.resumable(
+      this.name,
+      this.now(),
+      this.version(),
+    );
     // A fresh queue per process, since the last one ended when its process did.
     const lines = new LineQueue();
     this.lines = lines;
     const child = spawn(
       this.options.command ?? 'claude',
-      claudeArgs(this.options, resume, person),
+      claudeArgs(this.options, resume),
       {
         env: brainEnv(this.options.env ?? process.env),
+        ...(this.options.cwd === undefined ? {} : { cwd: this.options.cwd }),
         stdio: ['pipe', 'pipe', 'pipe'],
       },
     );
@@ -110,10 +122,17 @@ export class ClaudeCodeBrain implements Brain {
 
   private async keep(sessionId: string): Promise<void> {
     try {
-      await this.conversations.keep(this.name, sessionId, this.now());
+      await this.conversations.keep(this.name, sessionId, this.now(), this.version());
     } catch {
       // Resuming is a convenience: a home that cannot be written loses the follow up, never the answer.
     }
+  }
+
+  /** The instructions and model together: change either and the next question starts fresh. */
+  private version(): string {
+    return shortDigest(
+      `${voicePrompt()}|${this.options.model ?? ''}|${this.options.effort ?? ''}`,
+    );
   }
 
   private now(): Date {
@@ -122,11 +141,7 @@ export class ClaudeCodeBrain implements Brain {
 }
 
 /** The flags that make Claude Code a brain that reads and proposes and does nothing else. */
-function claudeArgs(
-  options: ClaudeBrainOptions,
-  resume: string | null,
-  person: string | undefined,
-): string[] {
+function claudeArgs(options: ClaudeBrainOptions, resume: string | null): string[] {
   const servers = {
     mcpServers: {
       [OPERATOR_SERVER]: {
@@ -151,8 +166,16 @@ function claudeArgs(
     JSON.stringify(servers),
     '--allowedTools',
     `mcp__${OPERATOR_SERVER}`,
-    '--append-system-prompt',
-    voicePrompt(person),
+    // Replaces Claude Code's own coding prompt rather than adding to it, since that one asks
+    // for thorough written answers and a voice needs one spoken sentence.
+    '--system-prompt',
+    voicePrompt(),
+    // Only a project's settings, and the brain starts where there is no project: no hooks on
+    // every tool call, and nothing of the person's own memory or instructions rides along.
+    '--setting-sources',
+    'project',
+    ...(options.model === undefined ? [] : ['--model', options.model]),
+    ...(options.effort === undefined ? [] : ['--effort', options.effort]),
     ...(resume === null ? [] : ['--resume', resume]),
   ];
 }

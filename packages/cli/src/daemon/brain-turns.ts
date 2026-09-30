@@ -24,6 +24,16 @@ export class BrainTurns {
     return turn;
   }
 
+  /** Starts the brain now, so a question that is still being spoken meets a warm process. */
+  async warm(): Promise<void> {
+    if (this.idle !== null) clearTimeout(this.idle);
+    const brain = this.brain ?? this.start();
+    this.brain = brain;
+    await brain.warm().catch(() => undefined);
+    this.idle = setTimeout(() => this.close(), this.idleMs);
+    this.idle.unref();
+  }
+
   /** Stops the turn in flight, if there is one; the turns queued behind it still run. */
   cancel(): boolean {
     if (this.brain === null || !this.busy) return false;

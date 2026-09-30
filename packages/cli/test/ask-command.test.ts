@@ -15,6 +15,7 @@ function brainSaying(chunks: BrainChunk[], heard: string[] = []): Brain {
     },
     close: () => undefined,
     cancel: () => undefined,
+    warm: async () => undefined,
   };
 }
 

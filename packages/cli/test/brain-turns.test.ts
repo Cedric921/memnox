@@ -8,6 +8,7 @@ class SlowBrain implements Brain {
   readonly name = 'claude';
   closed = 0;
   cancelled = 0;
+  warmed = 0;
   constructor(private readonly log: string[]) {}
 
   async *ask(said: string): AsyncIterable<BrainChunk> {
@@ -24,6 +25,10 @@ class SlowBrain implements Brain {
 
   cancel(): void {
     this.cancelled += 1;
+  }
+
+  async warm(): Promise<void> {
+    this.warmed += 1;
   }
 }
 
@@ -90,6 +95,7 @@ describe('one warm brain behind the daemon', () => {
         },
         close: () => undefined,
         cancel: () => undefined,
+        warm: async () => undefined,
       }),
       60_000,
     );
@@ -110,5 +116,19 @@ describe('one warm brain behind the daemon', () => {
     await running;
     turns.close();
     expect(brain.cancelled).toBe(1);
+  });
+
+  it('starts the brain before the question, and answers on that same warm brain', async () => {
+    let started = 0;
+    const brain = new SlowBrain([]);
+    const turns = new BrainTurns(() => {
+      started += 1;
+      return brain;
+    }, 60_000);
+    await turns.warm();
+    await turns.ask('what now', () => undefined);
+    turns.close();
+    expect(brain.warmed).toBe(1);
+    expect(started).toBe(1);
   });
 });
