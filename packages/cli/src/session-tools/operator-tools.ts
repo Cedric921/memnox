@@ -2,7 +2,9 @@ import { unattendedCheck } from '@memnox/core';
 import { readUnattended } from '../commands/unattended.command';
 import { WaitingFeed } from '../daemon/waiting-feed';
 import { DEFAULT_AGENT } from '../next/boundary-report';
+import { changesTool, readingFor } from './changes-tool';
 import { proposeAnswerTool, proposeRuleTool } from './propose-tools';
+import { sessionsTool } from './sessions-tool';
 import {
   decisionsTool,
   replayTool,
@@ -12,6 +14,7 @@ import {
   type SessionToolDeps,
   type ToolArgs,
 } from './read-tools';
+import type { RewindSeams } from './rewind-tool';
 import type { ToolCatalogue } from './session-server';
 import { readTool, SESSION_ARG, type ToolDefinition } from './session-tools';
 
@@ -51,6 +54,14 @@ export const OPERATOR_TOOLS: readonly ToolDefinition[] = [
     'Where this machine stands: the mode, which agents are here, what is held, and what happened today.',
   ),
   readTool(
+    'sessions',
+    'Every agent session on this machine lately, newest first: the agent, its task, the repository, how busy and how quiet it has been, what is waiting on the person and whether it is paused. When the person names an agent that has more than one session, ask which one they mean.',
+    {
+      agent: AGENT_ARG,
+      hours: { type: 'string', description: 'how far back to look; 24 when left out' },
+    },
+  ),
+  readTool(
     'waiting',
     'What is waiting on the person right now: held calls from agents, and proposals to confirm. Each has an id to answer with.',
   ),
@@ -87,6 +98,23 @@ export const OPERATOR_TOOLS: readonly ToolDefinition[] = [
       path: { type: 'string', description: 'a file or directory the action touches' },
     },
   ),
+  readTool(
+    'changes',
+    "What an agent's session changed in the code since its first write: files with lines added and removed, or the diff of one file, and the task it was given.",
+    {
+      agent: AGENT_ARG,
+      session: SESSION_ARG,
+      path: {
+        type: 'string',
+        description: 'one changed file, for its diff; the list of files when left out',
+      },
+      repository: {
+        type: 'string',
+        description:
+          'the repository, when it cannot be found from what the session touched',
+      },
+    },
+  ),
   proposeTool(
     'propose_answer',
     'Answer a held call with what the person said. "deny" takes effect at once. "once" and "session" wait for Touch ID on the Mac, so say that the person has to confirm.',
@@ -118,17 +146,20 @@ export const OPERATOR_TOOLS: readonly ToolDefinition[] = [
 
 /** The same reads the session server makes, pointed at whichever agent the person named. */
 function asAgent(deps: SessionToolDeps, args: ToolArgs): SessionToolDeps {
-  return { ...deps, agent: textArg(args, 'agent') ?? DEFAULT_AGENT };
+  return readingFor(deps, textArg(args, 'agent') ?? DEFAULT_AGENT);
 }
 
 export async function callOperatorTool(
   deps: SessionToolDeps,
+  seams: RewindSeams,
   name: string,
   args: ToolArgs,
 ): Promise<unknown> {
   switch (name) {
     case 'status':
       return statusTool(deps);
+    case 'sessions':
+      return sessionsTool(deps, args);
     case 'waiting':
       return new WaitingFeed(deps.home).current(deps.now().toISOString());
     case 'unattended':
@@ -145,6 +176,8 @@ export async function callOperatorTool(
       return replayTool(asAgent(deps, args), args);
     case 'decisions':
       return decisionsTool(asAgent(deps, args), args);
+    case 'changes':
+      return changesTool(asAgent(deps, args), seams, args);
     case 'propose_answer':
       return proposeAnswerTool(deps, args);
     case 'propose_rule':
@@ -155,11 +188,11 @@ export async function callOperatorTool(
 }
 
 const ABOUT_OPERATOR =
-  'You are the voice of Memnox, speaking with the person who runs these agents. Answer out loud: short sentences, the answer first, numbers said plainly, never a list read aloud. Read the machine through these tools before you answer, and never guess. When the person answers a held call or asks for a rule, in whatever words, call propose_answer or propose_rule. You can never allow anything yourself: every allow waits for the person to confirm with Touch ID on the Mac, so tell them that.';
+  'You are the voice of Memnox, speaking with the person who runs these agents. Answer out loud: short sentences, the answer first, numbers said plainly, never a list read aloud. Read the machine through these tools before you answer, and never guess. Several sessions can be open at once, even for one agent: call sessions first, pass the session id to every other tool, and when the person could mean more than one, ask which. When the person answers a held call or asks for a rule, in whatever words, call propose_answer or propose_rule. You can never allow anything yourself: every allow waits for the person to confirm with Touch ID on the Mac, so tell them that.';
 
 export const OPERATOR_CATALOGUE: ToolCatalogue = {
   info: { name: 'memnox-operator', version: '1' },
   tools: OPERATOR_TOOLS,
-  call: (deps, _seams, name, args) => callOperatorTool(deps, name, args),
+  call: callOperatorTool,
   instructions: async () => ABOUT_OPERATOR,
 };

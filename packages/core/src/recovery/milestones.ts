@@ -12,6 +12,7 @@ import {
   MILESTONE_REF_PREFIX,
   milestonesToForget,
   refFor,
+  type FileChange,
   type Milestone,
   type MilestoneReason,
 } from './milestone';
@@ -274,6 +275,26 @@ export class Milestones {
     return nonEmptyLines(listing);
   }
 
+  /**
+   * What the working tree changed since a milestone, file by file. The current tree is
+   * written as objects only, so nothing a person sees, no ref and no index, moves.
+   */
+  async changedSince(id: string): Promise<FileChange[]> {
+    const from = await this.find(id);
+    const { tree } = await this.writeWorkingTree(await this.repositoryRoot());
+    const range = ['--no-renames', from.commit, tree];
+    const statuses = await this.git.run(['diff', '--name-status', ...range]);
+    const counts = await this.git.run(['diff', '--numstat', ...range]);
+    return mergedChanges(nonEmptyLines(statuses), nonEmptyLines(counts));
+  }
+
+  /** The diff of one file since a milestone, as git prints it. */
+  async diffSince(id: string, path: string): Promise<string> {
+    const from = await this.find(id);
+    const { tree } = await this.writeWorkingTree(await this.repositoryRoot());
+    return this.git.run(['diff', '--no-renames', from.commit, tree, '--', path]);
+  }
+
   async forget(keep: number = MILESTONE_KEEP): Promise<string[]> {
     const dropped = milestonesToForget(await this.list(), keep);
     for (const milestone of dropped) {
@@ -316,4 +337,25 @@ export class Milestones {
       }
     }
   }
+}
+
+/** `--name-status` and `--numstat` lines joined by path, since neither says both. */
+function mergedChanges(
+  statuses: readonly string[],
+  counts: readonly string[],
+): FileChange[] {
+  const lines = new Map<string, { added: number | null; removed: number | null }>();
+  for (const line of counts) {
+    const [added = '-', removed = '-', path = ''] = line.split('\t');
+    lines.set(path, { added: countOf(added), removed: countOf(removed) });
+  }
+  return statuses.map((line) => {
+    const [status = 'M', path = ''] = line.split('\t');
+    return { path, status, ...(lines.get(path) ?? { added: null, removed: null }) };
+  });
+}
+
+/** Git prints a dash for a binary file, which has no lines to count. */
+function countOf(field: string): number | null {
+  return field === '-' ? null : Number(field);
 }

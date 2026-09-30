@@ -1,5 +1,6 @@
+import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdtemp } from 'node:fs/promises';
+import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
@@ -7,11 +8,17 @@ import { describe, expect, it } from 'vitest';
 import {
   ACTION,
   HOLD_ANSWER,
+  Milestones,
+  NodeGit,
+  NodeWorktree,
   PendingApprovals,
   PROPOSAL_KIND,
   Proposals,
   selfProtection,
+  SessionTasks,
+  SqliteEventStore,
   type HoldRequest,
+  type MemnoxEvent,
 } from '@memnox/core';
 import {
   callOperatorTool,
@@ -20,6 +27,7 @@ import {
 } from '../src/session-tools/operator-tools';
 import { OPERATOR_AGENT } from '../src/session-tools/propose-tools';
 import type { SessionToolDeps } from '../src/session-tools/read-tools';
+import type { RewindSeams } from '../src/session-tools/rewind-tool';
 import { serveSession } from '../src/session-tools/session-server';
 
 /**
@@ -39,6 +47,17 @@ const HELD: HoldRequest = {
   reason: 'pushing to main needs a person',
 };
 
+function milestonesIn(place: string): Milestones {
+  return new Milestones(new NodeGit(place), new NodeWorktree(place));
+}
+
+const SEAMS: RewindSeams = {
+  build: milestonesIn,
+  unattended: () => true,
+  terminal: () => false,
+  confirm: async () => null,
+};
+
 async function depsAt(): Promise<SessionToolDeps> {
   const home = await mkdtemp(join(tmpdir(), 'memnox-operator-'));
   return {
@@ -48,9 +67,47 @@ async function depsAt(): Promise<SessionToolDeps> {
     env: {},
     now: () => NOW,
     readStatus: async () => ({ mode: 'enforce' }),
-    milestonesAt: async () => [],
+    milestonesAt: async (place) =>
+      milestonesIn(place)
+        .list()
+        .catch(() => []),
     brief: async () => null,
   };
+}
+
+function event(
+  sessionId: string,
+  agent: string,
+  over: Partial<MemnoxEvent>,
+): MemnoxEvent {
+  return {
+    id: `evt_${sessionId}_${over.operation ?? 'x'}_${over.at ?? ''}`,
+    schemaVersion: 1,
+    at: '2026-09-30T11:00:00.000Z',
+    sessionId,
+    agent,
+    actorType: 'agent',
+    surface: 'filesystem',
+    operation: 'filesystem.write',
+    class: 'write',
+    effect: 'allow',
+    mode: 'enforce',
+    reason: 'no rule matched',
+    ...over,
+  };
+}
+
+async function recorded(home: string, events: MemnoxEvent[]): Promise<void> {
+  const store = SqliteEventStore.forHome(home);
+  for (const each of events) await store.append(each);
+  store.close();
+}
+
+function git(cwd: string, ...args: string[]): void {
+  execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', ...args], {
+    cwd,
+    stdio: 'ignore',
+  });
 }
 
 describe('what the operator is offered', () => {
@@ -97,7 +154,7 @@ describe('answering a held call from what the person said', () => {
       TWO_MINUTES,
     );
 
-    const answer = await callOperatorTool(deps, 'propose_answer', {
+    const answer = await callOperatorTool(deps, SEAMS, 'propose_answer', {
       call: held.id,
       answer: HOLD_ANSWER.DENY,
       said: 'no, not on main',
@@ -117,7 +174,7 @@ describe('answering a held call from what the person said', () => {
       TWO_MINUTES,
     );
 
-    const answer = await callOperatorTool(deps, 'propose_answer', {
+    const answer = await callOperatorTool(deps, SEAMS, 'propose_answer', {
       call: held.id,
       answer: HOLD_ANSWER.ONCE,
       said: 'yeah go ahead, just this once',
@@ -148,10 +205,13 @@ describe('answering a held call from what the person said', () => {
     );
 
     expect(
-      await callOperatorTool(deps, 'propose_answer', { call: held.id, answer: 'edit' }),
+      await callOperatorTool(deps, SEAMS, 'propose_answer', {
+        call: held.id,
+        answer: 'edit',
+      }),
     ).toHaveProperty('refused');
     expect(
-      await callOperatorTool(deps, 'propose_answer', {
+      await callOperatorTool(deps, SEAMS, 'propose_answer', {
         call: 'apr_gone',
         answer: 'deny',
       }),
@@ -164,7 +224,7 @@ describe('a rule the person asked for', () => {
     const deps = await depsAt();
     const project = join(deps.home, 'shop');
 
-    const answer = await callOperatorTool(deps, 'propose_rule', {
+    const answer = await callOperatorTool(deps, SEAMS, 'propose_rule', {
       action: 'npm.publish',
       effect: 'deny',
       reason: 'nobody publishes from a laptop',
@@ -181,7 +241,7 @@ describe('a rule the person asked for', () => {
 
   it('names a spoken command the way the engine rules on it', async () => {
     const deps = await depsAt();
-    const answer = await callOperatorTool(deps, 'propose_rule', {
+    const answer = await callOperatorTool(deps, SEAMS, 'propose_rule', {
       action: 'railway deploy',
       effect: 'deny',
       project: deps.home,
@@ -194,7 +254,7 @@ describe('a rule the person asked for', () => {
   it('refuses an effect the engine does not know', async () => {
     const deps = await depsAt();
     expect(
-      await callOperatorTool(deps, 'propose_rule', {
+      await callOperatorTool(deps, SEAMS, 'propose_rule', {
         action: 'npm.publish',
         effect: 'sort-of',
         project: deps.home,
@@ -205,7 +265,7 @@ describe('a rule the person asked for', () => {
   it('asks for the project rather than guessing when none has a rule file', async () => {
     const deps = await depsAt();
     expect(
-      await callOperatorTool(deps, 'propose_rule', {
+      await callOperatorTool(deps, SEAMS, 'propose_rule', {
         action: 'npm.publish',
         effect: 'deny',
       }),
@@ -253,5 +313,93 @@ describe('the operator on the wire', () => {
       name: string;
     }[];
     expect(tools.map((each) => each.name)).toContain('propose_rule');
+  });
+});
+
+describe('more than one session at once', () => {
+  it('lists every session, so two Claude sessions are two rows and not the newest one', async () => {
+    const deps = await depsAt();
+    await recorded(deps.home, [
+      event('ses_checkout', 'claude-code', { at: '2026-09-30T11:00:00.000Z' }),
+      event('ses_api', 'claude-code', { at: '2026-09-30T11:30:00.000Z' }),
+      event('ses_codex', 'codex', { at: '2026-09-30T11:45:00.000Z' }),
+    ]);
+    await new SessionTasks(deps.home).declare({
+      id: 'tsk_1',
+      sessionId: 'ses_checkout',
+      statement: 'add order cancellation',
+      scope: {},
+      declaredAt: '2026-09-30T10:59:00.000Z',
+    });
+
+    const claude = (await callOperatorTool(deps, SEAMS, 'sessions', {
+      agent: 'claude-code',
+    })) as { session: string; task?: string; quietForMinutes: number }[];
+
+    expect(claude.map((each) => each.session)).toEqual(['ses_api', 'ses_checkout']);
+    expect(claude[1]?.task).toBe('add order cancellation');
+    expect(claude[0]?.quietForMinutes).toBe(30);
+    const everyone = (await callOperatorTool(deps, SEAMS, 'sessions', {})) as unknown[];
+    expect(everyone).toHaveLength(3);
+  });
+
+  it('never reads its own run as the session the person asked about', async () => {
+    const deps = await depsAt();
+    await recorded(deps.home, [event('ses_work', 'claude-code', {})]);
+    const answer = await callOperatorTool(
+      { ...deps, env: { MEMNOX_SESSION: 'ses_operator_itself' } },
+      SEAMS,
+      'replay',
+      { agent: 'claude-code' },
+    );
+    expect(answer).toMatchObject({ sessionId: 'ses_work' });
+  });
+});
+
+describe('what a session changed in the code', () => {
+  it('lists the files it changed since its first write, and the diff of one', async () => {
+    const deps = await depsAt();
+    const repo = await mkdtemp(join(tmpdir(), 'memnox-operator-repo-'));
+    git(repo, 'init', '-q');
+    await writeFile(join(repo, 'orders.ts'), 'export const orders = [];\n');
+    git(repo, 'add', '.');
+    git(repo, 'commit', '-q', '-m', 'start');
+    await milestonesIn(repo).take({ at: '2026-09-30T11:00:00.000Z', sessionId: 'ses_1' });
+    await writeFile(
+      join(repo, 'orders.ts'),
+      'export const orders = [];\nexport function cancel(): void {}\n',
+    );
+    await writeFile(join(repo, 'cancel.test.ts'), 'test();\n');
+    await recorded(deps.home, [
+      event('ses_1', 'claude-code', { target: join(repo, 'orders.ts') }),
+    ]);
+
+    const files = (await callOperatorTool(deps, SEAMS, 'changes', {
+      agent: 'claude-code',
+    })) as { files: { total: number; shown: { path: string; status: string }[] } };
+    expect(files.files.shown).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ path: 'cancel.test.ts', status: 'A', added: 1 }),
+        expect.objectContaining({ path: 'orders.ts', status: 'M', added: 1, removed: 0 }),
+      ]),
+    );
+
+    const diff = (await callOperatorTool(deps, SEAMS, 'changes', {
+      agent: 'claude-code',
+      path: 'orders.ts',
+    })) as { diff: { lines: string[] } };
+    expect(diff.diff.lines).toContain('+export function cancel(): void {}');
+    // Only objects were written, so the person's own index and refs never moved.
+    expect(
+      execFileSync('git', ['status', '--porcelain'], { cwd: repo, encoding: 'utf8' }),
+    ).toContain('?? cancel.test.ts');
+  });
+
+  it('says so when no milestone was taken, rather than inventing a diff', async () => {
+    const deps = await depsAt();
+    await recorded(deps.home, [event('ses_2', 'claude-code', {})]);
+    expect(
+      await callOperatorTool(deps, SEAMS, 'changes', { agent: 'claude-code' }),
+    ).toMatchObject({ found: false });
   });
 });
