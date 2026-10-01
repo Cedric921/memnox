@@ -47,6 +47,8 @@ export interface ActionOutcome {
   /** Action plus target, digested by the caller. Identical work shares one. */
   fingerprint: string;
   action: string;
+  /** What it ran against, such as "symbolic-ref" for a git verb no table names, so a pause says which command. */
+  target?: string;
   at: string;
   /** Whether it failed. The caller decides: an exit code means different things per tool. */
   failed: boolean;
@@ -84,6 +86,10 @@ function recordOutcome(state: SessionState, outcome: ActionOutcome): number {
   if (!outcome.failed) {
     // Anything that worked is progress, and progress resets the run of failures.
     state.consecutiveFailures = 0;
+    // The same command working again means its failures were a passing state, not a loop.
+    for (const key of [...state.failures.keys()]) {
+      if (key.startsWith(`${outcome.fingerprint}:`)) state.failures.delete(key);
+    }
     return 0;
   }
   state.consecutiveFailures += 1;
@@ -152,7 +158,7 @@ export class CircuitBreaker {
       signal: BREAKER_SIGNAL.ERROR_LOOP,
       reached: same,
       ceiling: this.thresholds.errorLoop,
-      reason: `${outcome.action} has failed the same way ${same} times; retrying it again will fail the same way`,
+      reason: `${commandOf(outcome)} has failed the same way ${same} times${outcome.failureKind === undefined ? '' : `, exiting ${outcome.failureKind}`}; retrying it again will fail the same way`,
     };
   }
 
@@ -236,4 +242,13 @@ export function breachIn(
     if (breach !== null) return breach;
   }
   return null;
+}
+
+/** "git symbolic-ref" rather than "git.unknown", since a verb no table knows says nothing on its own. */
+function commandOf(outcome: ActionOutcome): string {
+  if (outcome.target === undefined || outcome.target === '') return outcome.action;
+  const tool = outcome.action.split('.')[0] ?? outcome.action;
+  return outcome.action.endsWith('.unknown')
+    ? `${tool} ${outcome.target}`
+    : `${outcome.action} on ${outcome.target}`;
 }

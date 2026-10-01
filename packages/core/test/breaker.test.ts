@@ -41,6 +41,29 @@ describe('the same failure, over and over', () => {
     expect(breach?.reason).toContain('5 times');
   });
 
+  it('forgets the failures of a command that has since worked, so a passing state is not a loop', () => {
+    const breaker = new CircuitBreaker();
+    for (let i = 0; i < 8; i += 1) {
+      expect(breaker.observe(failing())).toBeNull();
+      expect(breaker.observe(outcome())).toBeNull();
+    }
+  });
+
+  it('names the command and its exit code when the verb is one no table knows', () => {
+    const breaker = new CircuitBreaker();
+    const make = (): ActionOutcome =>
+      failing({
+        action: 'git.unknown',
+        target: 'symbolic-ref',
+        fingerprint: 'git.unknown:symbolic-ref',
+        failureKind: '128',
+      });
+    const breach = run(breaker, 5, make);
+    expect(breach?.reason).toContain(
+      'git symbolic-ref has failed the same way 5 times, exiting 128',
+    );
+  });
+
   it('does not trip on the same command failing differently each time', () => {
     const breaker = new CircuitBreaker();
     for (let i = 0; i < 4; i += 1) {

@@ -209,6 +209,7 @@ export class MemnoxDaemon {
       sessionId,
       fingerprint: `${action}:${request.target ?? ''}`,
       action,
+      ...(request.target === undefined ? {} : { target: request.target }),
       at: now,
       failed: request.exitCode !== undefined && request.exitCode !== 0,
       ...(request.exitCode === undefined
