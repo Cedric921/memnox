@@ -1,5 +1,7 @@
-import { dirname, isAbsolute } from 'node:path';
+import { realpathSync } from 'node:fs';
+import { basename, dirname, isAbsolute, join, relative } from 'node:path';
 import {
+  ACTION,
   LEDGER_SESSION_LIMIT,
   SESSION_VAR,
   SessionTasks,
@@ -32,25 +34,48 @@ export function readingFor(deps: SessionToolDeps, agent: string): SessionToolDep
 interface Found {
   scope: SessionScope;
   places: string[];
+  /** Absolute paths the session wrote or deleted, from the ledger. */
+  written: string[];
 }
+
+const WRITES: readonly string[] = [ACTION.FILESYSTEM_WRITE, ACTION.FILESYSTEM_DELETE];
 
 export async function changesTool(
   deps: SessionToolDeps,
   seams: RewindSeams,
   args: ToolArgs,
 ): Promise<unknown> {
-  const { scope, places } = await sessionAndPlaces(deps, textArg(args, 'session'));
+  const found = await sessionAndPlaces(deps, textArg(args, 'session'));
+  const { scope } = found;
   if (scope.sessionId === null) return { ...scope, found: false };
   const task = await new SessionTasks(deps.home).read(scope.sessionId);
+  const head = { ...scope, ...(task === null ? {} : { task: task.statement }) };
+  const answer =
+    (await sinceMilestone(deps, seams, args, found)) ??
+    (await sinceCommit(seams, args, found));
+  return answer === null
+    ? {
+        ...head,
+        found: false,
+        said: 'This session wrote no file in a repository Memnox could find, so there is nothing to compare.',
+      }
+    : { ...head, ...answer };
+}
+
+/** Against the milestone taken before the session's first write, which is the exact start. */
+async function sinceMilestone(
+  deps: SessionToolDeps,
+  seams: RewindSeams,
+  args: ToolArgs,
+  { scope, places }: Found,
+): Promise<Record<string, unknown> | null> {
   const asked = textArg(args, 'repository');
   for (const place of asked === undefined ? [...places, deps.cwd] : [asked]) {
-    const start = firstMilestoneOf(await deps.milestonesAt(place), scope.sessionId);
+    const start = firstMilestoneOf(await deps.milestonesAt(place), scope.sessionId ?? '');
     if (start === undefined) continue;
     const milestones = seams.build(place);
     const path = textArg(args, 'path');
     return {
-      ...scope,
-      ...(task === null ? {} : { task: task.statement }),
       repository: place,
       since: start.takenAt,
       ...(path === undefined
@@ -58,12 +83,36 @@ export async function changesTool(
         : { path, diff: firstLines(await milestones.diffSince(start.id, path)) }),
     };
   }
-  return {
-    ...scope,
-    ...(task === null ? {} : { task: task.statement }),
-    found: false,
-    said: 'No milestone was taken for this session, so there is nothing to compare its changes against.',
-  };
+  return null;
+}
+
+/** Against the last commit, kept to the files the ledger says this session wrote. */
+async function sinceCommit(
+  seams: RewindSeams,
+  args: ToolArgs,
+  { places, written }: Found,
+): Promise<Record<string, unknown> | null> {
+  const asked = textArg(args, 'repository');
+  for (const place of asked === undefined ? places : [asked]) {
+    const mine = written
+      .filter((each) => each.startsWith(`${place}/`))
+      .map((each) => relative(place, each));
+    if (mine.length === 0) continue;
+    const milestones = seams.build(place);
+    const path = textArg(args, 'path');
+    // The tree since the last commit holds everybody's work, so only this session's files are kept.
+    const files = (await milestones.changedSinceCommit()).filter((each) =>
+      mine.includes(each.path),
+    );
+    return {
+      repository: place,
+      comparedWith: 'the last commit, since no milestone was taken for this session',
+      ...(path === undefined
+        ? { files: listed(files) }
+        : { path, diff: firstLines(await milestones.diffSinceCommit(path)) }),
+    };
+  }
+  return null;
 }
 
 async function sessionAndPlaces(deps: SessionToolDeps, session?: string): Promise<Found> {
@@ -73,7 +122,12 @@ async function sessionAndPlaces(deps: SessionToolDeps, session?: string): Promis
       scope.sessionId === null
         ? []
         : await store.query({ sessionId: scope.sessionId, limit: LEDGER_SESSION_LIMIT });
-    return { scope, places: repositoriesOf(rows) };
+    const written = rows
+      .filter((each) => WRITES.includes(each.operation) && each.target !== undefined)
+      .map((each) => each.target ?? '')
+      .filter((each) => isAbsolute(each))
+      .map(resolved);
+    return { scope, places: repositoriesOf(rows), written: [...new Set(written)] };
   });
 }
 
@@ -111,4 +165,14 @@ function listed<T>(rows: readonly T[]): { total: number; shown: T[] } {
 function firstLines(diff: string): { total: number; lines: string[] } {
   const lines = diff.split('\n');
   return { total: lines.length, lines: lines.slice(0, MOST_ROWS) };
+}
+
+/** The path as git prints its root, since /var and /private/var are one folder to the disk and two to a string. */
+function resolved(path: string): string {
+  try {
+    return join(realpathSync(dirname(path)), basename(path));
+  } catch {
+    // The folder is gone, so the path is kept as the ledger wrote it.
+    return path;
+  }
 }

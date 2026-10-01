@@ -280,19 +280,36 @@ export class Milestones {
    * written as objects only, so nothing a person sees, no ref and no index, moves.
    */
   async changedSince(id: string): Promise<FileChange[]> {
-    const from = await this.find(id);
+    return this.changedFrom((await this.find(id)).commit);
+  }
+
+  /** The diff of one file since a milestone, as git prints it. */
+  async diffSince(id: string, path: string): Promise<string> {
+    return this.diffFrom((await this.find(id)).commit, path);
+  }
+
+  /** What the working tree changed since the last commit, for a session no milestone was taken for. */
+  async changedSinceCommit(): Promise<FileChange[]> {
+    const head = await this.head();
+    return head === null ? [] : this.changedFrom(head);
+  }
+
+  async diffSinceCommit(path: string): Promise<string> {
+    const head = await this.head();
+    return head === null ? '' : this.diffFrom(head, path);
+  }
+
+  private async changedFrom(commit: string): Promise<FileChange[]> {
     const { tree } = await this.writeWorkingTree(await this.repositoryRoot());
-    const range = ['--no-renames', from.commit, tree];
+    const range = ['--no-renames', commit, tree];
     const statuses = await this.git.run(['diff', '--name-status', ...range]);
     const counts = await this.git.run(['diff', '--numstat', ...range]);
     return mergedChanges(nonEmptyLines(statuses), nonEmptyLines(counts));
   }
 
-  /** The diff of one file since a milestone, as git prints it. */
-  async diffSince(id: string, path: string): Promise<string> {
-    const from = await this.find(id);
+  private async diffFrom(commit: string, path: string): Promise<string> {
     const { tree } = await this.writeWorkingTree(await this.repositoryRoot());
-    return this.git.run(['diff', '--no-renames', from.commit, tree, '--', path]);
+    return this.git.run(['diff', '--no-renames', commit, tree, '--', path]);
   }
 
   async forget(keep: number = MILESTONE_KEEP): Promise<string[]> {

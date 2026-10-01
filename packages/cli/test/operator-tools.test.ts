@@ -347,6 +347,17 @@ describe('more than one session at once', () => {
     expect(everyone).toHaveLength(3);
   });
 
+  it('says the catch-all session is this Mac and not an agent', async () => {
+    const deps = await depsAt();
+    await recorded(deps.home, [
+      event('ses_local', 'an agent', { surface: 'git', operation: 'git.unknown' }),
+    ]);
+    const rows = (await callOperatorTool(deps, SEAMS, 'sessions', {})) as {
+      notAnAgent?: string;
+    }[];
+    expect(rows[0]?.notAnAgent).toContain('outside any agent session');
+  });
+
   it('never reads its own run as the session the person asked about', async () => {
     const deps = await depsAt();
     await recorded(deps.home, [event('ses_work', 'claude-code', {})]);
@@ -399,11 +410,70 @@ describe('what a session changed in the code', () => {
     ).toContain('?? cancel.test.ts');
   });
 
+  it('compares with the last commit when no milestone was taken, and shows only its own files', async () => {
+    const deps = await depsAt();
+    const repo = await mkdtemp(join(tmpdir(), 'memnox-operator-repo-'));
+    git(repo, 'init', '-q');
+    await writeFile(join(repo, 'orders.ts'), 'export const orders = [];\n');
+    await writeFile(join(repo, 'other.ts'), 'one\n');
+    git(repo, 'add', '.');
+    git(repo, 'commit', '-q', '-m', 'start');
+    await writeFile(
+      join(repo, 'orders.ts'),
+      'export const orders = [];\nexport function cancel(): void {}\n',
+    );
+    await writeFile(join(repo, 'other.ts'), 'somebody else\n');
+    await recorded(deps.home, [
+      event('ses_3', 'claude-code', { target: join(repo, 'orders.ts') }),
+    ]);
+
+    const answer = (await callOperatorTool(deps, SEAMS, 'changes', {
+      agent: 'claude-code',
+    })) as { comparedWith: string; files: { shown: { path: string }[] } };
+    expect(answer.comparedWith).toContain('the last commit');
+    expect(answer.files.shown.map((each) => each.path)).toEqual(['orders.ts']);
+
+    const diff = (await callOperatorTool(deps, SEAMS, 'changes', {
+      agent: 'claude-code',
+      path: 'orders.ts',
+    })) as { diff: { lines: string[] } };
+    expect(diff.diff.lines).toContain('+export function cancel(): void {}');
+  });
+
   it('says so when no milestone was taken, rather than inventing a diff', async () => {
     const deps = await depsAt();
     await recorded(deps.home, [event('ses_2', 'claude-code', {})]);
     expect(
       await callOperatorTool(deps, SEAMS, 'changes', { agent: 'claude-code' }),
     ).toMatchObject({ found: false });
+  });
+});
+
+describe('what a session reached outside the machine', () => {
+  it('names the hosts it fetched and the MCP tools it called, for the session asked about', async () => {
+    const deps = await depsAt();
+    await recorded(deps.home, [
+      event('ses_4', 'claude-code', {
+        surface: 'network',
+        operation: 'http.request',
+        target: 'api.github.com',
+        class: 'read',
+      }),
+      event('ses_4', 'claude-code', {
+        at: '2026-09-30T11:05:00.000Z',
+        surface: 'mcp',
+        operation: 'mcp.linear.list_issues',
+        class: 'read',
+      }),
+    ]);
+    const answer = (await callOperatorTool(deps, SEAMS, 'outside', {
+      agent: 'claude-code',
+    })) as { contacts: { kind: string; name: string; operations: string[] }[] };
+    expect(
+      answer.contacts.map((each) => [each.kind, each.name, each.operations]),
+    ).toEqual([
+      ['mcp', 'linear', ['list_issues']],
+      ['web', 'api.github.com', ['http.request']],
+    ]);
   });
 });

@@ -7,6 +7,7 @@ import {
   SessionPauses,
   SessionTasks,
   summarizeSession,
+  UNNAMED_SESSION,
   type MemnoxEvent,
   type PendingApproval,
 } from '@memnox/core';
@@ -18,6 +19,10 @@ import { textArg, type SessionToolDeps, type ToolArgs } from './read-tools';
  * Every session on this machine lately, side by side, so "what is Claude doing" with two
  * Claude sessions open is answered by asking which one rather than by picking the newest.
  */
+
+/** Said of the catch-all session, so a pause on an editor's git check is never told as an agent stuck. */
+const LOCAL_WORK =
+  'commands run on this Mac outside any agent session, such as an editor or a terminal checking git';
 
 /** Far enough back to cover a working day, since a session left running overnight still counts. */
 const DEFAULT_HOURS = 24;
@@ -86,5 +91,6 @@ async function describe(
     waitingOnYou: waiting.filter((each) => each.request.sessionId === sessionId).length,
     ...(pause === null ? {} : { paused: pause.reason }),
     ...(host?.app === undefined ? {} : { runningIn: host.app }),
+    ...(sessionId === UNNAMED_SESSION ? { notAnAgent: LOCAL_WORK } : {}),
   };
 }

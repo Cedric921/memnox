@@ -63,6 +63,16 @@ describe('how the voice speaks', () => {
     expect(prompt).toContain('never allow anything yourself');
   });
 
+  it('gives the files, the lines and the services when asked for detail, and looks before saying it cannot', () => {
+    const prompt = voicePrompt();
+    expect(prompt).toContain('they want the detail, so give it');
+    expect(prompt).toContain('changes with a path for the lines');
+    expect(prompt).toContain('outside for the hosts');
+    expect(prompt).toContain('"cloth code"');
+    expect(prompt).toContain('what its exit code usually means');
+    expect(prompt).toContain('notAnAgent');
+  });
+
   it('stays warm when it mishears, and waits out a sentence cut off halfway', () => {
     const prompt = voicePrompt();
     expect(prompt).toContain('never clipped or bossy');

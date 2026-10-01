@@ -5,6 +5,7 @@ import { DEFAULT_AGENT } from '../next/boundary-report';
 import { changesTool, readingFor } from './changes-tool';
 import { readReach } from '../operator/vocabulary';
 import { proposeAnswerTool, proposeRuleTool } from './propose-tools';
+import { outsideTool } from './outside-tool';
 import { sessionsTool } from './sessions-tool';
 import {
   decisionsTool,
@@ -104,8 +105,13 @@ export const OPERATOR_TOOLS: readonly ToolDefinition[] = [
     },
   ),
   readTool(
+    'outside',
+    'What an agent\'s session reached outside this machine: each host it fetched from or searched, each MCP server and the tools it called there, and pages a browser opened, with how often, when, and how many the rules held. Destinations only; what came back is never recorded. Answer "what is it reading from" or "what services is it talking to" from here.',
+    { agent: AGENT_ARG, session: SESSION_ARG },
+  ),
+  readTool(
     'changes',
-    "What an agent's session changed in the code since its first write: files with lines added and removed, or the diff of one file, and the task it was given.",
+    'What an agent\'s session changed in the code: each file with lines added and removed, or the diff of one file with its actual lines, and the task it was given. Answer "what is it changing" or "what files" from here, and pass path for the lines of one file.',
     {
       agent: AGENT_ARG,
       session: SESSION_ARG,
@@ -154,48 +160,42 @@ function asAgent(deps: SessionToolDeps, args: ToolArgs): SessionToolDeps {
   return readingFor(deps, textArg(args, 'agent') ?? DEFAULT_AGENT);
 }
 
+type OperatorCall = (
+  deps: SessionToolDeps,
+  seams: RewindSeams,
+  args: ToolArgs,
+) => unknown;
+
+const OPERATOR_CALLS: Record<string, OperatorCall> = {
+  status: (deps) => statusTool(deps),
+  sessions: (deps, _seams, args) => sessionsTool(deps, args),
+  reach: (deps) => readReach(deps.home),
+  waiting: (deps) => new WaitingFeed(deps.home).current(deps.now().toISOString()),
+  unattended: async (deps, _seams, args) =>
+    unattendedCheck(
+      await readUnattended(deps.home, deps.cwd, textArg(args, 'agent') ?? DEFAULT_AGENT),
+    ),
+  why: (deps, _seams, args) => whyTool(asAgent(deps, args), args),
+  replay: (deps, _seams, args) => replayTool(asAgent(deps, args), args),
+  decisions: (deps, _seams, args) => decisionsTool(asAgent(deps, args), args),
+  outside: (deps, _seams, args) => outsideTool(asAgent(deps, args), args),
+  changes: (deps, seams, args) => changesTool(asAgent(deps, args), seams, args),
+  propose_answer: (deps, _seams, args) => proposeAnswerTool(deps, args),
+  propose_rule: (deps, _seams, args) => proposeRuleTool(deps, args),
+};
+
 export async function callOperatorTool(
   deps: SessionToolDeps,
   seams: RewindSeams,
   name: string,
   args: ToolArgs,
 ): Promise<unknown> {
-  switch (name) {
-    case 'status':
-      return statusTool(deps);
-    case 'sessions':
-      return sessionsTool(deps, args);
-    case 'reach':
-      return readReach(deps.home);
-    case 'waiting':
-      return new WaitingFeed(deps.home).current(deps.now().toISOString());
-    case 'unattended':
-      return unattendedCheck(
-        await readUnattended(
-          deps.home,
-          deps.cwd,
-          textArg(args, 'agent') ?? DEFAULT_AGENT,
-        ),
-      );
-    case 'why':
-      return whyTool(asAgent(deps, args), args);
-    case 'replay':
-      return replayTool(asAgent(deps, args), args);
-    case 'decisions':
-      return decisionsTool(asAgent(deps, args), args);
-    case 'changes':
-      return changesTool(asAgent(deps, args), seams, args);
-    case 'propose_answer':
-      return proposeAnswerTool(deps, args);
-    case 'propose_rule':
-      return proposeRuleTool(deps, args);
-    default:
-      return null;
-  }
+  const call = Object.hasOwn(OPERATOR_CALLS, name) ? OPERATOR_CALLS[name] : undefined;
+  return call === undefined ? null : call(deps, seams, args);
 }
 
 const ABOUT_OPERATOR =
-  'You are the voice of Memnox, speaking with the person who runs these agents. Answer out loud: short sentences, the answer first, numbers said plainly, never a list read aloud. Read the machine through these tools before you answer, and never guess. Several sessions can be open at once, even for one agent: call sessions first, pass the session id to every other tool, and when the person could mean more than one, ask which. When the person answers a held call or asks for a rule, in whatever words, call propose_answer or propose_rule. You can never allow anything yourself: every allow waits for the person to confirm with Touch ID on the Mac, so tell them that.';
+  'You are the voice of Memnox, speaking with the person who runs these agents. Answer out loud: short sentences, the answer first, numbers said plainly, never a list read aloud. Read the machine through these tools before you answer, and never guess. What an agent changed is in changes, with the lines of one file when you pass its path; what it reached outside this machine is in outside. Several sessions can be open at once, even for one agent: call sessions first, pass the session id to every other tool, and when the person could mean more than one, ask which. When the person answers a held call or asks for a rule, in whatever words, call propose_answer or propose_rule. You can never allow anything yourself: every allow waits for the person to confirm with Touch ID on the Mac, so tell them that.';
 
 export const OPERATOR_CATALOGUE: ToolCatalogue = {
   info: { name: 'memnox-operator', version: '1' },
