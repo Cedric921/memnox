@@ -77,6 +77,36 @@ describe('noting where a session runs', () => {
     expect(host?.app).toBeUndefined();
   });
 
+  it('keeps the agent its own id under memnox run, and follows it to a cleared conversation', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'memnox-host-note-'));
+    const context = {
+      home,
+      agent: 'claude-code',
+      runSession: 'ses_1eb61120-4c7',
+      pid: 1,
+      cwd: '/w',
+      now: () => new Date('2026-10-02T08:17:02.000Z'),
+    };
+    const noPs = (): string => '';
+    await noteSessionHost(
+      { hook_event_name: 'SessionStart', session_id: '9ddff478-4759' },
+      context,
+      noPs,
+    );
+    expect(await new SessionHosts(home).read('ses_1eb61120-4c7')).toMatchObject({
+      agentSession: '9ddff478-4759',
+    });
+    await noteSessionHost(
+      { hook_event_name: 'SessionStart', session_id: 'aa11bb22-cc33' },
+      context,
+      noPs,
+    );
+    expect(await new SessionHosts(home).read('ses_1eb61120-4c7')).toMatchObject({
+      agentSession: 'aa11bb22-cc33',
+      seenAt: '2026-10-02T08:17:02.000Z',
+    });
+  });
+
   it('ignores anything that is not a session start', async () => {
     const home = await mkdtemp(join(tmpdir(), 'memnox-host-note-'));
     await noteSessionHost(

@@ -9,6 +9,7 @@ import {
   readWorkspaceMemory,
   renderNotes,
   SECOND_MS,
+  SpokenInstructions,
   SqliteEventStore,
   type SessionNote,
 } from '@memnox/core';
@@ -110,11 +111,15 @@ async function notesAt(
     await keepHoldsAlive(holder, context);
     return [];
   }
+  const spoken = await spokenFor(home, [pause.sessionId, holder], agent);
   if (pause.moment === SESSION_MOMENT.TURN_END) {
-    return inbox.collect(agent, pause.sessionId, [NOTE_KIND.OPERATOR]);
+    return [
+      ...spoken,
+      ...(await inbox.collect(agent, pause.sessionId, [NOTE_KIND.OPERATOR])),
+    ];
   }
   if (pause.moment === SESSION_MOMENT.PROMPT)
-    return inbox.collect(agent, pause.sessionId);
+    return [...spoken, ...(await inbox.collect(agent, pause.sessionId))];
 
   const chore = { name: 'notes', sessionId: pause.sessionId, everyMs: NOTES_EVERY_MS };
   const [, notes] = await Promise.all([
@@ -123,7 +128,20 @@ async function notesAt(
       due ? inbox.collect(agent, pause.sessionId) : [],
     ),
   ]);
-  return notes;
+  return [...spoken, ...notes];
+}
+
+/** What the person said to this session out loud, under either id it goes by. */
+async function spokenFor(
+  home: string,
+  ids: readonly string[],
+  agent: string,
+): Promise<SessionNote[]> {
+  const inbox = new SpokenInstructions(home);
+  const found: SessionNote[] = [];
+  for (const id of new Set(ids))
+    found.push(...(await inbox.collect(agent, id).catch(() => [])));
+  return found;
 }
 
 /**

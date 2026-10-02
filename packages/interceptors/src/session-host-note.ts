@@ -38,6 +38,9 @@ export async function noteSessionHost(
       pid: agent?.pid ?? process.ppid,
       ...hostOf(chain),
       cwd: start.cwd ?? context.cwd,
+      ...(start.sessionId === '' || start.sessionId === sessionId
+        ? {}
+        : { agentSession: start.sessionId }),
       seenAt: context.now().toISOString(),
     });
   } catch (err) {
