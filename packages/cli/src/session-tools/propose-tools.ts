@@ -1,4 +1,4 @@
-import { basename, join } from 'node:path';
+import { basename, dirname, isAbsolute, join } from 'node:path';
 import {
   DECISION_EFFECT,
   HOLD_ANSWER,
@@ -113,9 +113,7 @@ export async function proposeRuleTool(
     return { refused: `name an action and one of: ${RULE_EFFECTS.join(', ')}` };
   }
   const file = await policyFileFor(deps.home, textArg(args, 'project'));
-  if (file === null) {
-    return { refused: 'no project has a rule file yet, so name the project directory' };
-  }
+  if (typeof file !== 'string') return file;
   const verb = verbOf(action, deps.env);
   // The effect was checked against the engine's own list just above.
   const rule = {
@@ -145,11 +143,32 @@ function verbOf(action: string, env: NodeJS.ProcessEnv): string {
   return resolveAction(binary, rest, env).action;
 }
 
-/** The rule file of the project named, or the only one registered; never a guess between several. */
-async function policyFileFor(home: string, project?: string): Promise<string | null> {
-  if (project !== undefined) return join(project, WRITTEN_POLICY_FILE);
+/**
+ * The rule file of the project named, by path or by folder name, or the only one registered;
+ * always an absolute path, since the daemon that writes it runs somewhere else entirely.
+ */
+async function policyFileFor(
+  home: string,
+  project?: string,
+): Promise<string | { refused: string }> {
   const written = (await readRegisteredFiles(home)).filter(
-    (file) => basename(file) === WRITTEN_POLICY_FILE,
+    (file) => basename(file) === WRITTEN_POLICY_FILE && isAbsolute(file),
   );
-  return written.length === 1 ? (written[0] ?? null) : null;
+  if (project !== undefined && isAbsolute(project))
+    return join(project, WRITTEN_POLICY_FILE);
+  const named =
+    project === undefined
+      ? written
+      : written.filter(
+          (file) => basename(dirname(file)).toLowerCase() === project.toLowerCase(),
+        );
+  const [only] = named;
+  if (named.length === 1 && only !== undefined) return only;
+  const projects = written.map((file) => basename(dirname(file)));
+  return {
+    refused:
+      projects.length === 0
+        ? 'no project has a rule file yet, so name the project directory by its full path'
+        : `name one project: ${projects.join(', ')}`,
+  };
 }

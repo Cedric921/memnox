@@ -3,22 +3,38 @@ import {
   DAEMON_EVENT,
   DAEMON_METHOD,
   BRIEFING,
+  DELIVERY,
   describePause,
+  DisplayRequests,
+  SPAN_KIND,
+  SPAN_STATUS,
   isP256Point,
   SessionPauses,
   SessionHosts,
   UNNAMED_AGENT,
+  VoiceFocusStore,
+  type DaemonAskChunk,
   type DaemonEvent,
   type DaemonRequest,
   type DaemonResponse,
+  type Delivery,
 } from '@memnox/core';
-import type { Brain } from '../operator/brain';
+import { BRAIN_CHUNK, type Brain } from '../operator/brain';
 import { keepOwner, readOwner } from '../operator/owner';
-import { backBrief, heldBrief, pausedBrief } from '../operator/voice-prompts';
+import {
+  backBrief,
+  heldBrief,
+  noticeBrief,
+  pausedBrief,
+} from '../operator/voice-prompts';
 import { readVocabulary } from '../operator/vocabulary';
 import { BrainTurns } from './brain-turns';
 import { confirmAnswer } from './confirm';
+import { NoticeWatcher } from './notice-watch';
+import { askContext, FINISHED_NOTE } from './ask-context';
+import { SessionViews } from './session-view';
 import { write, type Peer } from './socket-write';
+import { recordSpan, VoiceTurnTrace } from '../trace/voice-trace';
 import { WaitingFeed } from './waiting-feed';
 
 /**
@@ -27,11 +43,17 @@ import { WaitingFeed } from './waiting-feed';
  * on every command, since none of it has that latency budget.
  */
 
-/** A few questions' worth of quiet before the brain's process is let go. */
-const BRAIN_IDLE_MS = 5 * 60 * 1_000;
+/** Half an hour of quiet before the brain's process is let go, since starting it again costs the next answer ten seconds. */
+const BRAIN_IDLE_MS = 30 * 60 * 1_000;
 
 /** Often enough that a held call is spoken while the agent is still waiting on it. */
 const FEED_INTERVAL_MS = 500;
+
+/** A finished session is news for minutes, so the ledger is read for it far less often. */
+const NOTICE_INTERVAL_MS = 10_000;
+
+/** A turn's worth of the Mac's steps; more than this is not a turn. */
+const MOST_MAC_SPANS = 12;
 
 const VOICE_METHODS: readonly string[] = [
   DAEMON_METHOD.SUBSCRIBE,
@@ -44,6 +66,10 @@ const VOICE_METHODS: readonly string[] = [
   DAEMON_METHOD.BRIEF,
   DAEMON_METHOD.WARM,
   DAEMON_METHOD.VOCABULARY,
+  DAEMON_METHOD.SESSION_VIEW,
+  DAEMON_METHOD.SESSIONS_LIST,
+  DAEMON_METHOD.DELIVERED,
+  DAEMON_METHOD.TRACE,
 ];
 
 interface VoiceDeps {
@@ -51,6 +77,7 @@ interface VoiceDeps {
   now: () => string;
   log: (message: string) => void;
   feedIntervalMs?: number;
+  noticeIntervalMs?: number;
   brain?: () => Brain;
   brainIdleMs?: number;
 }
@@ -64,10 +91,15 @@ export class VoiceSurface {
   private readonly subscribers = new Map<Peer, Set<string>>();
   private readonly feed: WaitingFeed;
   private feedTimer: ReturnType<typeof setInterval> | null = null;
+  private noticeTimer: ReturnType<typeof setInterval> | null = null;
+  private readonly notices: NoticeWatcher;
   private readonly turns: BrainTurns | null;
+  private readonly views: SessionViews;
 
   constructor(private readonly deps: VoiceDeps) {
     this.feed = new WaitingFeed(deps.home);
+    this.notices = new NoticeWatcher(deps.home, deps.now());
+    this.views = new SessionViews(deps.home);
     this.turns =
       deps.brain === undefined
         ? null
@@ -117,6 +149,8 @@ export class VoiceSurface {
   close(): void {
     if (this.feedTimer !== null) clearInterval(this.feedTimer);
     this.feedTimer = null;
+    if (this.noticeTimer !== null) clearInterval(this.noticeTimer);
+    this.noticeTimer = null;
     for (const socket of this.subscribers.keys()) socket.destroy();
     this.subscribers.clear();
     this.turns?.close();
@@ -126,6 +160,10 @@ export class VoiceSurface {
     const { home } = this.deps;
     const feed = this.feed;
     if (request.method === DAEMON_METHOD.LOCATE) return this.locate(request);
+    if (request.method === DAEMON_METHOD.SESSION_VIEW) return this.sessionView(request);
+    if (request.method === DAEMON_METHOD.SESSIONS_LIST) {
+      return { id: request.id, ok: true, sessions: await this.views.list() };
+    }
     if (request.method === DAEMON_METHOD.VOCABULARY) {
       return { id: request.id, ok: true, words: await readVocabulary(this.deps.home) };
     }
@@ -133,6 +171,8 @@ export class VoiceSurface {
       return { id: request.id, ok: true, waiting: await feed.current(this.deps.now()) };
     }
     if (request.method === DAEMON_METHOD.REGISTER_KEY) return this.registerKey(request);
+    if (request.method === DAEMON_METHOD.DELIVERED) return this.delivered(request);
+    if (request.method === DAEMON_METHOD.TRACE) return this.macSpans(request);
     if (request.subject === undefined || request.answer === undefined) {
       return {
         id: request.id,
@@ -149,6 +189,39 @@ export class VoiceSurface {
     return result.ok
       ? { id: request.id, ok: true, outcome: result.outcome }
       : { id: request.id, ok: false, error: result.error };
+  }
+
+  /** Whether a typed instruction landed, kept for the brain that is waiting to say so. */
+  private async delivered(request: DaemonRequest): Promise<DaemonResponse> {
+    const outcome = request.answer;
+    if (request.subject === undefined || !isDelivery(outcome)) {
+      return {
+        id: request.id,
+        ok: false,
+        error: 'delivered needs a subject and an outcome',
+      };
+    }
+    const kept = await new DisplayRequests(this.deps.home).deliver(request.subject, {
+      outcome,
+      at: this.deps.now(),
+      ...(request.reason === undefined ? {} : { reason: request.reason }),
+    });
+    return { id: request.id, ok: true, outcome: kept ? 'kept' : 'nobody waiting' };
+  }
+
+  /** A session as it is right now, for the live window on it. */
+  private async sessionView(request: DaemonRequest): Promise<DaemonResponse> {
+    if (request.sessionId === undefined) {
+      return { id: request.id, ok: false, error: 'session-view needs a session' };
+    }
+    const session = await this.views.view(request.sessionId);
+    return session === null
+      ? {
+          id: request.id,
+          ok: false,
+          error: `nothing is known about ${request.sessionId}`,
+        }
+      : { id: request.id, ok: true, session };
   }
 
   /** The Mac app's key, trusted on first use and never replaced from here. */
@@ -205,6 +278,12 @@ export class VoiceSurface {
     }
     const waiting = await this.feed.current(this.deps.now());
     const event = waiting.find((each) => each.subject === request.subject);
+    if (request.briefing === BRIEFING.NOTICE && request.subject !== undefined) {
+      const notice = this.notices.recent(request.subject);
+      return notice === null
+        ? null
+        : noticeBrief(notice, await readOwner(this.deps.home));
+    }
     if (request.briefing === BRIEFING.HELD) {
       return event === undefined
         ? null
@@ -234,7 +313,50 @@ export class VoiceSurface {
       write(socket, { id: request.id, ok: false, error });
       return;
     }
-    await turns.ask(said, (chunk) => write(socket, { id: request.id, ok: true, chunk }));
+    const trace = new VoiceTurnTrace(
+      this.deps.home,
+      this.deps.now,
+      said.split(/\s+/).length,
+    );
+    const building = this.deps.now();
+    // Best effort: without it the brain looks the sessions up itself, only slower.
+    const [cards, focus] = await Promise.all([
+      this.views.list().catch(() => []),
+      new VoiceFocusStore(this.deps.home).read().catch(() => null),
+    ]);
+    trace.contextBuilt(building, cards.length);
+    const context = askContext(cards, new Date(this.deps.now()), focus);
+    const whole = request.finished === true ? `${said}\n${FINISHED_NOTE}` : said;
+    const asked = context === '' ? whole : `${context}\n${whole}`;
+    await trace.brainStarted();
+    let held = false;
+    await turns.ask(asked, (chunk) => {
+      trace.chunk(chunk);
+      // Whatever the brain writes after holding would be dropped anyway, so the orb listens now.
+      if (held) return;
+      write(socket, { id: request.id, ok: true, chunk });
+      if (!isHold(chunk)) return;
+      held = true;
+      write(socket, { id: request.id, ok: true, chunk: { kind: BRAIN_CHUNK.DONE } });
+      turns.cancel();
+    });
+    await trace.finish();
+  }
+
+  /** The Mac's own timings, hung on the question they belong to so one trace shows the whole answer. */
+  private async macSpans(request: DaemonRequest): Promise<DaemonResponse> {
+    for (const span of (request.spans ?? []).slice(0, MOST_MAC_SPANS)) {
+      await recordSpan(this.deps.home, {
+        name: `mac.${span.name}`,
+        kind: SPAN_KIND.MAC,
+        startAt: span.startAt,
+        endAt: span.endAt,
+        status: SPAN_STATUS.OK,
+        attributes: span.attributes ?? {},
+        under: 'root',
+      });
+    }
+    return { id: request.id, ok: true, outcome: 'kept' };
   }
 
   /** Everything already waiting first, then each new thing as it appears. */
@@ -243,10 +365,13 @@ export class VoiceSurface {
     const told = new Set<string>();
     this.subscribers.set(socket, told);
     write(socket, { id, ok: true });
-    for (const event of await feed.current(this.deps.now())) {
+    // The Mac app is listening, so the first question should meet a brain that is already up.
+    void this.turns?.warm();
+    for (const event of await feed.everything(this.deps.now())) {
       told.add(event.subject);
       write(socket, { id, ok: true, event });
     }
+    this.watchNotices();
     if (this.feedTimer !== null) return;
     this.feedTimer = setInterval(
       () => void this.pushWaiting(),
@@ -256,10 +381,25 @@ export class VoiceSurface {
     this.feedTimer.unref();
   }
 
+  /** Reads the ledger for news every few seconds while somebody is listening. */
+  private watchNotices(): void {
+    if (this.noticeTimer !== null) return;
+    this.noticeTimer = setInterval(() => {
+      if (this.subscribers.size === 0) return;
+      this.notices
+        .look(this.deps.now())
+        .then((events) => events.forEach((event) => this.broadcast(event)))
+        .catch((err: unknown) =>
+          this.deps.log(`could not look for news: ${String(err)}`),
+        );
+    }, this.deps.noticeIntervalMs ?? NOTICE_INTERVAL_MS);
+    this.noticeTimer.unref();
+  }
+
   private async pushWaiting(): Promise<void> {
     if (this.subscribers.size === 0) return;
     try {
-      const waiting = await this.feed.current(this.deps.now());
+      const waiting = await this.feed.everything(this.deps.now());
       const still = new Set(waiting.map((event) => event.subject));
       for (const [socket, told] of this.subscribers) {
         for (const event of waiting) {
@@ -299,4 +439,15 @@ function isRunning(pid: number): boolean {
     // Not ours to signal still means it is there.
     return (err as NodeJS.ErrnoException).code === 'EPERM';
   }
+}
+
+const DELIVERIES: readonly string[] = Object.values(DELIVERY);
+
+function isDelivery(value: string | undefined): value is Delivery {
+  return value !== undefined && DELIVERIES.includes(value);
+}
+
+/** The brain saying the person is mid thought, by the tool's own name whatever server prefix it carries. */
+function isHold(chunk: DaemonAskChunk): boolean {
+  return chunk.kind === BRAIN_CHUNK.TOOL && (chunk.tool ?? '').endsWith('keep_listening');
 }

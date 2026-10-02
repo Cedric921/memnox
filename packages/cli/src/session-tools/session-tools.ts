@@ -15,13 +15,25 @@ import { rewindTool, type RewindSeams } from './rewind-tool';
 import { briefTool, memoryTool } from './memory-tools';
 import { fingerprintTool } from './fingerprint-tool';
 
+/** One argument a tool takes: a string, or a list of small objects, such as a walk through's pages. */
+export type ToolProperty =
+  | { type: 'string'; description: string }
+  | {
+      type: 'array';
+      description: string;
+      items: {
+        type: 'object';
+        properties: Record<string, { type: 'string'; description: string }>;
+      };
+    };
+
 /** A tool as `tools/list` describes it; the annotations are how a host decides to ask. */
 export interface ToolDefinition {
   name: string;
   description: string;
   inputSchema: {
     type: 'object';
-    properties: Record<string, { type: 'string'; description: string }>;
+    properties: Record<string, ToolProperty>;
   };
   annotations: { readOnlyHint: boolean; destructiveHint: boolean; openWorldHint: false };
 }

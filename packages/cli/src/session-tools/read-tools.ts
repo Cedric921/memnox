@@ -15,12 +15,15 @@ import {
   SessionPauses,
   targetsRuledOn,
   type ActionRequest,
+  type DisplayDelivery,
   type LocalVerdict,
+  type StartableAgent,
   type MemnoxEvent,
   type Milestone,
 } from '@memnox/core';
 
 import { withEvents } from '../event-store';
+import type { CommandRun } from './voice-commands';
 import { policySetInForce } from '../policy-path';
 import { readLocalDecisions } from '../sync/local-decisions';
 import { scopeOf, type SessionScope } from './session-scope';
@@ -37,6 +40,14 @@ export interface SessionToolDeps {
   milestonesAt: (place: string) => Promise<Milestone[]>;
   /** The live brief from the workspace, or null where it cannot be asked just now. */
   brief: (resources: readonly string[], repository?: string) => Promise<unknown>;
+  /** How the Mac says an instruction it typed landed, or null when it never said; absent where nobody types. */
+  delivered?: (requestId: string) => Promise<DisplayDelivery | null>;
+  /** Where an agent's command is, from the person's own shell or where it is installed, or null. */
+  resolveCommand?: (agent: StartableAgent) => string | null;
+  /** How a memnox command is run for the voice; absent means memnox itself, beside this module. */
+  runMemnox?: (argv: readonly string[], timeoutMs: number) => Promise<CommandRun>;
+  /** What a login by voice names this machine when they named nothing; the hostname outside tests. */
+  machineName?: () => string;
 }
 
 /** Tool arguments as the host sent them, read field by field. */
@@ -77,7 +88,7 @@ export async function whyTool(deps: SessionToolDeps, args: ToolArgs): Promise<un
       const found = rows.find((each) => each.id === id);
       return found === undefined ? { found: false, event: id } : decisionOf(found);
     }
-    const scope = await scopeOf(store, deps.agent, deps.env, textArg(args, 'session'));
+    const scope = await scopeOf(store, deps, textArg(args, 'session'));
     if (scope.sessionId === null) return { ...scope, found: false };
     const rows = await store.query({
       sessionId: scope.sessionId,
@@ -105,7 +116,7 @@ export async function replayTool(
   args: ToolArgs,
 ): Promise<unknown> {
   const { scope, events } = await withEvents(deps.home, async (store) => {
-    const found = await scopeOf(store, deps.agent, deps.env, textArg(args, 'session'));
+    const found = await scopeOf(store, deps, textArg(args, 'session'));
     const rows =
       found.sessionId === null
         ? []

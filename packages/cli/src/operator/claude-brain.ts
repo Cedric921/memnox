@@ -2,7 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { ENV_AGENT_NAME, LineBuffer, SESSION_VAR, shortDigest } from '@memnox/core';
 import { BRAIN_CHUNK, type Brain, type BrainChunk } from './brain';
 import { readStreamLine } from './claude-stream';
-import { Conversations } from './conversation';
+import { Conversations, MOST_CONVERSATION_TURNS, type Resumable } from './conversation';
 import { voicePrompt } from './voice-prompts';
 
 /**
@@ -39,6 +39,9 @@ export class ClaudeCodeBrain implements Brain {
   private readonly conversations: Conversations;
   /** Set by cancel, so the process ending reads as stopped rather than as a crash. */
   private cancelled = false;
+  private stopping: ReturnType<typeof setTimeout> | null = null;
+  /** Questions in the conversation this process carries, resumed ones included. */
+  private turns = 0;
 
   constructor(private readonly options: ClaudeBrainOptions) {
     this.conversations = new Conversations(options.home);
@@ -46,7 +49,9 @@ export class ClaudeCodeBrain implements Brain {
 
   async *ask(said: string): AsyncIterable<BrainChunk> {
     this.cancelled = false;
+    this.freshIfLong();
     const child = await this.started();
+    this.turns += 1;
     child.stdin.write(`${JSON.stringify(userTurn(said))}\n`);
     let spoke = false;
     for (;;) {
@@ -60,15 +65,24 @@ export class ClaudeCodeBrain implements Brain {
       const read = readStreamLine(line, spoke);
       if (read.sessionId !== undefined) await this.keep(read.sessionId);
       for (const chunk of read.chunks) {
+        const ends = chunk.kind !== BRAIN_CHUNK.TEXT && chunk.kind !== BRAIN_CHUNK.TOOL;
+        // An interrupted turn ends with a result like any other, which is a stop and not a fault.
+        if (ends && this.cancelled) {
+          this.settle();
+          yield { kind: BRAIN_CHUNK.CANCELLED };
+          return;
+        }
+        if (this.cancelled) continue;
         if (chunk.kind === BRAIN_CHUNK.TEXT) spoke = true;
         yield chunk;
-        if (chunk.kind !== BRAIN_CHUNK.TEXT && chunk.kind !== BRAIN_CHUNK.TOOL) return;
+        if (ends) return;
       }
     }
   }
 
   /** Starts the process ahead of the question, so the answer does not wait on a cold start. */
   async warm(): Promise<void> {
+    this.freshIfLong();
     await this.started();
   }
 
@@ -78,14 +92,30 @@ export class ClaudeCodeBrain implements Brain {
   }
 
   /**
-   * Ends the process rather than asking it to stop, because its conversation is saved as it
-   * goes and resumes on the next ask: a half-said answer is all that is lost.
+   * Asks the turn to stop and keeps the process, since starting it again costs the next answer
+   * several seconds. Should it not stop in time it is ended, and the conversation resumes from
+   * what it saved.
    */
   cancel(): void {
     const child = this.child;
     if (child === null) return;
     this.cancelled = true;
-    child.kill('SIGTERM');
+    child.stdin.write(`${JSON.stringify(interrupt())}\n`);
+    this.stopping = setTimeout(() => {
+      if (this.child === child && this.cancelled) child.kill('SIGTERM');
+    }, INTERRUPT_GRACE_MS);
+    this.stopping.unref();
+  }
+
+  /** A long conversation is let go here, while they are still talking, so the cold start hides under it. */
+  private freshIfLong(): void {
+    if (this.child !== null && this.turns >= MOST_CONVERSATION_TURNS) this.close();
+  }
+
+  /** The interrupted turn has ended, so nothing needs ending by force. */
+  private settle(): void {
+    if (this.stopping !== null) clearTimeout(this.stopping);
+    this.stopping = null;
   }
 
   private async started(): Promise<ChildProcessWithoutNullStreams> {
@@ -95,6 +125,7 @@ export class ClaudeCodeBrain implements Brain {
       this.now(),
       this.version(),
     );
+    this.turns = resume?.turns ?? 0;
     const words = (await this.options.vocabulary?.().catch(() => [])) ?? [];
     // A fresh queue per process, since the last one ended when its process did.
     const lines = new LineQueue();
@@ -125,7 +156,13 @@ export class ClaudeCodeBrain implements Brain {
 
   private async keep(sessionId: string): Promise<void> {
     try {
-      await this.conversations.keep(this.name, sessionId, this.now(), this.version());
+      await this.conversations.keep(
+        this.name,
+        sessionId,
+        this.now(),
+        this.version(),
+        this.turns,
+      );
     } catch {
       // Resuming is a convenience: a home that cannot be written loses the follow up, never the answer.
     }
@@ -146,7 +183,7 @@ export class ClaudeCodeBrain implements Brain {
 /** The flags that make Claude Code a brain that reads and proposes and does nothing else. */
 function claudeArgs(
   options: ClaudeBrainOptions,
-  resume: string | null,
+  resume: Resumable | null,
   words: readonly string[],
 ): string[] {
   const servers = {
@@ -174,7 +211,7 @@ function claudeArgs(
     '--allowedTools',
     `mcp__${OPERATOR_SERVER}`,
     ...voiceFlags(options, words),
-    ...(resume === null ? [] : ['--resume', resume]),
+    ...(resume === null ? [] : ['--resume', resume.sessionId]),
   ];
 }
 
@@ -192,6 +229,18 @@ function voiceFlags(options: ClaudeBrainOptions, words: readonly string[]): stri
     ...(options.model === undefined ? [] : ['--model', options.model]),
     ...(options.effort === undefined ? [] : ['--effort', options.effort]),
   ];
+}
+
+/** How long an interrupted turn has to end before its process is ended instead. */
+const INTERRUPT_GRACE_MS = 2_000;
+
+/** The stream's own request to stop the turn in flight, as the Agent SDK sends it. */
+function interrupt(): unknown {
+  return {
+    type: 'control_request',
+    request_id: `interrupt_${Date.now().toString(36)}`,
+    request: { subtype: 'interrupt' },
+  };
 }
 
 function userTurn(said: string): unknown {

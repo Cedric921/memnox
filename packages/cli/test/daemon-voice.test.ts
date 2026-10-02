@@ -25,6 +25,7 @@ import {
   type HoldRequest,
   type Policy,
 } from '@memnox/core';
+import { FINISHED_NOTE } from '../src/daemon/ask-context';
 import { MemnoxDaemon } from '../src/daemon-server';
 import { BRAIN_CHUNK, type Brain } from '../src/operator/brain';
 
@@ -341,6 +342,75 @@ describe('asking the daemon in your own words', () => {
     expect(heard.map((each) => each.chunk?.kind)).toEqual(['tool', 'text', 'done']);
     expect(heard[1]?.chunk?.text).toBe('You asked: what is claude doing.');
     expect(heard.every((each) => each.id === 11)).toBe(true);
+    await daemon.close();
+  });
+
+  it('tells the brain the words are all of it when the person was waited on and said no more', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'memnox-voice-finished-'));
+    const echo: Brain = {
+      ...brain,
+      async *ask(said: string) {
+        yield { kind: BRAIN_CHUNK.TEXT, text: said };
+        yield { kind: BRAIN_CHUNK.DONE };
+      },
+    };
+    const daemon = new MemnoxDaemon({ now: () => NOW, log: () => {}, brain: () => echo });
+    await daemon.listen(home);
+
+    const heard = await ask(socketPathFor(home), {
+      id: 13,
+      method: DAEMON_METHOD.ASK,
+      said: 'open it and show me the session in',
+      finished: true,
+    });
+    expect(heard.chunk?.text).toContain(FINISHED_NOTE);
+    await daemon.close();
+  });
+
+  it('ends the turn the moment the brain holds for the rest, and stops it writing on', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'memnox-voice-hold-'));
+    let cancelled = 0;
+    const holding: Brain = {
+      ...brain,
+      async *ask() {
+        yield { kind: BRAIN_CHUNK.TOOL, tool: 'mcp__memnox-operator__keep_listening' };
+        yield { kind: BRAIN_CHUNK.TEXT, text: 'I am listening for you to finish.' };
+        yield { kind: BRAIN_CHUNK.DONE };
+      },
+      cancel: () => {
+        cancelled += 1;
+      },
+    };
+    const daemon = new MemnoxDaemon({
+      now: () => NOW,
+      log: () => {},
+      brain: () => holding,
+    });
+    await daemon.listen(home);
+
+    const heard: DaemonResponse[] = [];
+    await new Promise<void>((resolve, reject) => {
+      const socket = connect(socketPathFor(home), () =>
+        socket.write(encode({ id: 14, method: DAEMON_METHOD.ASK, said: 'so I was' })),
+      );
+      const reader = new LineBuffer();
+      socket.setEncoding('utf8');
+      socket.on('data', (chunk: string) => {
+        for (const line of reader.push(chunk)) {
+          const response = decodeResponse(line);
+          if (response !== null) heard.push(response);
+        }
+      });
+      // Long enough for anything written after the hold to have arrived, were it sent.
+      setTimeout(() => {
+        socket.end();
+        resolve();
+      }, 150);
+      socket.on('error', reject);
+    });
+
+    expect(heard.map((each) => each.chunk?.kind)).toEqual(['tool', 'done']);
+    expect(cancelled).toBe(1);
     await daemon.close();
   });
 

@@ -1,12 +1,15 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { existsSync, realpathSync } from 'node:fs';
+import { mkdir, mkdtemp, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { describe, expect, it } from 'vitest';
 import {
   ACTION,
+  DisplayRequests,
+  renderNotes,
+  SpokenInstructions,
   HOLD_ANSWER,
   Milestones,
   NodeGit,
@@ -15,7 +18,11 @@ import {
   PROPOSAL_KIND,
   Proposals,
   selfProtection,
+  SessionHosts,
+  SessionPauses,
+  SessionSubagents,
   SessionTasks,
+  SessionTurns,
   SqliteEventStore,
   type HoldRequest,
   type MemnoxEvent,
@@ -25,6 +32,8 @@ import {
   OPERATOR_CATALOGUE,
   OPERATOR_TOOLS,
 } from '../src/session-tools/operator-tools';
+import { WaitingFeed } from '../src/daemon/waiting-feed';
+import { registerPolicyFile } from '../src/policy-registry';
 import { OPERATOR_AGENT } from '../src/session-tools/propose-tools';
 import type { SessionToolDeps } from '../src/session-tools/read-tools';
 import type { RewindSeams } from '../src/session-tools/rewind-tool';
@@ -110,11 +119,28 @@ function git(cwd: string, ...args: string[]): void {
   });
 }
 
+/** A commit dated in the past, so it sits before a session recorded on the fixed clock. */
+function gitAt(cwd: string, moment: string, ...args: string[]): void {
+  execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', ...args], {
+    cwd,
+    stdio: 'ignore',
+    env: { ...process.env, GIT_COMMITTER_DATE: moment, GIT_AUTHOR_DATE: moment },
+  });
+}
+
+/** A file's time on disk set to a moment, as a command running then would have left it. */
+async function stamp(path: string, moment: string): Promise<void> {
+  const when = new Date(moment);
+  await utimes(path, when, when);
+}
+
 describe('what the operator is offered', () => {
-  it('reads, and writes nothing but a proposal', () => {
+  it('reads, and writes nothing but a proposal, a pause, a watch, or a request to show or start what the person said yes to', () => {
     for (const tool of OPERATOR_TOOLS) {
       if (tool.annotations.readOnlyHint) continue;
-      expect(tool.name).toMatch(/^propose_/);
+      expect(tool.name).toMatch(
+        /^(propose_|show$|pause_session$|send_instruction$|watch_for$|walk_through$|start_session$|show_agents$|memnox_command$|traces$)/,
+      );
     }
   });
 
@@ -266,6 +292,25 @@ describe('a rule the person asked for', () => {
     ).toHaveProperty('refused');
   });
 
+  it('finds the project by its folder name, and always proposes a full path', async () => {
+    const deps = await depsAt();
+    const file = join(deps.home, 'memnox-runtime', 'memnox.policies.toml');
+    await registerPolicyFile(deps.home, file);
+    const answer = (await callOperatorTool(deps, SEAMS, 'propose_rule', {
+      action: 'npm.publish',
+      effect: 'ask',
+      project: 'memnox-runtime',
+    })) as { rule: { file: string } };
+    expect(answer.rule.file).toBe(file);
+    expect(
+      await callOperatorTool(deps, SEAMS, 'propose_rule', {
+        action: 'npm.publish',
+        effect: 'ask',
+        project: 'somewhere-else',
+      }),
+    ).toMatchObject({ refused: expect.stringContaining('memnox-runtime') });
+  });
+
   it('asks for the project rather than guessing when none has a rule file', async () => {
     const deps = await depsAt();
     expect(
@@ -343,6 +388,7 @@ describe('more than one session at once', () => {
     expect(claude.map((each) => each.session)).toEqual(['ses_api', 'ses_checkout']);
     expect(claude[1]?.task).toBe('add order cancellation');
     expect(claude[0]?.quietForMinutes).toBe(30);
+    expect((claude[0] as { state?: string }).state).toBe('quiet');
     const everyone = (await callOperatorTool(deps, SEAMS, 'sessions', {})) as unknown[];
     expect(everyone).toHaveLength(3);
   });
@@ -371,6 +417,16 @@ describe('more than one session at once', () => {
   });
 });
 
+describe('a person still talking', () => {
+  it('is waited for rather than answered half way', async () => {
+    const deps = await depsAt();
+    expect(OPERATOR_TOOLS.map((each) => each.name)).toContain('keep_listening');
+    expect(await callOperatorTool(deps, SEAMS, 'keep_listening', {})).toEqual({
+      listening: true,
+    });
+  });
+});
+
 describe('what a session changed in the code', () => {
   it('lists the files it changed since its first write, and the diff of one', async () => {
     const deps = await depsAt();
@@ -387,6 +443,11 @@ describe('what a session changed in the code', () => {
     await writeFile(join(repo, 'cancel.test.ts'), 'test();\n');
     await recorded(deps.home, [
       event('ses_1', 'claude-code', { target: join(repo, 'orders.ts') }),
+      event('ses_1', 'claude-code', {
+        operation: 'file.edit',
+        target: join(repo, 'cancel.test.ts'),
+        at: '2026-09-30T11:00:05.000Z',
+      }),
     ]);
 
     const files = (await callOperatorTool(deps, SEAMS, 'changes', {
@@ -440,12 +501,362 @@ describe('what a session changed in the code', () => {
     expect(diff.diff.lines).toContain('+export function cancel(): void {}');
   });
 
+  it('still shows work the session has already committed', async () => {
+    const deps = await depsAt();
+    const repo = await mkdtemp(join(tmpdir(), 'memnox-operator-repo-'));
+    git(repo, 'init', '-q');
+    await writeFile(join(repo, 'orders.ts'), 'export const orders = [];\n');
+    git(repo, 'add', '.');
+    gitAt(repo, '2026-09-30T10:00:00Z', 'commit', '-q', '-m', 'start');
+    await writeFile(
+      join(repo, 'orders.ts'),
+      'export const orders = [];\nexport function cancel(): void {}\n',
+    );
+    git(repo, 'commit', '-q', '-am', 'add cancel');
+    await recorded(deps.home, [
+      event('ses_5', 'claude-code', { target: join(repo, 'orders.ts') }),
+    ]);
+
+    const answer = (await callOperatorTool(deps, SEAMS, 'changes', {
+      agent: 'claude-code',
+    })) as { files: { shown: { path: string; added: number }[] } };
+    expect(answer.files.shown).toEqual([
+      expect.objectContaining({ path: 'orders.ts', added: 1 }),
+    ]);
+  });
+
+  it('keeps the files a shell command changed while it ran, and not those changed around it', async () => {
+    const deps = await depsAt();
+    const repo = realpathSync(await mkdtemp(join(tmpdir(), 'memnox-operator-repo-')));
+    git(repo, 'init', '-q');
+    await mkdir(join(repo, 'Support'));
+    await writeFile(join(repo, 'Setup.swift'), 'let logo = nil\n');
+    await writeFile(join(repo, 'Other.swift'), 'one\n');
+    git(repo, 'add', '.');
+    gitAt(repo, '2026-09-30T10:00:00Z', 'commit', '-q', '-m', 'start');
+    await writeFile(join(repo, 'Support', 'logo.png'), 'png');
+    await writeFile(join(repo, 'Setup.swift'), 'let logo = "logo.png"\n');
+    await writeFile(join(repo, 'Other.swift'), 'somebody else\n');
+    await stamp(join(repo, 'Support', 'logo.png'), '2026-09-30T11:46:01.000Z');
+    await stamp(join(repo, 'Setup.swift'), '2026-09-30T11:47:13.000Z');
+    // Another session's edit an hour earlier, in the same tree.
+    await stamp(join(repo, 'Other.swift'), '2026-09-30T10:30:00.000Z');
+    await recorded(deps.home, [
+      event('ses_logo', 'claude-code', {
+        target: `${repo}/.`,
+        at: '2026-09-30T11:46:00.000Z',
+      }),
+      event('ses_logo', 'claude-code', {
+        operation: 'file.read',
+        class: 'read',
+        target: `${repo}/Support`,
+        at: '2026-09-30T11:46:30.000Z',
+      }),
+      event('ses_logo', 'claude-code', {
+        target: `${repo}/.`,
+        at: '2026-09-30T11:47:12.500Z',
+      }),
+    ]);
+    await new SessionTurns(deps.home).prompted(
+      'ses_logo',
+      'claude-code',
+      '2026-09-30T11:45:00.000Z',
+    );
+
+    const answer = (await callOperatorTool(deps, SEAMS, 'changes', {
+      session: 'ses_logo',
+    })) as {
+      repository: string;
+      files: { shown: { path: string }[] };
+      latestTurn: { files: string[] };
+    };
+    expect(answer.repository).toBe(repo);
+    expect(answer.files.shown.map((each) => each.path)).toEqual([
+      'Setup.swift',
+      'Support/logo.png',
+    ]);
+    expect(answer.latestTurn.files).toEqual(['Setup.swift', 'Support/logo.png']);
+    // The image is what a person sees; a Swift file that imports no UI framework is not.
+    expect((answer as unknown as { interfaceFiles: string[] }).interfaceFiles).toEqual([
+      'Support/logo.png',
+    ]);
+
+    const diff = (await callOperatorTool(deps, SEAMS, 'changes', {
+      session: 'ses_logo',
+      path: 'setup.swift',
+    })) as { path: string; diff: { lines: string[] } };
+    expect(diff.path).toBe('Setup.swift');
+    expect(diff.diff.lines).toContain('+let logo = "logo.png"');
+  });
+
+  it('reads the repository it wrote in last, and names the others', async () => {
+    const deps = await depsAt();
+    const older = realpathSync(await mkdtemp(join(tmpdir(), 'memnox-operator-repo-')));
+    const newer = realpathSync(await mkdtemp(join(tmpdir(), 'memnox-operator-repo-')));
+    for (const repo of [older, newer]) {
+      git(repo, 'init', '-q');
+      await writeFile(join(repo, 'a.ts'), 'one\n');
+      git(repo, 'add', '.');
+      gitAt(repo, '2026-09-29T10:00:00Z', 'commit', '-q', '-m', 'start');
+      // A different length, since git trusts a same sized file stamped in the second it was indexed.
+      await writeFile(join(repo, 'a.ts'), 'one, then two\n');
+    }
+    await recorded(deps.home, [
+      event('ses_6', 'claude-code', {
+        operation: 'file.edit',
+        target: join(older, 'a.ts'),
+        at: '2026-09-29T11:00:00.000Z',
+      }),
+      event('ses_6', 'claude-code', {
+        operation: 'file.edit',
+        target: join(newer, 'a.ts'),
+        at: '2026-09-30T11:00:00.000Z',
+      }),
+    ]);
+    const answer = (await callOperatorTool(deps, SEAMS, 'changes', {
+      session: 'ses_6',
+    })) as { repository: string; alsoChanged: { repository: string }[] };
+    expect(answer.repository).toBe(newer);
+    expect(answer.alsoChanged).toEqual([expect.objectContaining({ repository: older })]);
+  });
+
   it('says so when no milestone was taken, rather than inventing a diff', async () => {
     const deps = await depsAt();
     await recorded(deps.home, [event('ses_2', 'claude-code', {})]);
     expect(
       await callOperatorTool(deps, SEAMS, 'changes', { agent: 'claude-code' }),
     ).toMatchObject({ found: false });
+  });
+});
+
+describe('telling an agent what the person said', () => {
+  async function proposed(deps: SessionToolDeps): Promise<string> {
+    const answer = (await callOperatorTool(deps, SEAMS, 'propose_instruction', {
+      session: 'ses_work',
+      agent: 'claude-code',
+      message: 'git push the voice branch',
+      said: 'guitar push the voice branch',
+    })) as { instruction: string; readBack: string };
+    expect(answer.readBack).toBe('git push the voice branch');
+    return answer.instruction;
+  }
+
+  it('sends nothing until it is said yes to, and then hands it to a working session at its next pause', async () => {
+    const deps = await depsAt();
+    await new SessionTurns(deps.home).prompted(
+      'ses_work',
+      'claude-code',
+      '2026-09-30T11:50:00.000Z',
+    );
+    const id = await proposed(deps);
+    const inbox = new SpokenInstructions(deps.home, () => NOW);
+    expect(await inbox.collect('claude-code', 'ses_work')).toEqual([]);
+
+    expect(
+      await callOperatorTool(deps, SEAMS, 'send_instruction', { instruction: id }),
+    ).toMatchObject({
+      sent: true,
+      how: 'queued',
+    });
+    const notes = await inbox.collect('claude-code', 'ses_work');
+    expect(notes.map((each) => each.message)).toEqual(['git push the voice branch']);
+    expect(renderNotes(notes)).toContain('It is their own request');
+    // Handed over once, and a second send of the same id finds nothing.
+    expect(await inbox.collect('claude-code', 'ses_work')).toEqual([]);
+    expect(
+      await callOperatorTool(deps, SEAMS, 'send_instruction', { instruction: id }),
+    ).toMatchObject({
+      sent: false,
+    });
+  });
+
+  it('puts it in the input of a session waiting in an editor, for the person to send', async () => {
+    const deps = await depsAt();
+    const turns = new SessionTurns(deps.home);
+    await turns.prompted('ses_work', 'claude-code', '2026-09-30T11:00:00.000Z');
+    await turns.ended('ses_work', 'claude-code', '2026-09-30T11:10:00.000Z');
+    await new SessionHosts(deps.home).note({
+      sessionId: 'ses_work',
+      agent: 'claude-code',
+      pid: process.pid,
+      app: 'Visual Studio Code',
+      seenAt: '2026-09-30T11:00:00.000Z',
+      cwd: deps.home,
+    });
+    const id = await proposed(deps);
+    expect(
+      await callOperatorTool(deps, SEAMS, 'send_instruction', { instruction: id }),
+    ).toMatchObject({
+      how: 'prefilled',
+    });
+    const [request] = await new DisplayRequests(deps.home).open(NOW.toISOString());
+    expect(request).toMatchObject({
+      display: 'prefill',
+      text: 'git push the voice branch',
+    });
+    expect(
+      await new SpokenInstructions(deps.home).collect('claude-code', 'ses_work'),
+    ).toEqual([]);
+  });
+
+  async function waitingInEditor(): Promise<SessionToolDeps> {
+    const deps = await depsAt();
+    const turns = new SessionTurns(deps.home);
+    await turns.prompted('ses_work', 'claude-code', '2026-09-30T11:00:00.000Z');
+    await turns.ended('ses_work', 'claude-code', '2026-09-30T11:10:00.000Z');
+    await new SessionHosts(deps.home).note({
+      sessionId: 'ses_work',
+      agent: 'claude-code',
+      pid: process.pid,
+      app: 'Visual Studio Code',
+      seenAt: '2026-09-30T11:00:00.000Z',
+      cwd: deps.home,
+    });
+    return deps;
+  }
+
+  it('never says it was sent when the Mac said the typing failed', async () => {
+    const base = await waitingInEditor();
+    const deps: SessionToolDeps = {
+      ...base,
+      delivered: async (requestId) => {
+        await new DisplayRequests(base.home).deliver(requestId, {
+          outcome: 'failed',
+          at: NOW.toISOString(),
+          reason: 'no message box in focus',
+        });
+        return new DisplayRequests(base.home).deliveryOf(requestId);
+      },
+    };
+    const id = await proposed(deps);
+    const answer = (await callOperatorTool(deps, SEAMS, 'send_instruction', {
+      instruction: id,
+    })) as { sent: boolean; how: string; why: string; said: string };
+    expect(answer).toMatchObject({
+      sent: false,
+      how: 'failed',
+      why: 'no message box in focus',
+    });
+    expect(answer.said).toContain('Do not say it is on its way');
+    // Delivered, so the Mac is never asked to type it a second time.
+    expect(await new DisplayRequests(deps.home).open(NOW.toISOString())).toEqual([]);
+  });
+
+  it('says it started only once the Mac said it typed it', async () => {
+    const base = await waitingInEditor();
+    const typed: SessionToolDeps = {
+      ...base,
+      delivered: async () => ({ outcome: 'typed', at: NOW.toISOString() }),
+    };
+    expect(
+      await callOperatorTool(typed, SEAMS, 'send_instruction', {
+        instruction: await proposed(typed),
+      }),
+    ).toMatchObject({ sent: true, said: expect.stringContaining('starting on it now') });
+    const silent: SessionToolDeps = { ...base, delivered: async () => null };
+    expect(
+      await callOperatorTool(silent, SEAMS, 'send_instruction', {
+        instruction: await proposed(silent),
+      }),
+    ).toMatchObject({
+      sent: true,
+      said: expect.stringContaining('never say it was typed'),
+    });
+  });
+
+  it('refuses a proposal said yes to after it went stale', async () => {
+    const deps = await depsAt();
+    const id = await proposed(deps);
+    const later = { ...deps, now: () => new Date(NOW.getTime() + 10 * 60_000) };
+    expect(
+      await callOperatorTool(later, SEAMS, 'send_instruction', { instruction: id }),
+    ).toMatchObject({
+      sent: false,
+    });
+  });
+});
+
+describe('a session whose writes the ledger only partly saw', () => {
+  async function workedIn(): Promise<{ deps: SessionToolDeps; repo: string }> {
+    const deps = await depsAt();
+    const repo = realpathSync(await mkdtemp(join(tmpdir(), 'memnox-operator-repo-')));
+    git(repo, 'init', '-q');
+    await mkdir(join(repo, 'src'));
+    await writeFile(join(repo, 'src', 'edited.ts'), 'export const a = 1;\n');
+    await writeFile(join(repo, 'src', 'scripted.ts'), 'export const b = 1;\n');
+    git(repo, 'add', '.');
+    gitAt(repo, '2026-09-30T09:00:00Z', 'commit', '-q', '-m', 'start');
+    await writeFile(join(repo, 'src', 'edited.ts'), 'export const a = 2; // edited\n');
+    await writeFile(
+      join(repo, 'src', 'scripted.ts'),
+      'export const b = 2;\nexport const c = 3;\n',
+    );
+    await stamp(join(repo, 'src', 'scripted.ts'), '2026-09-30T11:20:00.000Z');
+    await new SessionHosts(deps.home).note({
+      sessionId: 'ses_py',
+      agent: 'claude-code',
+      pid: process.pid,
+      app: 'Visual Studio Code',
+      seenAt: '2026-09-30T11:00:00.000Z',
+      cwd: repo,
+    });
+    // The edit tool names a path relative to the repository it was opened in.
+    await recorded(deps.home, [
+      event('ses_py', 'claude-code', {
+        operation: 'file.edit',
+        target: 'src/edited.ts',
+        at: '2026-09-30T11:10:00.000Z',
+      }),
+    ]);
+    const turns = new SessionTurns(deps.home);
+    await turns.prompted('ses_py', 'claude-code', '2026-09-30T11:05:00.000Z');
+    await turns.ended('ses_py', 'claude-code', '2026-09-30T11:30:00.000Z');
+    return { deps, repo };
+  }
+
+  it('places a relative edit in its repository, and finds what changed while it worked', async () => {
+    const { deps, repo } = await workedIn();
+    const answer = (await callOperatorTool(deps, SEAMS, 'changes', {
+      session: 'ses_py',
+    })) as { repository: string; files: { shown: { path: string; evidence: string }[] } };
+    expect(answer.repository).toBe(repo);
+    expect(answer.files.shown).toEqual([
+      expect.objectContaining({ path: 'src/scripted.ts', evidence: 'turn' }),
+      expect.objectContaining({ path: 'src/edited.ts', evidence: 'named' }),
+    ]);
+  });
+
+  it('keeps every turn, so each stretch of work is known', async () => {
+    const deps = await depsAt();
+    const turns = new SessionTurns(deps.home);
+    await turns.prompted('ses_t', 'claude-code', '2026-09-30T10:00:00.000Z');
+    await turns.ended('ses_t', 'claude-code', '2026-09-30T10:05:00.000Z');
+    await turns.prompted('ses_t', 'claude-code', '2026-09-30T11:00:00.000Z');
+    expect((await turns.read('ses_t'))?.windows).toEqual([
+      { promptAt: '2026-09-30T10:00:00.000Z', endedAt: '2026-09-30T10:05:00.000Z' },
+      { promptAt: '2026-09-30T11:00:00.000Z' },
+    ]);
+  });
+
+  it('puts the files and a few changed lines on the summary card', async () => {
+    const { deps } = await workedIn();
+    const shown = await callOperatorTool(deps, SEAMS, 'show', {
+      session: 'ses_py',
+      display: 'card',
+      title: 'Constants',
+      text: 'It changed two constants.',
+    });
+    expect(shown).toMatchObject({ shown: true, filesOnCard: 2 });
+    expect(JSON.stringify(shown)).not.toContain('Visual Studio Code');
+    const [card] = await new DisplayRequests(deps.home).open(NOW.toISOString());
+    expect(card?.files?.map((each) => each.path)).toEqual([
+      'src/scripted.ts',
+      'src/edited.ts',
+    ]);
+    expect(card?.excerpt).toEqual({
+      path: 'src/scripted.ts',
+      lines: ['-export const b = 1;', '+export const b = 2;', '+export const c = 3;'],
+    });
   });
 });
 
@@ -475,5 +886,334 @@ describe('what a session reached outside the machine', () => {
       ['mcp', 'linear', ['list_issues']],
       ['web', 'api.github.com', ['http.request']],
     ]);
+  });
+});
+
+describe('which branch, and what a session committed', () => {
+  it('reads the branch and each commit since the session started, by folder name too', async () => {
+    const deps = await depsAt();
+    const repo = await mkdtemp(join(tmpdir(), 'memnox-runtime-'));
+    git(repo, 'init', '-q', '-b', 'feat/voice-answers');
+    await writeFile(join(repo, 'orders.ts'), 'one\n');
+    git(repo, 'add', '.');
+    gitAt(repo, '2026-09-30T10:00:00Z', 'commit', '-q', '-m', 'before the session');
+    await writeFile(join(repo, 'orders.ts'), 'two\n');
+    gitAt(
+      repo,
+      '2026-09-30T11:30:00Z',
+      'commit',
+      '-q',
+      '-am',
+      'fix(cli): cancel an order',
+    );
+    await recorded(deps.home, [
+      event('ses_6', 'claude-code', { target: join(repo, 'orders.ts') }),
+    ]);
+
+    const answer = (await callOperatorTool(deps, SEAMS, 'repository', {
+      agent: 'claude-code',
+    })) as {
+      repositories: { branch: string; commits: { subject: string; files: string[] }[] }[];
+    };
+    expect(answer.repositories[0]?.branch).toBe('feat/voice-answers');
+    expect(answer.repositories[0]?.commits).toEqual([
+      expect.objectContaining({
+        subject: 'fix(cli): cancel an order',
+        files: ['orders.ts'],
+      }),
+    ]);
+
+    const named = (await callOperatorTool(deps, SEAMS, 'repository', {
+      repository: 'runtime',
+    })) as { repositories: { name: string }[] };
+    expect(named.repositories.map((each) => each.name)).toEqual([basename(repo)]);
+  });
+});
+
+describe('which session is working right now', () => {
+  it('puts the one working now first, and never calls a paused or ended one working', async () => {
+    const deps = await depsAt();
+    await recorded(deps.home, [
+      event('ses_old', 'claude-code', { at: '2026-09-30T11:58:00.000Z' }),
+      event('ses_now', 'claude-code', { at: '2026-09-30T11:59:00.000Z' }),
+      event('ses_gone', 'claude-code', { at: '2026-09-30T11:59:30.000Z' }),
+    ]);
+    await new SessionHosts(deps.home).note({
+      sessionId: 'ses_gone',
+      agent: 'claude-code',
+      pid: 2_147_483_000,
+      seenAt: '2026-09-30T11:59:30.000Z',
+    });
+    const rows = (await callOperatorTool(deps, SEAMS, 'sessions', {})) as {
+      session: string;
+      state: string;
+    }[];
+    expect(rows.map((each) => [each.session, each.state])).toEqual([
+      ['ses_now', 'working'],
+      ['ses_old', 'working'],
+      ['ses_gone', 'ended'],
+    ]);
+  });
+});
+
+describe('showing the person a session', () => {
+  it('says which session it put up and what it last did, so the voice names the right one', async () => {
+    const deps = await depsAt();
+    await recorded(deps.home, [
+      event('ses_7', 'claude-code', { operation: 'git.commit', target: 'main' }),
+    ]);
+    await new SessionTasks(deps.home).declare({
+      id: 'tsk_7',
+      sessionId: 'ses_7',
+      statement: 'fix the popup card',
+      scope: {},
+      declaredAt: '2026-09-30T10:59:00.000Z',
+    });
+    const shown = (await callOperatorTool(deps, SEAMS, 'show', {
+      session: 'ses_7',
+      display: 'open',
+    })) as { showing: Record<string, unknown>; said: string };
+    expect(shown.showing).toMatchObject({
+      task: 'fix the popup card',
+      actions: 1,
+      lastDid: 'git.commit main',
+    });
+    expect(shown.said).toContain('never describe work showing does not list');
+  });
+
+  it('asks the app for a card with the summary, and refuses a card with nothing on it', async () => {
+    const deps = await depsAt();
+    await recorded(deps.home, [event('ses_7', 'claude-code', {})]);
+    expect(
+      await callOperatorTool(deps, SEAMS, 'show', {
+        agent: 'claude-code',
+        display: 'card',
+      }),
+    ).toMatchObject({ shown: false });
+    expect(
+      await callOperatorTool(deps, SEAMS, 'show', {
+        agent: 'claude-code',
+        display: 'card',
+        title: 'Order cancellation',
+        text: 'It added a cancel button and two tests.',
+      }),
+    ).toMatchObject({ shown: true, display: 'card' });
+    const shown = await new WaitingFeed(deps.home).everything(NOW.toISOString());
+    expect(shown).toEqual([
+      expect.objectContaining({
+        kind: 'show',
+        display: 'card',
+        title: 'Order cancellation',
+      }),
+    ]);
+    // Never listed as waiting on the person, since nothing is.
+    expect(await new WaitingFeed(deps.home).current(NOW.toISOString())).toEqual([]);
+  });
+
+  it('puts every session up at once when asked for them all, naming none', async () => {
+    const deps = await depsAt();
+    expect(await callOperatorTool(deps, SEAMS, 'show', { display: 'all' })).toMatchObject(
+      {
+        shown: true,
+        display: 'sessions',
+      },
+    );
+    const shown = await new WaitingFeed(deps.home).everything(NOW.toISOString());
+    expect(shown).toEqual([
+      expect.objectContaining({
+        kind: 'show',
+        display: 'sessions',
+        title: 'Your sessions',
+      }),
+    ]);
+  });
+
+  it('opens the repository a session worked in when its window was never noted', async () => {
+    const deps = await depsAt();
+    const repo = await mkdtemp(join(tmpdir(), 'memnox-operator-repo-'));
+    git(repo, 'init', '-q');
+    await recorded(deps.home, [
+      event('ses_10', 'claude-code', { target: join(repo, 'orders.ts') }),
+    ]);
+    expect(
+      await callOperatorTool(deps, SEAMS, 'show', {
+        agent: 'claude-code',
+        display: 'open',
+      }),
+    ).toMatchObject({ shown: true, display: 'open' });
+    const [shown] = await new WaitingFeed(deps.home).everything(NOW.toISOString());
+    expect(shown?.host?.cwd).toContain('memnox-operator-repo-');
+  });
+
+  it('opens the main checkout, never the worktree an agent made for itself', async () => {
+    const deps = await depsAt();
+    const repo = await mkdtemp(join(tmpdir(), 'memnox-operator-main-'));
+    git(repo, 'init', '-q');
+    await writeFile(join(repo, 'orders.ts'), 'one\n');
+    git(repo, 'add', '.');
+    git(repo, 'commit', '-q', '-m', 'start');
+    const worktree = join(repo, '.claude', 'worktrees', 'agent-1');
+    git(repo, 'worktree', 'add', '-q', worktree);
+    await recorded(deps.home, [
+      event('ses_11', 'claude-code', { target: join(worktree, 'orders.ts') }),
+    ]);
+    await callOperatorTool(deps, SEAMS, 'show', {
+      agent: 'claude-code',
+      display: 'open',
+    });
+    const [shown] = await new WaitingFeed(deps.home).everything(NOW.toISOString());
+    expect(shown?.host?.cwd).toBe(realpathSync(repo));
+  });
+
+  it('opens a live window on a session even when where it runs was never noted', async () => {
+    const deps = await depsAt();
+    await recorded(deps.home, [event('ses_8', 'claude-code', {})]);
+    const shown = await callOperatorTool(deps, SEAMS, 'show', {
+      agent: 'claude-code',
+      display: 'open',
+    });
+    expect(shown).toMatchObject({ shown: true, display: 'open' });
+    expect(JSON.stringify(shown)).toContain('live window');
+  });
+});
+
+describe('stopping and restarting a session by voice', () => {
+  it('pauses at once, and only proposes the resume, which waits on Touch ID', async () => {
+    const deps = await depsAt();
+    await recorded(deps.home, [event('ses_9', 'claude-code', {})]);
+    expect(
+      await callOperatorTool(deps, SEAMS, 'pause_session', {
+        agent: 'claude-code',
+        said: 'stop that one',
+      }),
+    ).toMatchObject({ paused: true, session: 'ses_9' });
+    expect(await new SessionPauses(deps.home).inForce('ses_9')).toMatchObject({
+      signal: 'asked',
+    });
+    const resumed = (await callOperatorTool(deps, SEAMS, 'propose_resume', {
+      agent: 'claude-code',
+      said: 'carry on',
+    })) as { proposed: string };
+    expect(resumed.proposed).toMatch(/^prp_/);
+    // Still paused: a spoken yes alone restarts nothing.
+    expect(await new SessionPauses(deps.home).inForce('ses_9')).not.toBeNull();
+  });
+
+  it('never pauses this Mac itself', async () => {
+    const deps = await depsAt();
+    expect(
+      await callOperatorTool(deps, SEAMS, 'pause_session', { session: 'ses_local' }),
+    ).toMatchObject({ paused: false });
+  });
+});
+
+describe('a session just opened', () => {
+  it('is listed first, but never read in place of the session that did the work', async () => {
+    const deps = await depsAt();
+    await recorded(deps.home, [
+      event('ses_older', 'claude-code', { at: '2026-09-30T11:00:00.000Z' }),
+    ]);
+    await new SessionHosts(deps.home).note({
+      sessionId: 'ses_new',
+      agent: 'claude-code',
+      pid: process.pid,
+      app: 'Terminal',
+      tty: 'ttys009',
+      seenAt: '2026-09-30T11:58:00.000Z',
+    });
+    const rows = (await callOperatorTool(deps, SEAMS, 'sessions', {})) as {
+      session: string;
+      state: string;
+      runningIn?: string;
+    }[];
+    expect(rows[0]).toMatchObject({
+      session: 'ses_new',
+      state: 'open',
+      runningIn: 'Terminal',
+    });
+    // Opened after the work finished, it has nothing to read, so "what changed" stays on the work.
+    expect(
+      await callOperatorTool(deps, SEAMS, 'replay', { agent: 'claude-code' }),
+    ).toMatchObject({ sessionId: 'ses_older' });
+  });
+
+  it('is read once it has been asked something', async () => {
+    const deps = await depsAt();
+    await recorded(deps.home, [
+      event('ses_older', 'claude-code', { at: '2026-09-30T11:00:00.000Z' }),
+    ]);
+    await new SessionTurns(deps.home).prompted(
+      'ses_new',
+      'claude-code',
+      '2026-09-30T11:58:00.000Z',
+    );
+    expect(
+      await callOperatorTool(deps, SEAMS, 'replay', { agent: 'claude-code' }),
+    ).toMatchObject({ sessionId: 'ses_new' });
+  });
+});
+
+describe('a session that has handed back', () => {
+  it('is waiting on the person, not working, however recently it acted', async () => {
+    const deps = await depsAt();
+    await recorded(deps.home, [
+      event('ses_done', 'claude-code', { at: '2026-09-30T11:59:00.000Z' }),
+    ]);
+    await new SessionTurns(deps.home).prompted(
+      'ses_done',
+      'claude-code',
+      '2026-09-30T11:40:00.000Z',
+    );
+    await new SessionTurns(deps.home).ended(
+      'ses_done',
+      'claude-code',
+      '2026-09-30T11:59:10.000Z',
+    );
+    const rows = (await callOperatorTool(deps, SEAMS, 'sessions', {})) as {
+      state: string;
+      turn?: string;
+    }[];
+    expect(rows[0]).toMatchObject({ state: 'open', turn: 'handed back to you' });
+  });
+});
+
+describe('a session working with no ledger rows to show for it', () => {
+  it('counts a turn still being thought through as working, and lists its helpers', async () => {
+    const deps = await depsAt();
+    await new SessionTurns(deps.home).prompted(
+      'ses_think',
+      'claude-code',
+      '2026-09-30T11:50:00.000Z',
+    );
+    await new SessionSubagents(deps.home).launched({
+      sessionId: 'ses_think',
+      description: 'review the voice prompts',
+      type: 'Explore',
+      background: true,
+      at: '2026-09-30T11:51:00.000Z',
+    });
+    await new SessionSubagents(deps.home).acted({
+      sessionId: 'ses_think',
+      agentId: 'agent_1',
+      type: 'Explore',
+      tool: 'Grep',
+      at: '2026-09-30T11:59:30.000Z',
+    });
+    const rows = (await callOperatorTool(deps, SEAMS, 'sessions', {})) as {
+      session: string;
+      state: string;
+      turn?: string;
+      subagents?: {
+        launched: { description: string }[];
+        working: { lastTool?: string }[];
+      };
+    }[];
+    expect(rows[0]).toMatchObject({
+      session: 'ses_think',
+      state: 'working',
+      turn: 'in progress',
+    });
+    expect(rows[0]?.subagents?.launched[0]?.description).toBe('review the voice prompts');
+    expect(rows[0]?.subagents?.working[0]?.lastTool).toBe('Grep');
   });
 });

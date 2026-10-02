@@ -13,7 +13,7 @@ export async function outsideTool(
   args: ToolArgs,
 ): Promise<unknown> {
   return withEvents(deps.home, async (store) => {
-    const scope = await scopeOf(store, deps.agent, deps.env, textArg(args, 'session'));
+    const scope = await scopeOf(store, deps, textArg(args, 'session'));
     if (scope.sessionId === null) return { ...scope, contacts: [] };
     const rows = await store.query({
       sessionId: scope.sessionId,

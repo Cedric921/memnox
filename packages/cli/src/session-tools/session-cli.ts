@@ -17,6 +17,7 @@ import { readStatus } from '../commands/status.command';
 import { fetchBrief } from '../sync/memory';
 import type { SessionToolDeps } from './read-tools';
 import type { RewindSeams } from './rewind-tool';
+import { awaitDelivery } from './instruct-tools';
 import { OPERATOR_CATALOGUE } from './operator-tools';
 import { serveSession } from './session-server';
 
@@ -80,6 +81,7 @@ function depsFor(argv: readonly string[], env: NodeJS.ProcessEnv): SessionToolDe
     readStatus,
     milestonesAt,
     brief: (resources, repository) => fetchBrief(homedir(), resources, repository),
+    delivered: (requestId) => awaitDelivery(homedir(), requestId),
   };
 }
 

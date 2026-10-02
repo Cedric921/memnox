@@ -1,7 +1,11 @@
-import { basename } from 'node:path';
+import { basename, isAbsolute } from 'node:path';
 import {
+  SessionPauses,
   ConfirmKeys,
   HOLD_ANSWER,
+  Milestones,
+  NodeGit,
+  NodeWorktree,
   PendingApprovals,
   PROPOSAL_ANSWER,
   PROPOSAL_KIND,
@@ -13,6 +17,14 @@ import {
 } from '@memnox/core';
 import { mergeRules, WRITTEN_POLICY_FILE } from '../protect/merge-rules';
 import { recordAnswer } from './record-answer';
+import {
+  commandResults,
+  runMemnox,
+  runsInBackground,
+  VOICE_RUN,
+  voiceArguments,
+  type CommandRun,
+} from '../session-tools/voice-commands';
 
 /**
  * A person's answer arriving from the Mac app. Refusing never needs proof, since saying no
@@ -25,6 +37,8 @@ interface ConfirmInput {
   answer: string;
   signature?: string;
   at: string;
+  /** How a confirmed memnox command is run; memnox itself unless a test hands in another. */
+  run?: CommandRunner;
 }
 
 type ConfirmResult = { ok: true; outcome: string } | { ok: false; error: string };
@@ -114,19 +128,64 @@ async function answerProposal(home: string, input: ConfirmInput): Promise<Confir
   }
   if ('expired' in outcome) return { ok: false, error: `${input.subject} has expired` };
   if (!confirming) return { ok: true, outcome: answer };
-  return apply(home, outcome.answered, input.at);
+  return apply(home, outcome.answered, input.at, input.run ?? runMemnox);
 }
 
 async function apply(
   home: string,
   proposal: Proposal,
   at: string,
+  run: CommandRunner,
 ): Promise<ConfirmResult> {
   const change = proposal.change;
   if (change.kind === PROPOSAL_KIND.RULES) {
     await mergeRules(change.file, change.rules, home);
     return { ok: true, outcome: PROPOSAL_ANSWER.CONFIRMED };
   }
+  if (change.kind === PROPOSAL_KIND.RESUME) {
+    const lifted = await new SessionPauses(home).resume(
+      change.sessionId,
+      BY_TOUCH_ID,
+      at,
+    );
+    return lifted === null
+      ? { ok: false, error: `${change.sessionId} is not paused` }
+      : { ok: true, outcome: PROPOSAL_ANSWER.CONFIRMED };
+  }
+  if (change.kind === PROPOSAL_KIND.REWIND) return applyRewind(change, at);
+  if (change.kind === PROPOSAL_KIND.COMMAND) {
+    return applyCommand(home, { id: proposal.id, argv: change.argv, at }, run);
+  }
+  return applyHeldAnswer(home, proposal, change, at);
+}
+
+/** The tree put back once the person signed for it; the tree as it was is kept first, so it can come back. */
+async function applyRewind(
+  change: { repository: string; milestone: string },
+  at: string,
+): Promise<ConfirmResult> {
+  const milestones = new Milestones(
+    new NodeGit(change.repository),
+    new NodeWorktree(change.repository),
+  );
+  try {
+    const { restored, kept } = await milestones.restore(change.milestone, at);
+    return {
+      ok: true,
+      outcome: `${PROPOSAL_ANSWER.CONFIRMED}: back to ${restored.id}, the work before it kept as ${kept.id}`,
+    };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/** A held call let through once the person signed for it, and the row that says who and in what words. */
+async function applyHeldAnswer(
+  home: string,
+  proposal: Proposal,
+  change: { pendingId: string; answer: HoldAnswer },
+  at: string,
+): Promise<ConfirmResult> {
   const approvals = new PendingApprovals(home);
   const held = await approvals.read(change.pendingId);
   const outcome = await approvals.answer(
@@ -149,10 +208,65 @@ async function apply(
   return { ok: true, outcome: PROPOSAL_ANSWER.CONFIRMED };
 }
 
+type CommandRunner = (argv: readonly string[], timeoutMs: number) => Promise<CommandRun>;
+
+/** Long enough for an update or a protect to finish, never a command left hanging. */
+const COMMAND_TIMEOUT_MS = 120_000;
+/** As long as an enrolment code is good for, since the wait is the person in the browser. */
+const BACKGROUND_TIMEOUT_MS = 15 * 60 * 1_000;
+
+/**
+ * A memnox command the person signed for, run here and kept for the voice to read back. Checked
+ * again against what a voice may run, so a proposal written by hand cannot run what the voice never may.
+ */
+async function applyCommand(
+  home: string,
+  signed: { id: string; argv: readonly string[]; at: string },
+  run: CommandRunner,
+): Promise<ConfirmResult> {
+  const { id, argv, at } = signed;
+  const command = voiceArguments(argv);
+  if (command === null || command.run === VOICE_RUN.NEVER) {
+    return {
+      ok: false,
+      error: `memnox ${argv.join(' ')} is not something a voice may run`,
+    };
+  }
+  const results = commandResults(home);
+  if (runsInBackground(command.argv)) {
+    await results.write(id, {
+      exitCode: 0,
+      output: '',
+      argv: command.argv,
+      at,
+      running: true,
+    });
+    // Not awaited: the confirmation ends now and the notice watcher tells the person when it does.
+    void run(command.argv, BACKGROUND_TIMEOUT_MS).then((ran) =>
+      results.write(id, {
+        ...ran,
+        argv: command.argv,
+        at,
+        doneAt: new Date().toISOString(),
+      }),
+    );
+    return { ok: true, outcome: PROPOSAL_ANSWER.CONFIRMED };
+  }
+  const ran = await run(command.argv, COMMAND_TIMEOUT_MS);
+  await results.write(id, { ...ran, argv: command.argv, at });
+  return ran.exitCode === 0
+    ? { ok: true, outcome: PROPOSAL_ANSWER.CONFIRMED }
+    : { ok: false, error: `memnox ${argv[0] ?? ''} ended with exit ${ran.exitCode}` };
+}
+
 /** A model wrote the path, so a confirmed proposal may only ever touch the rule file itself. */
 function writesOnlyAPolicyFile(proposal: Proposal): boolean {
   if (proposal.change.kind !== PROPOSAL_KIND.RULES) return true;
-  return basename(proposal.change.file) === WRITTEN_POLICY_FILE;
+  // Relative to where the daemon runs would be a file nobody meant, so only a full path is written.
+  return (
+    isAbsolute(proposal.change.file) &&
+    basename(proposal.change.file) === WRITTEN_POLICY_FILE
+  );
 }
 
 async function signed(home: string, input: ConfirmInput): Promise<boolean> {
