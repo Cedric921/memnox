@@ -721,6 +721,26 @@ One action end to end: the command, the rule that governed it, the exit code, th
 duration and the argument digest. When the session kept a transcript, the tail of what
 it printed. An id prefix is enough.
 
+### `memnox traces [id]`
+What ran, inside what, for how long, and what failed, drawn as a waterfall the way
+Logfire draws one. Two kinds of trace live here:
+
+- **An agent's session.** Name a session id and every turn the person gave it, and
+  every action inside with its decision, duration and exit code, comes back as a
+  tree. It is built from the ledger, so every session ever recorded has one.
+- **Memnox itself.** Each question to the voice is traced as it is answered:
+  waiting for the end of what was said, building the session list, the brain's turn
+  and how soon its first word came, each tool it called, and speaking the answer.
+  `last` opens the most recent.
+
+With no id it lists the recent traces of Memnox itself. `--json` for the spans.
+`--otlp [endpoint]` sends the trace as OTLP to Logfire, Honeycomb, Grafana Tempo or
+any OpenTelemetry collector, reading `OTEL_EXPORTER_OTLP_ENDPOINT` and
+`OTEL_EXPORTER_OTLP_HEADERS` when no endpoint is named, with `--header key=value`
+for anything else. Nothing leaves the machine unless you ask for it this way, and
+what is sent is names, timings, decisions and paths, never output or what was said.
+Traces are kept locally for seven days.
+
 ### `memnox collisions`
 Two agents in one file, and two agents building one thing. `--since <when>` to
 narrow the window.

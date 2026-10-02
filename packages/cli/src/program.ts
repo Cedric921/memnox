@@ -9,6 +9,7 @@ import { registerWatchCommand } from './commands/watch.command';
 import { registerRewindCommand } from './commands/rewind.command';
 import { registerCheckCommand } from './commands/check.command';
 import { registerTraceCommand } from './commands/trace.command';
+import { registerTracesCommand } from './commands/traces.command';
 import { registerReplayCommand } from './commands/replay.command';
 import { registerExplainCommand } from './commands/explain.command';
 import { registerConfigCommand } from './commands/config.command';
@@ -159,6 +160,7 @@ function registerCommands(program: Command, context: CliContext): void {
   registerRewindCommand(program, context);
   registerCheckCommand(program, context);
   registerTraceCommand(program, context);
+  registerTracesCommand(program, context);
   registerDoctorCommand(program, context);
   registerConfigCommand(program, context);
 }
