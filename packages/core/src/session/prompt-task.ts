@@ -28,9 +28,29 @@ export function intentOfPrompt(prompt: string): TaskIntent | undefined {
   return undefined;
 }
 
-/** The first line of the prompt, clipped, which is the ask as the person put it. */
+/** A pasted log line, a tag, an image marker or a fence: what somebody pasted, never what they asked. */
+const NOT_THEIR_WORDS =
+  /^(\d{4}-\d{2}-\d{2}[T ]\d|<\/?[a-z_-]+|\[(image|pasted)|```|\$ |>)/i;
+
+/** Quotes and code marks somebody typed around a paste, which are not part of the ask. */
+const WRAPPING = /^[`'"\s]+|[`'"\s]+$/g;
+
+/** Enough letters to be a sentence somebody typed rather than a stray mark. */
+const MOST_WORDS_NEEDED = 3;
+
+/**
+ * The first line the person wrote themselves, clipped, which is the ask as they put it. A prompt
+ * that opens with a pasted log or a stray backtick still has its question further down.
+ */
 export function statementOfPrompt(prompt: string): string {
-  const line = prompt.trim().split('\n')[0] ?? '';
+  const lines = prompt
+    .split('\n')
+    .map((each) => each.replace(WRAPPING, '').trim())
+    .filter((each) => each !== '' && !NOT_THEIR_WORDS.test(each));
+  const line =
+    lines.find((each) => (each.match(/[a-z]{2,}/gi) ?? []).length >= MOST_WORDS_NEEDED) ??
+    lines.find((each) => /[a-z]/i.test(each)) ??
+    '';
   return line.length <= MOST_STATEMENT_CHARS
     ? line
     : `${line.slice(0, MOST_STATEMENT_CHARS - 1)}…`;

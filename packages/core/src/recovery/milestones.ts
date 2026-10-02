@@ -288,15 +288,30 @@ export class Milestones {
     return this.diffFrom((await this.find(id)).commit, path);
   }
 
-  /** What the working tree changed since the last commit, for a session no milestone was taken for. */
-  async changedSinceCommit(): Promise<FileChange[]> {
-    const head = await this.head();
-    return head === null ? [] : this.changedFrom(head);
+  /**
+   * What the working tree changed since the last commit made before `moment`, for a session no
+   * milestone was taken for, so work the session has already committed is still its work.
+   */
+  async changedSinceCommit(moment?: string): Promise<FileChange[]> {
+    const base = await this.commitBefore(moment);
+    return base === null ? [] : this.changedFrom(base);
   }
 
-  async diffSinceCommit(path: string): Promise<string> {
-    const head = await this.head();
-    return head === null ? '' : this.diffFrom(head, path);
+  async diffSinceCommit(path: string, moment?: string): Promise<string> {
+    const base = await this.commitBefore(moment);
+    return base === null ? '' : this.diffFrom(base, path);
+  }
+
+  /** The newest commit made before the moment, or the head when no moment or none that old. */
+  private async commitBefore(moment?: string): Promise<string | null> {
+    if (moment === undefined) return this.head();
+    try {
+      const found = await this.git.run(['rev-list', '-1', `--before=${moment}`, 'HEAD']);
+      return found === '' ? await this.head() : found;
+    } catch {
+      // No commits yet, which leaves nothing to compare against.
+      return null;
+    }
   }
 
   private async changedFrom(commit: string): Promise<FileChange[]> {

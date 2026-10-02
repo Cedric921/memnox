@@ -18,3 +18,7 @@ export * from './session-summary';
 export * from './authority';
 export * from './agent-lineage';
 export * from './prompt-task';
+export * from './notices';
+export * from './watches';
+export * from './session-turns';
+export * from './session-subagents';

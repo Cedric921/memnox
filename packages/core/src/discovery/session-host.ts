@@ -22,6 +22,8 @@ export interface SessionHost {
   /** The terminal device, such as `ttys004`, which is how a tab is found in Terminal and iTerm2. */
   tty?: string;
   cwd?: string;
+  /** The agent's own id when `memnox run` keys the ledger by another, which is what its transcript is named after. */
+  agentSession?: string;
   seenAt: string;
 }
 
@@ -83,10 +85,21 @@ export class SessionHosts {
     return this.records.read(idFor(sessionId));
   }
 
-  /** Once per session: a second start of the same session keeps the first answer. */
+  /** Once per session: a second start of the same session keeps the first answer, bar the agent's own id. */
   async note(host: SessionHost): Promise<void> {
-    if ((await this.read(host.sessionId)) !== null) return;
-    await this.records.write(idFor(host.sessionId), host);
+    const kept = await this.read(host.sessionId);
+    if (kept === null) return this.records.write(idFor(host.sessionId), host);
+    // A cleared or resumed conversation under one `memnox run` is a new transcript in the same session.
+    if (host.agentSession === undefined || host.agentSession === kept.agentSession)
+      return;
+    await this.records.write(idFor(host.sessionId), {
+      ...kept,
+      agentSession: host.agentSession,
+    });
+  }
+
+  all(): Promise<SessionHost[]> {
+    return this.records.all();
   }
 
   async forget(sessionId: string): Promise<void> {

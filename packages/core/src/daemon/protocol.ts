@@ -43,6 +43,14 @@ export const DAEMON_METHOD = {
   WARM: 'warm',
   /** The names this machine uses, for the recognizer to listen for. */
   VOCABULARY: 'vocabulary',
+  /** A session as it is right now, for the live window the Mac app opens on it. */
+  SESSION_VIEW: 'session-view',
+  /** The sessions lately, each as a card, for the switcher that turns through them. */
+  SESSIONS_LIST: 'sessions-list',
+  /** The Mac app saying whether an instruction it was asked to type landed, so nobody is told it did when it did not. */
+  DELIVERED: 'delivered',
+  /** The Mac app's own timings for the question just answered: hearing, waiting for the end, speaking. */
+  TRACE: 'trace',
 } as const;
 
 export type DaemonMethod = (typeof DAEMON_METHOD)[keyof typeof DAEMON_METHOD];
@@ -75,12 +83,24 @@ export interface DaemonRequest {
   point?: string;
   /** On ASK: what the person said, whole, in their own words. */
   said?: string;
+  /** On ASK: they were waited on for the rest and said nothing more, so `said` is the whole of it. */
+  finished?: boolean;
   /** On any voice request: the name the person asked to be called. */
   owner?: string;
   /** On BRIEF: held, paused or back. */
   briefing?: string;
   /** On BRIEF back: when the person went away. */
   since?: string;
+  /** On TRACE: the Mac's own steps for the question just answered. */
+  spans?: MacSpan[];
+}
+
+/** A step the Mac timed, hung on the trace of the question it belongs to. */
+export interface MacSpan {
+  name: string;
+  startAt: string;
+  endAt: string;
+  attributes?: Record<string, string | number | boolean>;
 }
 
 export const BRIEFING = {
@@ -90,6 +110,8 @@ export const BRIEFING = {
   PAUSED: 'paused',
   /** The person came back to their Mac. */
   BACK: 'back',
+  /** Something worth telling without being asked: a session finished, committed or pushed. */
+  NOTICE: 'notice',
 } as const;
 
 /** Where a session runs, as LOCATE answers it. */
@@ -114,6 +136,129 @@ export interface DaemonAskChunk {
   tool?: string;
 }
 
+export const DISPLAY = {
+  /** Bring the session's own window forward. */
+  OPEN: 'open',
+  /** Put a summary card on screen while the voice reads it. */
+  CARD: 'card',
+  /** Type the person's confirmed instruction into the terminal tab the agent waits in. */
+  TYPE: 'type',
+  /** Open the session in its editor with the instruction in its input, for the person to send. */
+  PREFILL: 'prefill',
+  /** Turn through the sessions to this one and bring its own terminal tab or editor forward. */
+  FOCUS: 'focus',
+  /** Open a new terminal tab in a repository and type the line that starts an agent there. */
+  LAUNCH: 'launch',
+  /** A card that pages through a session's changed files while the voice walks through them. */
+  WALK: 'walk',
+  /** The whole screen: every agent on this Mac, found by a live scan, with what each reaches. */
+  AGENTS: 'agents',
+  /** A trace as a waterfall card: what ran, inside what, for how long, and what failed. */
+  TRACE: 'trace',
+  /** Every session lately as one card each, together, so they can be read at a glance. */
+  SESSIONS: 'sessions',
+  /** Close the live window on a session and its own terminal tab, which ends the agent there. */
+  CLOSE: 'close',
+} as const;
+
+export type DisplayKind = (typeof DISPLAY)[keyof typeof DISPLAY];
+
+/** How an instruction the Mac was asked to type ended, as DELIVERED reports it in `answer`. */
+export const DELIVERY = {
+  /** Typed into the agent's prompt and sent. */
+  TYPED: 'typed',
+  /** It could not be typed safely, so the words were left on the clipboard. */
+  CLIPBOARD: 'clipboard',
+  /** Nothing was typed anywhere. */
+  FAILED: 'failed',
+} as const;
+
+export type Delivery = (typeof DELIVERY)[keyof typeof DELIVERY];
+
+/** Who said a line of a session's conversation. */
+export const SPEAKER = {
+  PERSON: 'person',
+  AGENT: 'agent',
+  /** A tool the agent ran, by its name and what it was for. */
+  TOOL: 'tool',
+} as const;
+
+export type Speaker = (typeof SPEAKER)[keyof typeof SPEAKER];
+
+/** A line of the conversation itself, as the live window shows it. */
+export interface ConversationLine {
+  at: string;
+  who: Speaker;
+  text: string;
+}
+
+/** A session as one card in the switcher: who, on what, in what state, and where it runs. */
+export interface SessionCard {
+  sessionId: string;
+  agentName: string;
+  task?: string;
+  state: string;
+  thinking: boolean;
+  repository?: string;
+  runningIn?: string;
+  lastActive?: string;
+  /** When it began, so sessions can be told apart by the order they were started in. */
+  startedAt?: string;
+  /** What it has run, so a session that only said hello is never taken for the last one that worked. */
+  actions?: number;
+  host?: DisplayHost;
+}
+
+/** One thing a session did, as the live window lists it. */
+export interface SessionViewStep {
+  at: string;
+  /** shell, file, network, mcp, git, or whatever surface the action was on. */
+  surface: string;
+  /** What it did, in a line: the operation and its target. */
+  text: string;
+  /** It failed, or was refused, which the window marks. */
+  failed?: boolean;
+  refused?: boolean;
+}
+
+/** A session as it is right now: what it is on, what it just did, and what it changed. */
+export interface SessionView {
+  sessionId: string;
+  agent: string;
+  agentName: string;
+  task?: string;
+  /** working, open, idle, quiet, ended or paused, as the sessions list says it. */
+  state: string;
+  /** Thinking through a turn even when nothing new is recorded. */
+  thinking: boolean;
+  repository?: string;
+  runningIn?: string;
+  startedAt?: string;
+  lastActive?: string;
+  waitingOnYou: number;
+  paused?: string;
+  /** What its helpers are doing, one line each. */
+  helpers: string[];
+  /** Newest last, a dozen at most. */
+  steps: SessionViewStep[];
+  files: CardFile[];
+  /** The conversation's latest lines, where the agent keeps a transcript Memnox can read. */
+  conversation?: ConversationLine[];
+}
+
+/** A file on a summary card, with its lines added and removed; a binary file has no counts. */
+export interface CardFile {
+  path: string;
+  added?: number;
+  removed?: number;
+}
+
+/** A few changed lines of one file, so the card shows the code itself and not only its name. */
+export interface CardExcerpt {
+  path: string;
+  lines: string[];
+}
+
 export const DAEMON_EVENT = {
   /** A call is held until a person answers it. */
   HELD: 'held',
@@ -123,6 +268,10 @@ export const DAEMON_EVENT = {
   PAUSED: 'paused',
   /** Something told before is no longer waiting: answered elsewhere, or expired. */
   SETTLED: 'settled',
+  /** The person asked to see a session: its window brought forward, or its summary on a card. */
+  SHOW: 'show',
+  /** Something worth saying unasked: a session finished, committed or pushed. */
+  NOTICE: 'notice',
 } as const;
 
 export type DaemonEventKind = (typeof DAEMON_EVENT)[keyof typeof DAEMON_EVENT];
@@ -146,6 +295,69 @@ export interface DaemonEvent {
   task?: string;
   /** The folder the session works in, by name. */
   place?: string;
+  /** On HELD and NOTICE, the session it is about, so the voice reads that one and never guesses. */
+  sessionId?: string;
+  /** On SHOW, whether to bring the session's window forward or put a card on screen. */
+  display?: DisplayKind;
+  /** On SHOW, the card's heading. */
+  title?: string;
+  /** On SHOW, where the session runs, so its own window can be found. */
+  host?: DisplayHost;
+  /** On a SHOW card, the files the session changed and a few of the changed lines. */
+  files?: CardFile[];
+  excerpt?: CardExcerpt;
+  /** On NOTICE, what happened: finished, committed or pushed. */
+  notice?: string;
+  /** On a WALK card, one page per file, in the order the voice says them. */
+  pages?: WalkPage[];
+  /** On AGENTS, every agent the scan found. */
+  agents?: AgentNode[];
+  /** On TRACE, the waterfall to draw. */
+  trace?: TraceCard;
+}
+
+/** A trace drawn as a waterfall: each step's place on the clock, how deep it sits, how it ended. */
+export interface TraceCard {
+  totalMs: number;
+  rows: {
+    name: string;
+    depth: number;
+    offsetMs: number;
+    durationMs: number;
+    status: string;
+  }[];
+}
+
+/** One agent on the scan screen: who it is, and counted facts about what it reaches. */
+export interface AgentNode {
+  id: string;
+  /** The product, which picks its logo: claude-code, cursor, codex-cli, hermes. */
+  kind: string;
+  name: string;
+  /** MCP servers its configs launch. */
+  servers: number;
+  /** What else it can touch: shell, filesystem, git, network, browser, cloud, docker. */
+  reaches: string[];
+  /** Its sessions working right now, and open waiting on the person. */
+  working: number;
+  open: number;
+}
+
+/** One file of a walk through: what the voice says about it and the lines it is about. */
+export interface WalkPage {
+  path: string;
+  note: string;
+  added?: number;
+  removed?: number;
+  lines: string[];
+}
+
+/** Where a session runs, as far as its hook could see: the app, its terminal tab and its folder. */
+export interface DisplayHost {
+  app?: string;
+  appPath?: string;
+  tty?: string;
+  cwd?: string;
 }
 
 export interface DaemonResponse {
@@ -166,6 +378,10 @@ export interface DaemonResponse {
   location?: DaemonLocation;
   /** On VOCABULARY. */
   words?: readonly string[];
+  /** On SESSION_VIEW. */
+  session?: SessionView;
+  /** On SESSIONS_LIST, the most recently active first. */
+  sessions?: SessionCard[];
   /** On ASK, one per line; the turn ends with a chunk whose kind is in ASK_ENDS. */
   chunk?: DaemonAskChunk;
   /** On CONFIRM and REGISTER_KEY: what happened, in a word or two. */

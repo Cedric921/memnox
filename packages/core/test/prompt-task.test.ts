@@ -35,6 +35,24 @@ describe('the task a prompt declares', () => {
     expect(statementOfPrompt('x'.repeat(300)).length).toBe(200);
   });
 
+  it('takes the line the person wrote, past a stray backtick and a pasted log', () => {
+    const prompt = [
+      '`',
+      '2026-10-01T15:44:21Z  not listening for my name',
+      '2026-10-01T15:44:21Z  speech model ready',
+      '` Fix this actually to load seamlessly and correct in all these use cases.',
+    ].join('\n');
+    expect(statementOfPrompt(prompt)).toBe(
+      'Fix this actually to load seamlessly and correct in all these use cases.',
+    );
+    expect(
+      statementOfPrompt('when you finished this session the voice came up and told me `'),
+    ).toBe('when you finished this session the voice came up and told me');
+    expect(statementOfPrompt('[Image #1]\nwhy is the card wrong')).toBe(
+      'why is the card wrong',
+    );
+  });
+
   it('never replaces a task a person declared, and replaces one read from an earlier prompt', () => {
     const declared = {
       id: 't',

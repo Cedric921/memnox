@@ -16,6 +16,8 @@ export const BREAKER_SIGNAL = {
   SCOPE_DRIFT: 'scope-drift',
   /** Spending, with nothing to show. Counted only from a cost somebody reported. */
   SPEND: 'spend',
+  /** A person asked for it to stop, by voice or otherwise. Nothing was counted. */
+  ASKED: 'asked',
 } as const;
 
 export type BreakerSignal = (typeof BREAKER_SIGNAL)[keyof typeof BREAKER_SIGNAL];

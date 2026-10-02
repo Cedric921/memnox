@@ -17,6 +17,12 @@ export const PROPOSAL_KIND = {
   RULES: 'rules',
   /** An answer to a call that is being held. */
   ANSWER: 'answer',
+  /** Lifting a pause, which lets a stopped session carry on. */
+  RESUME: 'resume',
+  /** The working tree of a repository put back to a milestone, which keeps the tree as it was first. */
+  REWIND: 'rewind',
+  /** A memnox command that changes something, run once the person confirms. */
+  COMMAND: 'command',
 } as const;
 
 export const PROPOSAL_ANSWER = {
@@ -28,7 +34,15 @@ export type ProposalAnswer = (typeof PROPOSAL_ANSWER)[keyof typeof PROPOSAL_ANSW
 
 export type ProposedChange =
   | { kind: typeof PROPOSAL_KIND.RULES; file: string; rules: readonly Policy[] }
-  | { kind: typeof PROPOSAL_KIND.ANSWER; pendingId: string; answer: HoldAnswer };
+  | { kind: typeof PROPOSAL_KIND.ANSWER; pendingId: string; answer: HoldAnswer }
+  | { kind: typeof PROPOSAL_KIND.RESUME; sessionId: string }
+  | {
+      kind: typeof PROPOSAL_KIND.REWIND;
+      repository: string;
+      milestone: string;
+      sessionId?: string;
+    }
+  | { kind: typeof PROPOSAL_KIND.COMMAND; argv: string[] };
 
 export interface Proposal {
   id: string;
