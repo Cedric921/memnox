@@ -46,3 +46,4 @@ export * from './store/json-records';
 export * from './domain/duration-text';
 export * from './notice/index';
 export * from './context/index';
+export * from './trace/index';
