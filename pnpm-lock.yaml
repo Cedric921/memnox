@@ -59,6 +59,10 @@ importers:
       yaml:
         specifier: ^2.4.0
         version: 2.9.0
+    devDependencies:
+      '@memnox/vscode':
+        specifier: workspace:*
+        version: link:../vscode
 
   packages/core:
     dependencies:
@@ -87,6 +91,8 @@ importers:
       '@memnox/core':
         specifier: workspace:*
         version: link:../core
+
+  packages/vscode: {}
 
 packages:
 
