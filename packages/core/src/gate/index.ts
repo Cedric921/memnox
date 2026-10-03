@@ -22,3 +22,4 @@ export * from './proposals';
 export * from './confirm-key';
 export * from './answer-row';
 export * from './display-requests';
+export * from './voice-presence';

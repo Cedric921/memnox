@@ -258,3 +258,74 @@ describe('where the route comes from', () => {
     expect(await readApprovalRoute(machine)).toBe(APPROVAL_ROUTE.BOTH);
   });
 });
+
+describe('a question while the Mac voice is listening', () => {
+  async function askWithVoice(
+    machine: string,
+    voiceWaitMs: number,
+    answering?: (approvals: PendingApprovals) => Promise<void>,
+  ) {
+    const gate = new LocalGate(ASK_MERGES as never, { agentName: 'claude-code' });
+    const approvals = new PendingApprovals(machine);
+    const asking = answerToolCall(
+      merge(),
+      {
+        home: machine,
+        agent: 'claude-code',
+        runSession: undefined,
+        env: {},
+        personThere: false,
+        now: () => NOW,
+      },
+      {
+        authorizer: new HookAuthorizer({ gate }),
+        mode: ENFORCEMENT_MODE.ENFORCE,
+        sink: null,
+        route: APPROVAL_ROUTE.SESSION,
+        voiceThere: async () => true,
+        voiceWaitMs,
+      },
+    );
+    if (answering !== undefined) {
+      // The voice answers while the call is still waiting, as Touch ID does.
+      for (;;) {
+        const [held] = await approvals.list(NOW.toISOString());
+        if (held !== undefined) break;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      await answering(approvals);
+    }
+    return asking;
+  }
+
+  it('lets the call through on a spoken yes, with no picker left to click', async () => {
+    const machine = await home();
+    const answer = await askWithVoice(machine, 5_000, async (approvals) => {
+      const [held] = await approvals.list(NOW.toISOString());
+      await approvals.answer(held?.id ?? '', 'session', 'voice', NOW.toISOString());
+    });
+    expect(answer?.ruling.effect).toBe(DECISION_EFFECT.ALLOW);
+    expect(answer?.reply?.stdout ?? '').not.toContain('AskUserQuestion');
+    expect(await new PendingApprovals(machine).list(NOW.toISOString())).toEqual([]);
+    // For this session, so the next one goes through without being put to anybody.
+    expect((await ask(machine, APPROVAL_ROUTE.SESSION))?.ruling.effect).toBe(
+      DECISION_EFFECT.ALLOW,
+    );
+  });
+
+  it('refuses on a spoken no', async () => {
+    const machine = await home();
+    const answer = await askWithVoice(machine, 5_000, async (approvals) => {
+      const [held] = await approvals.list(NOW.toISOString());
+      await approvals.answer(held?.id ?? '', 'deny', 'voice', NOW.toISOString());
+    });
+    expect(answer?.ruling.effect).toBe(DECISION_EFFECT.DENY);
+  });
+
+  it('falls back to the picker when nobody answers in time', async () => {
+    const machine = await home();
+    const answer = await askWithVoice(machine, 50);
+    expect(answer?.ruling.effect).toBe(DECISION_EFFECT.ASK);
+    expect(answer?.reply?.stdout).toContain('with your AskUserQuestion tool');
+  });
+});

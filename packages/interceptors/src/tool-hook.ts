@@ -26,6 +26,8 @@ import {
   openQuestionFor,
   PendingApprovals,
   SessionTasks,
+  voiceListening,
+  waitForAnswer,
   type ApprovalRoute,
   type ChatQuestion,
   type PendingApproval,
@@ -80,7 +82,16 @@ export interface ToolHookSeams {
   sink?: EventSink | null;
   route?: ApprovalRoute;
   declared?: ToolDeclarations;
+  /** Whether the Mac voice is listening, so a held question waits for a spoken answer. */
+  voiceThere?: () => Promise<boolean>;
+  voiceWaitMs?: number;
 }
+
+/**
+ * How long a held call waits for the voice to put it and Touch ID to sign the answer, under
+ * the minute the host gives a hook by default, so a spoken yes lets the call straight through.
+ */
+const VOICE_ANSWER_WAIT_MS = 50_000;
 
 /** What the hook decided, and what it says to the host, or null for no reply. */
 export interface ToolAnswer {
@@ -167,12 +178,44 @@ export async function answerToolCall(
     ruling.effect === DECISION_EFFECT.ASK && !asked
       ? await heldFor(ruling, sessionId, route, context)
       : null;
+  const spoken =
+    held === null
+      ? null
+      : await spokenAnswer(held, ruling, { sessionId, context, seams });
+  if (spoken !== null) {
+    return { call, ruling: spoken, reply: toolReply(call, spoken, false), asked: false };
+  }
   return {
     call,
     ruling,
     reply: toolReply(call, ruling, context.personThere, held),
     asked,
   };
+}
+
+/**
+ * The answer said out loud while the call waited, or null where nobody is listening or nobody
+ * answered in time. A picker is something only a click can close, so without this a spoken yes
+ * landed and the agent sat on its picker until the person clicked anyway.
+ */
+async function spokenAnswer(
+  held: PendingApproval,
+  ruling: ToolRuling,
+  where: { sessionId: string; context: ToolHookContext; seams: ToolHookSeams },
+): Promise<ToolRuling | null> {
+  const { sessionId, context, seams } = where;
+  const there =
+    seams.voiceThere ?? ((): Promise<boolean> => voiceListening(context.home));
+  if (!(await there().catch(() => false))) return null;
+  const answer = await waitForAnswer({
+    approvals: new PendingApprovals(context.home),
+    id: held.id,
+    // Real time on purpose: a wait is wall clock, whatever clock the ruling was made on.
+    deadline: Date.now() + (seams.voiceWaitMs ?? VOICE_ANSWER_WAIT_MS),
+  });
+  if (answer === null) return null;
+  const after = await withChatAnswer(ruling, sessionId, context);
+  return after.effect === DECISION_EFFECT.ASK ? null : after;
 }
 
 /** Where questions go, from `config.toml`; in the session where nothing says otherwise. */
