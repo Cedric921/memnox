@@ -107,10 +107,38 @@ describe('noting where a session runs', () => {
     });
   });
 
-  it('ignores anything that is not a session start', async () => {
+  it('notes a session that began before Memnox saw it at its first other hook, and only once', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'memnox-host-note-'));
+    const context = {
+      home,
+      agent: 'a',
+      runSession: undefined,
+      pid: 1,
+      cwd: '/',
+      now: () => new Date(),
+    };
+    const listing = (): string => '';
+    await noteSessionHost(
+      { hook_event_name: 'PreToolUse', session_id: 'abc-123', cwd: '/code/runtime' },
+      context,
+      listing,
+    );
+    expect(await new SessionHosts(home).read('abc-123')).toMatchObject({
+      sessionId: 'abc-123',
+      cwd: '/code/runtime',
+    });
+    await noteSessionHost(
+      { hook_event_name: 'PreToolUse', session_id: 'abc-123', cwd: '/elsewhere' },
+      context,
+      listing,
+    );
+    expect((await new SessionHosts(home).read('abc-123'))?.cwd).toBe('/code/runtime');
+  });
+
+  it('notes nothing for a hook that names no session', async () => {
     const home = await mkdtemp(join(tmpdir(), 'memnox-host-note-'));
     await noteSessionHost(
-      { hook_event_name: 'PreToolUse', session_id: 'abc-123' },
+      { hook_event_name: 'PreToolUse' },
       {
         home,
         agent: 'a',
@@ -119,7 +147,8 @@ describe('noting where a session runs', () => {
         cwd: '/',
         now: () => new Date(),
       },
+      () => '',
     );
-    expect(await new SessionHosts(home).read('abc-123')).toBeNull();
+    expect(await new SessionHosts(home).all()).toEqual([]);
   });
 });

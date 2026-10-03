@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   agentProcessOf,
+  describeHost,
   hostOf,
   SessionHosts,
   type HostProcess,
@@ -38,6 +39,75 @@ describe('where a session runs', () => {
         { pid: 1, command: '/Applications/iTerm.app/Contents/MacOS/iTerm2', tty: '??' },
       ]),
     ).toEqual({ tty: 'ttys004', appPath: '/Applications/iTerm.app', app: 'iTerm' });
+  });
+
+  it("names the terminal a Codex inside ChatGPT runs in, never the agent's own app", () => {
+    expect(
+      hostOf([
+        { pid: 4, command: '/bin/sh', tty: 'ttys007' },
+        {
+          pid: 3,
+          command: '/Applications/ChatGPT.app/Contents/Resources/codex',
+          tty: 'ttys007',
+        },
+        { pid: 2, command: '-zsh', tty: 'ttys007' },
+        {
+          pid: 1,
+          command: '/System/Applications/Utilities/Terminal.app/Contents/MacOS/Terminal',
+          tty: '??',
+        },
+      ]),
+    ).toEqual({
+      tty: 'ttys007',
+      appPath: '/System/Applications/Utilities/Terminal.app',
+      app: 'Terminal',
+    });
+  });
+
+  it("finds an agent in an editor's panel, which has no terminal", () => {
+    expect(
+      hostOf([
+        {
+          pid: 3,
+          command: '/Users/me/.vscode/extensions/anthropic.claude-code/resources/claude',
+          tty: '??',
+        },
+        {
+          pid: 2,
+          command:
+            '/Applications/Visual Studio Code.app/Contents/Frameworks/Code Helper (Plugin).app/Contents/MacOS/Code Helper (Plugin)',
+          tty: '??',
+        },
+        {
+          pid: 1,
+          command: '/Applications/Visual Studio Code.app/Contents/MacOS/Electron',
+          tty: '??',
+        },
+      ]),
+    ).toEqual({
+      appPath: '/Applications/Visual Studio Code.app',
+      app: 'Visual Studio Code',
+    });
+  });
+
+  it('says where it runs the way a person would look for it', () => {
+    const at = {
+      sessionId: 's',
+      agent: 'claude-code',
+      pid: 1,
+      seenAt: 't',
+      cwd: '/code/memnox-runtime',
+    };
+    expect(describeHost({ ...at, app: 'Visual Studio Code' })).toBe(
+      'Visual Studio Code, in its Claude Code panel, opened on memnox-runtime',
+    );
+    expect(describeHost({ ...at, app: 'Visual Studio Code', tty: 'ttys003' })).toBe(
+      'Visual Studio Code, in its terminal, opened on memnox-runtime',
+    );
+    expect(describeHost({ ...at, app: 'iTerm', tty: 'ttys004' })).toBe(
+      'a tab in iTerm, opened on memnox-runtime',
+    );
+    expect(describeHost(at)).toBeUndefined();
   });
 
   it('says nothing it does not know, rather than guessing an app', () => {

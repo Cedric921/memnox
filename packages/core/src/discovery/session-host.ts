@@ -1,4 +1,5 @@
 import { basename, join } from 'node:path';
+import { agentShown } from '../gate/plain-ask';
 import { MEMNOX_HOME } from '../config/config';
 import { JsonRecordDir } from '../store/json-records';
 
@@ -49,23 +50,49 @@ const DEEPEST = 32;
 const NO_TERMINAL = '??';
 
 /**
- * The app and terminal a chain of processes sits in, nearest first. The outermost bundle in
- * a path wins, because an editor runs its terminal inside a helper nested in its own bundle.
+ * The app and terminal a chain of processes sits in, nearest first. The app is the outermost
+ * one above the agent, never the agent's own bundle: Codex lives inside ChatGPT.app and still
+ * runs in a Terminal tab, and an editor runs its terminal inside a helper nested in its bundle.
  */
 export function hostOf(
   chain: readonly HostProcess[],
 ): Pick<SessionHost, 'app' | 'appPath' | 'tty'> {
   const tty = chain.find((each) => each.tty !== '' && each.tty !== NO_TERMINAL)?.tty;
-  const appPath = chain
-    .slice(0, DEEPEST)
+  const agent = agentProcessOf(chain);
+  const above = chain.slice(agent === undefined ? 0 : chain.indexOf(agent) + 1, DEEPEST);
+  const appPath = above
     .map((each) => outermostBundle(each.command))
-    .find((path) => path !== null);
+    .filter((path) => path !== null)
+    .pop();
   return {
     ...(tty === undefined ? {} : { tty }),
     ...(appPath === undefined || appPath === null
       ? {}
       : { appPath, app: basename(appPath).replace(/\.app$/, '') }),
   };
+}
+
+/** Editors whose sessions run in their own terminal or in an agent's panel inside them. */
+const EDITORS: readonly string[] = [
+  'visual studio code',
+  'code',
+  'cursor',
+  'windsurf',
+  'zed',
+];
+
+/**
+ * Where a session runs, in the words a person would use to find it: a Terminal tab, an
+ * editor's own terminal, or an agent's panel inside the editor, with the folder it was opened on.
+ */
+export function describeHost(host: SessionHost): string | undefined {
+  if (host.app === undefined) return undefined;
+  const folder = host.cwd === undefined ? '' : `, opened on ${basename(host.cwd)}`;
+  const editor = EDITORS.some((name) => host.app?.toLowerCase().includes(name) === true);
+  if (!editor) return host.tty === undefined ? host.app : `a tab in ${host.app}${folder}`;
+  return host.tty === undefined
+    ? `${host.app}, in its ${agentShown(host.agent)} panel${folder}`
+    : `${host.app}, in its terminal${folder}`;
 }
 
 function outermostBundle(command: string): string | null {

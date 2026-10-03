@@ -10,6 +10,7 @@ import {
 
 import type { EditHookContext } from './edit-claims';
 import { log } from './seam-runtime';
+import { cwdOf, fieldsOf, sessionOf } from './hook-payload';
 import { sessionStartOf } from './session-context-hook';
 
 /**
@@ -19,13 +20,16 @@ import { sessionStartOf } from './session-context-hook';
 
 const PS_TIMEOUT_MS = 2000;
 
-/** Written down once per session, so "show me" knows which window the agent is in. */
+/**
+ * Written down once per session, so "show me" knows which window the agent is in: at its start,
+ * or at the first hook after it for a session that began before Memnox was there to see it.
+ */
 export async function noteSessionHost(
   payload: unknown,
   context: EditHookContext,
   listing: () => string = psListing,
 ): Promise<void> {
-  const start = sessionStartOf(payload);
+  const start = sessionStartOf(payload) ?? (await unnotedSession(payload, context));
   if (start === null) return;
   const sessionId =
     context.runSession ?? (start.sessionId === '' ? UNNAMED_SESSION : start.sessionId);
@@ -47,6 +51,21 @@ export async function noteSessionHost(
     // Showing the window is a convenience: a session is never held up for it.
     log(`could not note where the session runs: ${String(err)}`);
   }
+}
+
+/** Any other hook of a session nobody has noted yet, read as if it were the start. */
+async function unnotedSession(
+  payload: unknown,
+  context: EditHookContext,
+): Promise<{ sessionId: string; cwd?: string } | null> {
+  const hook = fieldsOf(payload);
+  if (hook === null) return null;
+  const sessionId = sessionOf(hook);
+  const keyed = context.runSession ?? sessionId;
+  if (keyed === '' || (await new SessionHosts(context.home).read(keyed)) !== null)
+    return null;
+  const cwd = cwdOf(hook);
+  return { sessionId, ...(cwd === undefined ? {} : { cwd }) };
 }
 
 /**
