@@ -1,6 +1,6 @@
 import { generateKeyPairSync, sign } from 'node:crypto';
 import { connect } from 'node:net';
-import { mkdtemp } from 'node:fs/promises';
+import { mkdir, mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -239,6 +239,8 @@ describe('answering by voice', () => {
 describe('confirming a proposed rule', () => {
   it('writes the rule only after a signed confirmation', async () => {
     const { home, daemon, path, key } = await running();
+    // A real project folder: a proposal for one that does not exist is refused before Touch ID.
+    await mkdir(join(home, 'project'));
     const file = join(home, 'project', 'memnox.policies.toml');
     const proposal = await new Proposals(home).propose({
       change: { kind: PROPOSAL_KIND.RULES, file, rules: [RULE] },

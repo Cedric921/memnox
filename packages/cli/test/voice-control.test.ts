@@ -14,14 +14,18 @@ import {
   NodeWorktree,
   PROPOSAL_KIND,
   Proposals,
+  Clashes,
   SessionHosts,
+  SessionStarts,
   SessionTurns,
   SessionWatches,
   SpokenInstructions,
   SqliteEventStore,
   STARTABLE_AGENT,
   VoiceFocusStore,
+  writeWorkspaceMemory,
   type DiscoveryReport,
+  type EnvironmentSnapshot,
   type MemnoxEvent,
 } from '@memnox/core';
 import { confirmAnswer } from '../src/daemon/confirm';
@@ -32,6 +36,7 @@ import type { SessionToolDeps } from '../src/session-tools/read-tools';
 import type { RewindSeams } from '../src/session-tools/rewind-tool';
 import { showAgentsTool } from '../src/session-tools/agents-tool';
 import { repositoryNamed } from '../src/session-tools/start-tools';
+import { callTool } from '../src/session-tools/session-tools';
 
 /**
  * The voice doing things rather than reading them: watching for news, putting work back,
@@ -352,6 +357,27 @@ describe('starting a session out loud', () => {
     ).toMatchObject({ started: false });
   });
 
+  it('starts it without the tokens when they asked to keep them away from it', async () => {
+    const base = await depsAt();
+    const repo = await workedOn(base, 'memnox-runtime');
+    const deps: SessionToolDeps = {
+      ...base,
+      resolveCommand: () => 'claude',
+      delivered: async () => ({ outcome: 'typed', at: NOW.toISOString() }),
+    };
+    const proposed = (await callOperatorTool(deps, SEAMS, 'propose_start', {
+      repository: 'memnox runtime',
+      task: 'fix the build',
+      hold_credentials: 'true',
+    })) as { start: string; holdsCredentials?: boolean };
+    expect(proposed.holdsCredentials).toBe(true);
+    await callOperatorTool(deps, SEAMS, 'start_session', { start: proposed.start });
+    const [request] = await new DisplayRequests(deps.home).open(NOW.toISOString());
+    expect(request?.text).toBe(
+      `cd '${repo}' && memnox run --hold-credentials -- claude 'fix the build'`,
+    );
+  });
+
   it('finds a repository no session has opened yet, in the folders code is kept in', async () => {
     const base = await depsAt();
     const deps: SessionToolDeps = { ...base, resolveCommand: () => 'claude' };
@@ -511,15 +537,50 @@ describe('showing every agent on the whole screen', () => {
       ],
       surfaces: [
         { agentId: 'agt_claude-code', kind: 'shell' },
-        { agentId: 'agt_claude-code', kind: 'mcp', servers: [{}, {}, {}] },
+        {
+          agentId: 'agt_claude-code',
+          kind: 'mcp',
+          servers: [{ name: 'github' }, { name: 'linear' }, { name: 'slack' }],
+        },
         { agentId: 'agt_codex-cli', kind: 'filesystem' },
       ],
+      authenticated: [{ name: 'gh' }, { name: 'vercel' }, { name: 'gh' }],
     } as unknown as DiscoveryReport;
-    expect(await showAgentsTool(deps, {}, async () => report)).toMatchObject({
+    const heard = {
+      servers: [
+        {
+          name: 'github',
+          tools: [
+            { name: 'list_issues', effect: 'read' },
+            { name: 'merge_pull_request', effect: 'write' },
+          ],
+        },
+      ],
+    } as unknown as EnvironmentSnapshot;
+    expect(
+      await showAgentsTool(
+        deps,
+        {},
+        async () => report,
+        async () => heard,
+      ),
+    ).toMatchObject({
       shown: true,
       agents: [
-        { name: 'Claude Code', servers: 3, reaches: ['shell'], working: 0 },
-        { servers: 0, reaches: ['filesystem'], working: 1 },
+        {
+          name: 'Claude Code',
+          servers: 3,
+          reaches: ['shell'],
+          working: 0,
+          mcp: [
+            { name: 'github', tools: 2, changing: 1 },
+            { name: 'linear' },
+            { name: 'slack' },
+          ],
+          clis: ['gh', 'vercel'],
+        },
+        // No shell, so a CLI signed in on the Mac is not its reach.
+        { servers: 0, reaches: ['filesystem'], working: 1, mcp: [], clis: [] },
       ],
     });
     const [request] = await new DisplayRequests(deps.home).open(NOW.toISOString());
@@ -536,5 +597,229 @@ describe('showing every agent on the whole screen', () => {
     expect(await showAgentsTool(deps, {}, async () => empty)).toMatchObject({
       shown: false,
     });
+  });
+});
+
+describe('work from the workspace', () => {
+  const TICKET = {
+    title: 'Fix auth token refresh',
+    excerpt: 'Tokens expire mid session; refresh them before the call fails.',
+    system: 'linear',
+    author: 'Ada',
+    at: '2026-10-02T09:00:00.000Z',
+    link: 'https://linear.app/acme/issue/ENG-12',
+  };
+  const SAID = {
+    title: '@Memnox implement the task "Fix auth token refresh"',
+    system: 'slack',
+    author: 'Moise',
+    at: '2026-10-02T10:00:00.000Z',
+  };
+  const WHOLE_TICKET = `${TICKET.excerpt} Acceptance: a refresh never logs the token, and a failed refresh signs the person out once.`;
+  const BY_KEY = {
+    title: 'ENG-12 must not log the token while it refreshes',
+    system: 'slack',
+    author: 'Priya',
+    at: '2026-10-02T09:30:00.000Z',
+  };
+  const DOC = {
+    title: 'Auth design: token refresh',
+    system: 'document',
+    at: '2026-09-01T08:00:00.000Z',
+  };
+
+  async function connected(): Promise<SessionToolDeps> {
+    const base = await depsAt();
+    await writeWorkspaceMemory(base.home, {
+      hash: 'm1',
+      withheld: 0,
+      syncedAt: NOW.toISOString(),
+      facts: [
+        {
+          id: 'f_auth',
+          kind: 'decision',
+          statement:
+            'Auth token refresh stays inside the session client, never in callers.',
+          subject: 'auth token',
+          verifiedBy: 'ada@acme.test',
+        },
+      ],
+    });
+    return {
+      ...base,
+      resolveCommand: () => 'claude',
+      // The ticket read whole, past the excerpt the search returned.
+      source: async (link) =>
+        link === TICKET.link
+          ? { content: WHOLE_TICKET, cut: false, untrusted: false }
+          : null,
+      // Each search finds what names the ticket that way, as the workspace would.
+      sources: async (query) => {
+        if (query.system === 'document') return { sources: [DOC], total: 1, withheld: 0 };
+        if (query.about === 'ENG-12') return { sources: [BY_KEY], total: 1, withheld: 0 };
+        return { sources: [SAID, TICKET], total: 2, withheld: 1 };
+      },
+    };
+  }
+
+  it('reads Slack and tickets for the voice, and says when the workspace cannot be asked', async () => {
+    const deps = await connected();
+    expect(
+      await callOperatorTool(deps, SEAMS, 'sources', { about: 'auth' }),
+    ).toMatchObject({
+      sources: [SAID, TICKET],
+      total: 2,
+      withheld: '1 more this Mac is not cleared to read',
+    });
+    const offline = { ...deps, sources: async () => null };
+    expect(await callOperatorTool(offline, SEAMS, 'sources', {})).toMatchObject({
+      reached: false,
+    });
+  });
+
+  it('hands a new session the ticket, what was said and the decision it must keep to', async () => {
+    const deps = await connected();
+    await workedOn(deps, 'memnox-runtime');
+    const proposed = (await callOperatorTool(deps, SEAMS, 'propose_start', {
+      repository: 'memnox runtime',
+      task: 'implement the fix auth token refresh ticket',
+      work: 'Fix auth token refresh',
+    })) as { start: string; readBack: string; found: { brief: string } };
+
+    expect(proposed.readBack).toBe('implement the fix auth token refresh ticket');
+    expect(proposed.found).toMatchObject({
+      ticket: 'Fix auth token refresh',
+      messages: 3,
+      decisions: 1,
+    });
+    const [start] = await new SessionStarts(deps.home).waiting(NOW.toISOString());
+    expect(start?.task).toContain(`read workspace brief ${proposed.found.brief}`);
+    expect(start?.brief).toBe(proposed.found.brief);
+
+    const brief = (await callTool(deps, SEAMS, 'work', {
+      brief: proposed.found.brief,
+    })) as {
+      sources: unknown[];
+      decisions: { statement: string; settled: string }[];
+      keep: string;
+    };
+    // The ticket first and whole, then what named it by its words, its key or a document, oldest first.
+    expect(brief.sources).toEqual([
+      { ...TICKET, content: WHOLE_TICKET },
+      DOC,
+      BY_KEY,
+      SAID,
+    ]);
+    expect(brief.decisions[0]?.statement).toContain('stays inside the session client');
+    expect(brief.decisions[0]?.settled).toContain('confirmed by ada@acme.test');
+    expect(brief.keep).toContain('stop before you change anything and ask your person');
+    expect(brief.keep).toContain('the way this repository already writes code');
+    expect(brief.keep).toContain('every point the ticket and the messages asked for');
+  });
+
+  it('works where their last session did when they named no repository, and says so', async () => {
+    const deps = await connected();
+    const repo = await workedOn(deps, 'memnox-runtime');
+    await new SessionHosts(deps.home).note({
+      sessionId: 'ses_last',
+      agent: 'claude-code',
+      pid: 1,
+      cwd: repo,
+      seenAt: NOW.toISOString(),
+    });
+    expect(
+      await callOperatorTool(deps, SEAMS, 'propose_start', {
+        task: 'implement the fix auth token refresh ticket',
+        work: 'Fix auth token refresh',
+      }),
+    ).toMatchObject({
+      proposed: true,
+      repository: 'memnox-runtime',
+      repositoryFrom: 'the repository your last session worked in',
+    });
+  });
+
+  it('asks the workspace for whose tickets they are, by the name said', async () => {
+    const asked: unknown[] = [];
+    const deps = {
+      ...(await connected()),
+      sources: async (query: unknown) => {
+        asked.push(query);
+        return { sources: [TICKET], total: 1, withheld: 0 };
+      },
+    };
+    await callOperatorTool(deps, SEAMS, 'sources', {
+      assignee: 'Priya',
+      system: 'linear',
+    });
+    expect(asked).toEqual([{ assignee: 'Priya', system: 'linear' }]);
+  });
+
+  it('never reads a brief by an id it did not make', async () => {
+    const deps = await connected();
+    expect(await callTool(deps, SEAMS, 'work', { brief: '../../account' })).toMatchObject(
+      {
+        said: expect.stringContaining('Pass brief'),
+      },
+    );
+  });
+});
+
+describe('two agents on one piece of work', () => {
+  it('tells the person once when two sessions write the same files at once', async () => {
+    const deps = await depsAt();
+    const started = '2026-09-30T11:50:00.000Z';
+    await recorded(deps.home, [
+      edit('ses_claude', '/r/src/checkout.ts', '2026-09-30T11:55:00.000Z'),
+      {
+        ...edit('ses_codex', '/r/src/checkout.ts', '2026-09-30T11:56:00.000Z'),
+        agent: 'codex',
+      },
+      {
+        ...edit('ses_codex', '/r/src/cart.ts', '2026-09-30T11:57:00.000Z'),
+        agent: 'codex',
+      },
+      edit('ses_claude', '/r/src/cart.ts', '2026-09-30T11:58:00.000Z'),
+    ]);
+    const watcher = new NoticeWatcher(deps.home, started);
+
+    const told = (await watcher.look(NOW.toISOString())).filter(
+      (each) => each.notice === 'collision',
+    );
+    expect(told).toHaveLength(1);
+    expect(told[0]?.summary).toContain(
+      'are working on the same files at once on this Mac',
+    );
+    expect(told[0]?.summary).toContain('cart.ts, checkout.ts');
+    expect(told[0]?.sessionId).toBeDefined();
+
+    const again = await watcher.look('2026-09-30T12:00:10.000Z');
+    expect(again.filter((each) => each.notice === 'collision')).toEqual([]);
+  });
+
+  it('tells the person when an agent was held off a file another machine has, once', async () => {
+    const deps = await depsAt();
+    const watcher = new NoticeWatcher(deps.home, '2026-09-30T11:50:00.000Z');
+    const clash = {
+      at: '2026-09-30T11:59:00.000Z',
+      sessionId: 'ses_claude',
+      agent: 'claude-code',
+      what: '/r/src/billing/invoice.ts',
+      said: 'Codex on studio is editing lines 10 to 40 of src/billing/invoice.ts.',
+    };
+    await new Clashes(deps.home).note(clash);
+    await new Clashes(deps.home).note({ ...clash, at: '2026-09-30T11:59:30.000Z' });
+
+    const told = (await watcher.look(NOW.toISOString())).filter(
+      (each) => each.notice === 'collision',
+    );
+    expect(told).toHaveLength(1);
+    expect(told[0]?.summary).toContain('was held off invoice.ts');
+    expect(told[0]?.summary).toContain('Codex on studio is editing');
+    expect(
+      (await watcher.look('2026-09-30T12:00:10.000Z')).filter(
+        (each) => each.notice === 'collision',
+      ),
+    ).toEqual([]);
   });
 });

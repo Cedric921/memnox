@@ -6,6 +6,7 @@ import {
   ACTION,
   buildReplay,
   DECISION_EFFECT,
+  delegationChain,
   LEDGER_LATEST_ONLY,
   LEDGER_RECENT_LIMIT,
   LEDGER_SESSION_LIMIT,
@@ -21,6 +22,7 @@ import {
   type MemnoxEvent,
   type Milestone,
 } from '@memnox/core';
+import type { SourceQuery, SourceRead, SourcesRead } from '../sync/workspace-reads';
 
 import { withEvents } from '../event-store';
 import type { CommandRun } from './voice-commands';
@@ -40,8 +42,16 @@ export interface SessionToolDeps {
   milestonesAt: (place: string) => Promise<Milestone[]>;
   /** The live brief from the workspace, or null where it cannot be asked just now. */
   brief: (resources: readonly string[], repository?: string) => Promise<unknown>;
+  /** Pulls the workspace memory again before it is read; absent where nothing can reach the workspace. */
+  refreshMemory?: () => Promise<void>;
+  /** Messages and tickets from the systems the workspace connects, or null where it cannot be asked. */
+  sources?: (query: SourceQuery) => Promise<SourcesRead | null>;
+  /** One item read whole by its link, or null where the workspace will not or cannot say. */
+  source?: (link: string) => Promise<SourceRead | null>;
+  /** The workspace's own name, or null when it has none or cannot be asked. */
+  workspaceName?: () => Promise<string | null>;
   /** How the Mac says an instruction it typed landed, or null when it never said; absent where nobody types. */
-  delivered?: (requestId: string) => Promise<DisplayDelivery | null>;
+  delivered?: (requestId: string, waitMs?: number) => Promise<DisplayDelivery | null>;
   /** Where an agent's command is, from the person's own shell or where it is installed, or null. */
   resolveCommand?: (agent: StartableAgent) => string | null;
   /** How a memnox command is run for the voice; absent means memnox itself, beside this module. */
@@ -76,6 +86,7 @@ function decisionOf(event: MemnoxEvent): Record<string, unknown> {
         }),
     ...(event.alternative === undefined ? {} : { instead: event.alternative }),
     ...(event.authorizedBy === undefined ? {} : { releasedBy: event.authorizedBy }),
+    ...(event.subagent === undefined ? {} : { by: delegationChain(event) }),
   };
 }
 
@@ -148,7 +159,7 @@ async function compactReplay(
     ...(replay.endReason === undefined ? {} : { endReason: replay.endReason }),
     steps: replay.steps.map(
       (step) =>
-        `${step.at} ${step.leadUp === true ? '> ' : ''}${step.summary}${step.eventId === undefined ? '' : ` [${step.eventId}]`}`,
+        `${step.at} ${step.leadUp === true ? '> ' : ''}${step.summary}${step.by === undefined ? '' : `, by the ${step.by}`}${step.eventId === undefined ? '' : ` [${step.eventId}]`}`,
     ),
   };
 }

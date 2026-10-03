@@ -101,4 +101,34 @@ describe('the line that starts a session', () => {
       }),
     ).toBe(`cd '/r' && memnox run -- codex 'add a test then push'`);
   });
+
+  it('hands the agent its brief through memnox run when the work came from the workspace', () => {
+    expect(
+      startCommand({
+        id: 'stt_2',
+        agent: 'claude-code',
+        command: 'claude',
+        repository: '/r',
+        task: 'implement the ticket',
+        brief: 'wrk_abc123',
+        proposedAt: SET_AT,
+        expiresAt: SET_AT,
+      }),
+    ).toBe(`cd '/r' && memnox run --brief 'wrk_abc123' -- claude 'implement the ticket'`);
+  });
+
+  it('holds the credentials back when asked, before the agent command and never inside it', () => {
+    expect(
+      startCommand({
+        id: 'stt_2',
+        agent: 'claude-code',
+        command: 'claude',
+        repository: '/r',
+        task: 'fix the build',
+        holdCredentials: true,
+        proposedAt: SET_AT,
+        expiresAt: SET_AT,
+      }),
+    ).toBe(`cd '/r' && memnox run --hold-credentials -- claude 'fix the build'`);
+  });
 });

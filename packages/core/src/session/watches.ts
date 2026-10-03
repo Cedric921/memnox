@@ -34,8 +34,18 @@ export interface SessionWatch {
   for: WatchFor;
   /** What the person said, so the voice can answer in their terms. */
   said?: string;
+  /**
+   * A session just started has no id until its agent first acts, so the watch waits for the
+   * first one in this repository started after `since`, and `sessionId` stays empty until then.
+   */
+  awaiting?: AwaitedSession;
   setAt: string;
   expiresAt: string;
+}
+
+export interface AwaitedSession {
+  repository: string;
+  since: string;
 }
 
 /** One test run the agent made, as its own transcript records it. */
@@ -96,6 +106,7 @@ export interface WatchInput {
   agent: string;
   for: WatchFor;
   said?: string;
+  awaiting?: AwaitedSession;
   at: string;
 }
 
@@ -113,6 +124,7 @@ export class SessionWatches {
       agent: input.agent,
       for: input.for,
       ...(input.said === undefined ? {} : { said: input.said }),
+      ...(input.awaiting === undefined ? {} : { awaiting: input.awaiting }),
       setAt: input.at,
       expiresAt: new Date(Date.parse(input.at) + WATCH_TTL_MS).toISOString(),
     };
@@ -127,6 +139,14 @@ export class SessionWatches {
       if (each.expiresAt <= moment) await this.records.remove(each.id);
     }
     return found.filter((each) => each.expiresAt > moment);
+  }
+
+  /** The session it was waiting for has appeared, so from now on it watches that one. */
+  async bind(watch: SessionWatch, sessionId: string): Promise<SessionWatch> {
+    const { awaiting: _done, ...rest } = watch;
+    const bound = { ...rest, sessionId };
+    await this.records.write(watch.id, bound);
+    return bound;
   }
 
   /** Said once, so it is gone. */

@@ -25,6 +25,7 @@ import {
   SessionTurns,
   SqliteEventStore,
   type HoldRequest,
+  writeWorkspaceMemory,
   type MemnoxEvent,
 } from '@memnox/core';
 import {
@@ -135,11 +136,11 @@ async function stamp(path: string, moment: string): Promise<void> {
 }
 
 describe('what the operator is offered', () => {
-  it('reads, and writes nothing but a proposal, a pause, a watch, or a request to show or start what the person said yes to', () => {
+  it("reads, and writes nothing but a proposal, a pause, a watch, the person's answer to their agent's question, or a request to show or start what the person said yes to", () => {
     for (const tool of OPERATOR_TOOLS) {
       if (tool.annotations.readOnlyHint) continue;
       expect(tool.name).toMatch(
-        /^(propose_|show$|pause_session$|send_instruction$|watch_for$|walk_through$|start_session$|show_agents$|memnox_command$|traces$)/,
+        /^(propose_|show$|pause_session$|send_instruction$|answer_question$|watch_for$|walk_through$|start_session$|show_agents$|memnox_command$|traces$)/,
       );
     }
   });
@@ -253,6 +254,7 @@ describe('a rule the person asked for', () => {
   it('is proposed and never written, so it is not in force until Touch ID', async () => {
     const deps = await depsAt();
     const project = join(deps.home, 'shop');
+    await mkdir(project);
 
     const answer = await callOperatorTool(deps, SEAMS, 'propose_rule', {
       action: 'npm.publish',
@@ -414,6 +416,34 @@ describe('more than one session at once', () => {
       { agent: 'claude-code' },
     );
     expect(answer).toMatchObject({ sessionId: 'ses_work' });
+  });
+});
+
+describe('a question about the workspace', () => {
+  it('is answered from the memory this Mac pulled, rather than sent to the console', async () => {
+    const deps = await depsAt();
+    await writeWorkspaceMemory(deps.home, {
+      hash: 'm1',
+      withheld: 0,
+      syncedAt: '2026-09-30T11:00:00.000Z',
+      facts: [
+        {
+          id: 'f_owner',
+          kind: 'ownership',
+          statement: 'The billing service is owned by Engineering.',
+          subject: 'billing',
+          verifiedBy: 'ada@acme.test',
+        },
+      ],
+    });
+
+    expect(OPERATOR_TOOLS.map((each) => each.name)).toEqual(
+      expect.arrayContaining(['memory', 'brief']),
+    );
+    expect(await callOperatorTool(deps, SEAMS, 'memory', {})).toMatchObject({
+      held: 1,
+      facts: [{ statement: 'The billing service is owned by Engineering.' }],
+    });
   });
 });
 
@@ -714,6 +744,37 @@ describe('telling an agent what the person said', () => {
     });
     return deps;
   }
+
+  it('says nothing over the Mac when it is not allowed to type, and retries only when asked', async () => {
+    const base = await waitingInEditor();
+    const deps: SessionToolDeps = {
+      ...base,
+      delivered: async (requestId) => {
+        await new DisplayRequests(base.home).deliver(requestId, {
+          outcome: 'not-allowed',
+          at: NOW.toISOString(),
+          reason: 'Memnox is not allowed to type yet',
+        });
+        return new DisplayRequests(base.home).deliveryOf(requestId);
+      },
+    };
+    const id = await proposed(deps);
+    const answer = (await callOperatorTool(deps, SEAMS, 'send_instruction', {
+      instruction: id,
+    })) as { sent: boolean; how: string; said: string };
+    expect(answer).toMatchObject({ sent: false, how: 'not-allowed' });
+    expect(answer.said).toContain('Write nothing at all this turn');
+    expect(answer.said).toContain('ask you to try again');
+  });
+
+  it('sends a used instruction again on a retry rather than reading it back', async () => {
+    const answer = (await callOperatorTool(await depsAt(), SEAMS, 'send_instruction', {
+      instruction: 'ins_gone',
+    })) as { sent: boolean; said: string };
+    expect(answer.sent).toBe(false);
+    expect(answer.said).toContain('send_instruction straight away');
+    expect(answer.said).toContain('Never tell them it expired');
+  });
 
   it('never says it was sent when the Mac said the typing failed', async () => {
     const base = await waitingInEditor();
@@ -1040,7 +1101,7 @@ describe('showing the person a session', () => {
         agent: 'claude-code',
         display: 'open',
       }),
-    ).toMatchObject({ shown: true, display: 'open' });
+    ).toMatchObject({ shown: true, display: 'focus' });
     const [shown] = await new WaitingFeed(deps.home).everything(NOW.toISOString());
     expect(shown?.host?.cwd).toContain('memnox-operator-repo-');
   });
@@ -1065,15 +1126,36 @@ describe('showing the person a session', () => {
     expect(shown?.host?.cwd).toBe(realpathSync(repo));
   });
 
-  it('opens a live window on a session even when where it runs was never noted', async () => {
+  it('opens a live window on a session only when asked to watch it', async () => {
     const deps = await depsAt();
     await recorded(deps.home, [event('ses_8', 'claude-code', {})]);
     const shown = await callOperatorTool(deps, SEAMS, 'show', {
       agent: 'claude-code',
-      display: 'open',
+      display: 'watch',
     });
     expect(shown).toMatchObject({ shown: true, display: 'open' });
     expect(JSON.stringify(shown)).toContain('live window');
+  });
+
+  it('clears every popup at once without naming or closing any session', async () => {
+    const deps = await depsAt();
+    expect(
+      await callOperatorTool(deps, SEAMS, 'show', { display: 'dismiss' }),
+    ).toMatchObject({ dismissed: true });
+    const [request] = await new DisplayRequests(deps.home).open(NOW.toISOString());
+    expect(request).toMatchObject({ display: 'dismiss', sessionId: 'all' });
+  });
+
+  it('takes the person to the session itself when asked to open it, never a popup', async () => {
+    const deps = await depsAt();
+    await recorded(deps.home, [event('ses_9', 'claude-code', {})]);
+    const shown = await callOperatorTool(deps, SEAMS, 'show', {
+      agent: 'claude-code',
+      display: 'open',
+    });
+    expect(shown).toMatchObject({ shown: true, display: 'focus' });
+    const [request] = await new DisplayRequests(deps.home).open(NOW.toISOString());
+    expect(request?.display).toBe('focus');
   });
 });
 

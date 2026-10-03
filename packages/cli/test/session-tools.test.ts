@@ -153,7 +153,7 @@ async function call(
 }
 
 describe('the session tools', () => {
-  it('offers exactly why, status, replay, decisions, memory, brief, fingerprint and rewind', () => {
+  it('offers exactly why, status, replay, decisions, memory, brief, work, fingerprint and rewind', () => {
     expect(SESSION_TOOLS.map((tool) => tool.name)).toEqual([
       'why',
       'status',
@@ -161,6 +161,7 @@ describe('the session tools', () => {
       'decisions',
       'memory',
       'brief',
+      'work',
       'fingerprint',
       'rewind',
     ]);

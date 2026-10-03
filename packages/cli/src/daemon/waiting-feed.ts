@@ -1,6 +1,7 @@
 import { basename } from 'node:path';
 import {
   AGENT_ID_PREFIX,
+  AgentQuestions,
   DAEMON_EVENT,
   describeHeldCall,
   DisplayRequests,
@@ -9,9 +10,12 @@ import {
   Proposals,
   SessionHosts,
   SessionTasks,
+  NOTICE_KIND,
+  type AgentQuestion,
   type DaemonEvent,
   type DisplayRequest,
   type PendingApproval,
+  type SessionHost,
 } from '@memnox/core';
 import { liveHost } from '../session-tools/live-host';
 import { displayName, readNames, type AgentNames } from '../agents/names';
@@ -68,6 +72,8 @@ export class WaitingFeed {
               ...(host.app === undefined ? {} : { app: host.app }),
               ...(host.appPath === undefined ? {} : { appPath: host.appPath }),
               ...(host.tty === undefined ? {} : { tty: host.tty }),
+              // Only the agent's own id: a guess opens a new conversation in the panel instead of this one.
+              ...conversationOf(host),
               // The show tool resolved the checkout the person has open, which beats the agent's own folder.
               ...((request.cwd ?? host.cwd) === undefined
                 ? {}
@@ -84,6 +90,11 @@ export class WaitingFeed {
       (each) => each.answer === undefined,
     );
     const held = await Promise.all(waiting.map((each) => this.heldEvent(each, names)));
+    const asking = await Promise.all(
+      (await new AgentQuestions(this.home).open(moment)).map((each) =>
+        this.questionEvent(each, names),
+      ),
+    );
     const proposed = (await this.proposals.open(moment)).map((each): DaemonEvent => ({
       kind: DAEMON_EVENT.PROPOSAL,
       subject: each.id,
@@ -92,7 +103,32 @@ export class WaitingFeed {
       at: each.proposedAt,
       expiresAt: each.expiresAt,
     }));
-    return [...held, ...proposed];
+    return [...held, ...asking, ...proposed];
+  }
+
+  /** An agent's own question, said as news so the voice reads it out and listens for the answer. */
+  private async questionEvent(
+    question: AgentQuestion,
+    names: AgentNames,
+  ): Promise<DaemonEvent> {
+    const [task, host] = await Promise.all([
+      new SessionTasks(this.home).read(question.sessionId),
+      new SessionHosts(this.home).read(question.sessionId),
+    ]);
+    const agentName = nameOf(names, question.agent);
+    return {
+      kind: DAEMON_EVENT.NOTICE,
+      notice: NOTICE_KIND.QUESTION,
+      subject: question.id,
+      agent: question.agent,
+      agentName,
+      summary: `${agentName} is asking you: ${question.questions[0]?.question ?? 'a question'}`,
+      at: question.askedAt,
+      expiresAt: question.expiresAt,
+      sessionId: question.sessionId,
+      ...(task === null ? {} : { task: task.statement }),
+      ...(host?.cwd === undefined ? {} : { place: basename(host.cwd) }),
+    };
   }
 
   /** A held call with what a person needs to hear about it: who, where, doing what, and why. */
@@ -122,6 +158,19 @@ export class WaitingFeed {
       ...(host?.cwd === undefined ? {} : { place: basename(host.cwd) }),
     };
   }
+}
+
+/**
+ * An agent's own conversation id, which is a UUID, never Memnox's own `ses_` key for it. Outside
+ * `memnox run` the session is keyed by that very id, so it is the session id itself.
+ */
+export function conversationOf(host: Pick<SessionHost, 'sessionId' | 'agentSession'>): {
+  conversation?: string;
+} {
+  const id = host.agentSession ?? host.sessionId;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)
+    ? { conversation: id }
+    : {};
 }
 
 /** The name the person gave the agent, or its product name made readable. */

@@ -103,13 +103,15 @@ function registerLocalSubcommands(agents: Command, deps: AgentsDeps): void {
 /** The subcommands that put an agent under the workspace, take it out, or hear from it. */
 function registerWorkspaceSubcommands(agents: Command, deps: AgentsDeps): void {
   agents
-    .command('onboard [agent]')
-    .description('Put an agent under Memnox, backing up its config first')
+    .command('onboard [agents...]')
+    .description('Put one or more agents under Memnox, backing up each config first')
     .option('--name <name>', 'what the workspace should call it, rather than being asked')
     .option('--json', 'machine-readable output')
-    .action(async (agent: string | undefined, options: OnboardOptions) =>
-      runOnboard(deps, agent, options),
-    );
+    .action(async (agents: string[], options: OnboardOptions) => {
+      if (agents.length === 0) return runOnboard(deps, undefined, options);
+      // One after another, since each rewrites a config and enrols against the same account.
+      for (const agent of agents) await runOnboard(deps, agent, options);
+    });
 
   agents
     .command('offboard <agent>')

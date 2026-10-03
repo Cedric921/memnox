@@ -6,11 +6,11 @@ import { conversationPath } from '../memnox-paths';
  * resumes it with its context rather than starting a stranger.
  */
 
-/** Long enough for a coffee between questions, short enough that tomorrow starts fresh. */
-const CONVERSATION_IDLE_MS = minutesToMs(30);
+/** A working afternoon with gaps in it, so it still knows the session from before lunch; tomorrow starts fresh. */
+const CONVERSATION_IDLE_MS = minutesToMs(180);
 
-/** Every turn rereads the whole history, so past this many the next answer starts fresh and quick. */
-export const MOST_CONVERSATION_TURNS = 20;
+/** Every turn rereads the whole history, so past this many the next answer starts fresh, with recall carrying the thread. */
+export const MOST_CONVERSATION_TURNS = 40;
 
 interface Conversation {
   brain: string;

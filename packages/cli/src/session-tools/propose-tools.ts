@@ -1,3 +1,4 @@
+import { statSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join } from 'node:path';
 import {
   DECISION_EFFECT,
@@ -154,8 +155,12 @@ async function policyFileFor(
   const written = (await readRegisteredFiles(home)).filter(
     (file) => basename(file) === WRITTEN_POLICY_FILE && isAbsolute(file),
   );
-  if (project !== undefined && isAbsolute(project))
+  if (project !== undefined && isAbsolute(project)) {
+    // Refused now rather than after the Touch ID, and never created: a misheard path is not a project.
+    if (!isDirectory(project))
+      return { refused: `${project} is not a folder on this Mac` };
     return join(project, WRITTEN_POLICY_FILE);
+  }
   const named =
     project === undefined
       ? written
@@ -171,4 +176,13 @@ async function policyFileFor(
         ? 'no project has a rule file yet, so name the project directory by its full path'
         : `name one project: ${projects.join(', ')}`,
   };
+}
+
+function isDirectory(path: string): boolean {
+  try {
+    return statSync(path).isDirectory();
+  } catch {
+    // Missing or unreadable, which is the same answer: there is no project here to write into.
+    return false;
+  }
 }

@@ -12,6 +12,10 @@ import { repositoryTool } from './repository-tool';
 import { showAgentsTool } from './agents-tool';
 import { commandOutputTool, memnoxCommandTool } from './command-tool';
 import { tracesTool } from './traces-tool';
+import { aboutTool } from './about-tool';
+import { briefTool, memoryTool } from './memory-tools';
+import { sourcesTool } from './work-tools';
+import { answerQuestionTool } from './question-tool';
 import { proposeRewindTool } from './rewind-proposal';
 import { pauseSessionTool, proposeResumeTool } from './session-actions';
 import { proposeStartTool, startSessionTool } from './start-tools';
@@ -60,7 +64,7 @@ export const OPERATOR_TOOLS: readonly ToolDefinition[] = [
   ),
   readTool(
     'reach',
-    'What the agents on this machine can use: the agents themselves, each MCP server and which agents start it, and the CLIs Memnox watches, which any agent with a shell can run, and which of those are signed in, so an agent running them acts as the person. Answer "is Claude Code connected to Railway" from here.',
+    'What the agents on this machine can use: the agents themselves, each MCP server and which agents start it, and the CLIs Memnox watches, which any agent with a shell can run, and which of those are signed in, so an agent running them acts as the person, and for each agent whether it approves its own actions or asks first and where its program was installed from and who signed it. Answer "is Claude Code connected to Railway" and "which agents act without asking" from here.',
   ),
   readTool(
     'waiting',
@@ -97,6 +101,66 @@ export const OPERATOR_TOOLS: readonly ToolDefinition[] = [
         description: 'a command such as "railway deploy", or a verb such as "git.push"',
       },
       path: { type: 'string', description: 'a file or directory the action touches' },
+    },
+  ),
+  readTool(
+    'about',
+    'What the Memnox project itself says: its vision in thirty three numbered sections, its architecture, every command and flag, policies, onboarding, use cases, the threat model, the FAQ, the build plan and the changelog. Answer any question about what Memnox is, why it exists, how a part of it works, what a command does, what a vision section says, what shipped in a release or how it is priced from here, never from memory. Pass question with the key words of what they asked; leave it out for a list of what is written down.',
+    {
+      question: {
+        type: 'string',
+        description:
+          'the key words of their question, such as "circuit breaker", "section 15", "protect enforce" or "pricing"',
+      },
+    },
+  ),
+  readTool(
+    'memory',
+    'What the person\'s Memnox Cloud workspace has settled, as this Mac last pulled it: decisions, policies, who approves what and who owns what, each with who confirmed it, when and where it came from, and how many facts the workspace holds. Answer "what is in my workspace", "what does the cloud know", "summarise our memory" and "who owns billing" from here, never from the console. Pass about with the key words of their question; leave it out for the newest.',
+    {
+      about: {
+        type: 'string',
+        description:
+          'words or paths the question is about, such as "payment retries" or "src/billing"; the newest when left out',
+      },
+    },
+  ),
+  readTool(
+    'sources',
+    'What people actually said, filed or wrote in the systems the workspace connects: Slack and Discord messages, Linear, Jira and GitHub issues, and documents, each with its title, a short excerpt, who wrote it, when and a link, as far as this Mac is cleared to read. Each ticket opens with its status, priority and who it is assigned to. Answer "what did we say in Slack", "who said this", "what does Priya have to work on", "what tickets do I have", "how many tickets" and "what is the ticket about" from here, and find a ticket here before an agent works on it.',
+    {
+      about: {
+        type: 'string',
+        description: 'the key words, such as "auth token" or "rate limiting"',
+      },
+      person: {
+        type: 'string',
+        description: 'who wrote or said them: a name, email or handle',
+      },
+      assignee: {
+        type: 'string',
+        description:
+          'whose tickets: a name or part of one, matched against who each ticket is assigned to',
+      },
+      system: {
+        type: 'string',
+        description: 'slack, discord, linear, jira, github or document',
+      },
+      since: { type: 'string', description: 'an ISO date; nothing before it' },
+    },
+  ),
+  readTool(
+    'brief',
+    'Ask the workspace, live, about paths, services or a repository: the decisions that bear on them, who owns them, which agent holds them and what landed there lately. Falls back to what this Mac pulled when the cloud cannot be reached, and says so.',
+    {
+      paths: {
+        type: 'string',
+        description: 'the paths, services or repository, comma separated',
+      },
+      repository: {
+        type: 'string',
+        description: 'the repository, where the workspace knows it by name',
+      },
     },
   ),
   readTool(
@@ -144,7 +208,7 @@ export const OPERATOR_TOOLS: readonly ToolDefinition[] = [
   {
     name: 'show',
     description:
-      'Show the person a session. display "open" turns through their sessions in 3D to this one and opens a live window on it showing what it is doing now and its conversation. display "focus" turns through them the same way and then brings its own terminal tab or editor conversation forward. display "card" puts a card in the top left corner of their screen with a title and the summary text you are about to say, so they can read along. display "all" puts every session up at once, one card each, and needs no session. display "close" closes its live window and its own terminal tab, which ends the agent there; it refuses while a turn is in progress. Use open when they ask to open, see or watch a session; focus when they ask to go to it, switch to it or take them to its tab or terminal; card when they ask for a summary or what a session did; all when they ask to see all their sessions, every session or them all at once, which is never show_agents; close when they ask to close it, its tab, its window or its terminal, which is never pause_session. Only close ends anything, and only a session that has handed back.',
+      'Show the person a session. display "open" brings the session itself forward: its own terminal tab, or its editor window and the terminal or conversation it runs in, so they can carry on there. display "watch" opens a live window in the middle of the screen showing what it is doing now and its conversation. display "card" puts a card in the top left corner of their screen with a title and a markdown summary of what happened, for them to read while you say the gist. display "all" puts every session up at once, one card each, and needs no session. display "close" closes its live window and its own terminal tab, in iTerm, Terminal or an editor, which ends the agent there; it refuses while a turn is in progress. display "dismiss" takes every Memnox card, live window and board off the screen at once, needs no session and ends nothing. Use open when they ask to open it, go to it, switch to it or take them to it; watch only when they ask to watch it live or see it as it happens; card when they ask for a summary, what a session did, or say yes, here or in front of me after you offered a summary; all when they ask to see all their sessions, every session or them all at once, which is never show_agents; close when they ask to close a session, its tab or its terminal, which is never pause_session; dismiss when they ask to close, clear or hide the popups, the cards, the windows or the screen, which never closes a session. Only close ends anything, and only a session that has handed back.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -152,7 +216,7 @@ export const OPERATOR_TOOLS: readonly ToolDefinition[] = [
         session: SESSION_ARG,
         display: {
           type: 'string',
-          description: 'open, focus, card, close or all; card when left out',
+          description: 'open, watch, card, close, dismiss or all; card when left out',
         },
         title: {
           type: 'string',
@@ -160,7 +224,8 @@ export const OPERATOR_TOOLS: readonly ToolDefinition[] = [
         },
         text: {
           type: 'string',
-          description: 'for a card: the summary, in the same plain words you will say',
+          description:
+            'for a card: markdown of what happened, read from session, replay and changes. A short heading line, then bullets for what it was asked, what it ran with the outcome, the commits and files it changed, and where it stands now; commands and names in backticks. Facts only, no more than about twenty lines.',
         },
       },
     },
@@ -193,6 +258,11 @@ export const OPERATOR_TOOLS: readonly ToolDefinition[] = [
         description:
           'for a hand off, another session id whose changed files are added to the message, like when they say "have Codex review what Claude just changed"',
       },
+      work: {
+        type: 'string',
+        description:
+          'the ticket or task from the workspace this is about, by its title or key words, such as "Fix auth token refresh", when they ask an agent to implement, fix or work on one: the ticket, what was said about it and the decisions that bind it are gathered and handed to the agent',
+      },
       said: SAID_ARG,
     },
   ),
@@ -213,6 +283,31 @@ export const OPERATOR_TOOLS: readonly ToolDefinition[] = [
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   },
   ...ACTING_TOOLS,
+  {
+    name: 'answer_question',
+    description:
+      'Pass the person\'s answer to a question an agent is asking them in its own picker, such as "which database should I use". Their answer is their choice, so it goes at once with no read back and no Touch ID; the agent carries on with it. Pass the option they meant by its label, or their own words when it is none of them.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        question: {
+          type: 'string',
+          description: 'the question id, from the notice or waiting',
+        },
+        answer: {
+          type: 'string',
+          description: 'the option label they chose, or their own words',
+        },
+        number: {
+          type: 'string',
+          description:
+            'which question, from 1, when the agent asked several at once; 1 when left out',
+        },
+      },
+    },
+    // It passes on the person's own choice; what the agent then does is ruled on as ever.
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+  },
   proposeTool(
     'propose_resume',
     'Resume a paused session the person asked to carry on. Nothing restarts until they confirm with Touch ID on the Mac, so say that.',
@@ -287,6 +382,17 @@ const OPERATOR_CALLS: Record<string, OperatorCall> = {
   show_agents: (deps, _seams, args) => showAgentsTool(deps, args),
   memnox_command: (deps, _seams, args) => memnoxCommandTool(deps, args),
   traces: (deps, _seams, args) => tracesTool(deps, args),
+  about: (_deps, _seams, args) => aboutTool(args),
+  memory: async (deps, _seams, args) => {
+    const [answer, name] = await Promise.all([
+      memoryTool(deps, args),
+      deps.workspaceName?.() ?? null,
+    ]);
+    // memoryTool always answers with an object; it is typed unknown only because tools answer anything.
+    return name === null ? answer : { workspace: name, ...(answer as object) };
+  },
+  sources: (deps, _seams, args) => sourcesTool(deps, args),
+  brief: (deps, _seams, args) => briefTool(deps, args),
   command_output: (deps, _seams, args) => commandOutputTool(deps, args),
   walk_through: (deps, seams, args) => walkThroughTool(asAgent(deps, args), seams, args),
   propose_start: (deps, _seams, args) => proposeStartTool(deps, args),
@@ -295,6 +401,7 @@ const OPERATOR_CALLS: Record<string, OperatorCall> = {
     proposeRewindTool(asAgent(deps, args), seams, args),
   send_instruction: (deps, _seams, args) => sendInstructionTool(deps, args),
   propose_answer: (deps, _seams, args) => proposeAnswerTool(deps, args),
+  answer_question: (deps, _seams, args) => answerQuestionTool(deps, args),
   propose_rule: (deps, _seams, args) => proposeRuleTool(deps, args),
 };
 

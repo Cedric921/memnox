@@ -14,7 +14,15 @@ interface StreamRead {
 /** How Claude Code words a plan that has run out, the one error said differently. */
 const LIMIT_WORDING = /usage limit|rate limit|limit reached|quota/i;
 
-export function readStreamLine(line: string, spokeThisTurn: boolean): StreamRead {
+/**
+ * @param announced tool calls already said to have started, by id, so the whole message that
+ * repeats them later is not a second call. Kept by the caller for the turn.
+ */
+export function readStreamLine(
+  line: string,
+  spokeThisTurn: boolean,
+  announced: Set<string> = new Set(),
+): StreamRead {
   const message = parsedObject(line);
   if (message === null) return { chunks: [] };
   const sessionId = stringField(message, 'session_id');
@@ -23,9 +31,12 @@ export function readStreamLine(line: string, spokeThisTurn: boolean): StreamRead
 
   switch (message['type']) {
     case 'stream_event':
-      return withSession(deltaOf(message['event']));
+      return withSession([
+        ...deltaOf(message['event']),
+        ...toolStartOf(message['event'], announced),
+      ]);
     case 'assistant':
-      return withSession(toolsOf(message['message']));
+      return withSession(toolsOf(message['message'], announced));
     case 'result':
       return withSession(resultOf(message, spokeThisTurn));
     default:
@@ -43,13 +54,30 @@ function deltaOf(event: unknown): BrainChunk[] {
   return [{ kind: BRAIN_CHUNK.TEXT, text }];
 }
 
-/** The tools a whole message called; its text already arrived as deltas. */
-function toolsOf(message: unknown): BrainChunk[] {
+/**
+ * A tool call as soon as it starts, before its arguments are written: a summary card's
+ * arguments take a second to write, and the words said before it wait on knowing it began.
+ */
+function toolStartOf(event: unknown, announced: Set<string>): BrainChunk[] {
+  const record = asObject(event);
+  if (record === null || record['type'] !== 'content_block_start') return [];
+  const block = asObject(record['content_block']);
+  const tool = block === null ? undefined : stringField(block, 'name');
+  const id = block === null ? undefined : stringField(block, 'id');
+  if (block?.['type'] !== 'tool_use' || tool === undefined || id === undefined) return [];
+  announced.add(id);
+  return [{ kind: BRAIN_CHUNK.TOOL, tool }];
+}
+
+/** The tools a whole message called that did not stream their start; its text already arrived as deltas. */
+function toolsOf(message: unknown, announced: Set<string>): BrainChunk[] {
   const content = asObject(message)?.['content'];
   if (!Array.isArray(content)) return [];
   return content.flatMap((block: unknown) => {
     const record = asObject(block);
     const tool = record === null ? undefined : stringField(record, 'name');
+    const id = record === null ? undefined : stringField(record, 'id');
+    if (id !== undefined && announced.has(id)) return [];
     return record?.['type'] === 'tool_use' && tool !== undefined
       ? [{ kind: BRAIN_CHUNK.TOOL, tool }]
       : [];

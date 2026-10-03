@@ -14,7 +14,8 @@ import {
 } from '@memnox/core';
 
 import { readStatus } from '../commands/status.command';
-import { fetchBrief } from '../sync/memory';
+import { fetchBrief, refreshMemory } from '../sync/memory';
+import { readSource, readSources, readWorkspaceName } from '../sync/workspace-reads';
 import type { SessionToolDeps } from './read-tools';
 import type { RewindSeams } from './rewind-tool';
 import { awaitDelivery } from './instruct-tools';
@@ -81,7 +82,11 @@ function depsFor(argv: readonly string[], env: NodeJS.ProcessEnv): SessionToolDe
     readStatus,
     milestonesAt,
     brief: (resources, repository) => fetchBrief(homedir(), resources, repository),
-    delivered: (requestId) => awaitDelivery(homedir(), requestId),
+    refreshMemory: () => refreshMemory(homedir()),
+    sources: (query) => readSources(homedir(), query),
+    source: (link) => readSource(homedir(), link),
+    workspaceName: () => readWorkspaceName(homedir()),
+    delivered: (requestId, waitMs) => awaitDelivery(homedir(), requestId, waitMs),
   };
 }
 

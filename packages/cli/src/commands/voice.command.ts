@@ -10,6 +10,7 @@ import { ConfirmKeys } from '@memnox/core';
 
 import type { CliContext } from '../cli-context';
 import { confirmOnTerminal, type Confirm } from '../confirm';
+import { keepAddress, readAddress } from '../operator/owner';
 
 interface VoiceDeps {
   home: () => string;
@@ -24,13 +25,47 @@ export function registerVoiceCommand(
   const deps: VoiceDeps = { home: homedir, confirm: confirmOnTerminal, ...overrides };
   const voice = program
     .command('voice')
-    .description('The key the Mac app confirms with, and clearing it')
+    .description('The key the Mac app confirms with, and how the voice addresses you')
     .action(async () => runKey(context, deps));
   voice
     .command('forget-key')
     .description('Clear the confirmation key, so the Mac app can register its own again')
     .option('--yes', 'clear it without asking')
     .action(async (options: { yes?: boolean }) => runForget(context, deps, options));
+  voice
+    .command('address')
+    .description('How the voice addresses you, such as "sir", "ma\'am" or your name')
+    .argument('[words...]', 'the words to use; nothing shows the current one')
+    .option('--clear', 'use no form of address at all')
+    .action(async (words: string[], options: { clear?: boolean }) =>
+      runAddress(context, deps, words, options.clear === true),
+    );
+}
+
+/** Chosen by the person, never guessed from a name, since a wrong "sir" or "ma'am" misgenders them. */
+async function runAddress(
+  context: CliContext,
+  deps: VoiceDeps,
+  words: readonly string[],
+  clear: boolean,
+): Promise<void> {
+  const { flow } = context;
+  flow.open('memnox voice address');
+  if (!clear && words.length === 0) {
+    const current = await readAddress(deps.home());
+    flow.close(
+      current === undefined
+        ? 'The voice uses no form of address.'
+        : `The voice addresses you as "${current}".`,
+    );
+    return;
+  }
+  const kept = await keepAddress(deps.home(), clear ? null : words.join(' '));
+  flow.close(
+    kept === null
+      ? 'The voice uses no form of address from its next conversation.'
+      : `The voice addresses you as "${kept}" from its next conversation.`,
+  );
 }
 
 async function runKey(context: CliContext, deps: VoiceDeps): Promise<void> {

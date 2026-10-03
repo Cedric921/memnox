@@ -9,7 +9,9 @@ import { MEMNOX_HOME, readJsonFile, writeJsonFile } from '@memnox/core';
 const OWNER_FILE = join('voice', 'owner.json');
 
 interface Owner {
-  name: string;
+  name?: string;
+  /** How the voice addresses them, such as "sir" or their name, chosen by them and never guessed. */
+  address?: string;
 }
 
 /** Long enough for any first name, short enough that nothing else rides in with it. */
@@ -29,5 +31,38 @@ export async function keepOwner(home: string, name: string): Promise<void> {
     .trim()
     .slice(0, NAME_LIMIT);
   if (plain === '' || plain === (await readOwner(home))) return;
-  await writeJsonFile(join(home, MEMNOX_HOME, OWNER_FILE), { name: plain });
+  await writeOwner(home, { name: plain });
+}
+
+/** How they asked to be addressed, or undefined, which means no honorific at all. */
+export async function readAddress(home: string): Promise<string | undefined> {
+  const kept = await readJsonFile<Owner>(join(home, MEMNOX_HOME, OWNER_FILE));
+  return typeof kept?.address === 'string' && kept.address.trim() !== ''
+    ? kept.address.trim()
+    : undefined;
+}
+
+/** Kept as plain words for the same reason as the name; null takes it away. */
+export async function keepAddress(
+  home: string,
+  address: string | null,
+): Promise<string | null> {
+  const plain =
+    address === null
+      ? ''
+      : address
+          .replace(/[^\p{L}\p{M}' -]/gu, '')
+          .trim()
+          .slice(0, NAME_LIMIT);
+  await writeOwner(home, plain === '' ? { address: undefined } : { address: plain });
+  return plain === '' ? null : plain;
+}
+
+/** Merged into what is kept, so setting one never drops the other. */
+async function writeOwner(home: string, change: Owner): Promise<void> {
+  const path = join(home, MEMNOX_HOME, OWNER_FILE);
+  const kept = (await readJsonFile<Owner>(path)) ?? {};
+  const next: Owner = { ...kept, ...change };
+  if (next.address === undefined) delete next.address;
+  await writeJsonFile(path, next);
 }

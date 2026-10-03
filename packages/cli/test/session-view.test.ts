@@ -1,8 +1,11 @@
-import { mkdtemp } from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
+import { realpathSync } from 'node:fs';
+import { mkdir, mkdtemp, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
+  SessionHosts,
   SessionTasks,
   SessionTurns,
   SqliteEventStore,
@@ -76,10 +79,61 @@ describe('the live window on a session', () => {
     expect(await new SessionViews(home, () => NOW).list()).toEqual([
       expect.objectContaining({
         sessionId: 'ses_live',
+        agent: 'claude-code',
         agentName: 'Claude Code',
         task: 'add order cancellation',
         thinking: true,
       }),
     ]);
+  });
+
+  it('shows the lines it changed in the file it changed most', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'memnox-live-'));
+    const repo = realpathSync(await mkdtemp(join(tmpdir(), 'memnox-live-repo-')));
+    const git = (...args: string[]): void => {
+      execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', ...args], {
+        cwd: repo,
+        stdio: 'ignore',
+        env: {
+          ...process.env,
+          GIT_COMMITTER_DATE: '2026-10-02T11:00:00Z',
+          GIT_AUTHOR_DATE: '2026-10-02T11:00:00Z',
+        },
+      });
+    };
+    git('init', '-q');
+    await mkdir(join(repo, 'src'));
+    await writeFile(join(repo, 'src', 'invoice.ts'), 'export const TVA = 0.2;\n');
+    git('add', '.');
+    git('commit', '-q', '-m', 'start');
+    await writeFile(
+      join(repo, 'src', 'invoice.ts'),
+      'export const TVA = 0.196;\nexport const total = 0;\n',
+    );
+    const touched = new Date('2026-10-02T11:58:30.000Z');
+    await utimes(join(repo, 'src', 'invoice.ts'), touched, touched);
+    await new SessionHosts(home).note({
+      sessionId: 'ses_live',
+      agent: 'claude-code',
+      pid: process.pid,
+      seenAt: '2026-10-02T11:50:00.000Z',
+      cwd: repo,
+    });
+    const store = SqliteEventStore.forHome(home);
+    await store.append(row({ target: 'src/invoice.ts' }));
+    store.close();
+    const turns = new SessionTurns(home);
+    await turns.prompted('ses_live', 'claude-code', '2026-10-02T11:55:00.000Z');
+    await turns.ended('ses_live', 'claude-code', '2026-10-02T11:59:30.000Z');
+
+    const view = await new SessionViews(home, () => NOW).view('ses_live');
+    expect(view?.excerpt).toEqual({
+      path: 'src/invoice.ts',
+      lines: [
+        '-export const TVA = 0.2;',
+        '+export const TVA = 0.196;',
+        '+export const total = 0;',
+      ],
+    });
   });
 });

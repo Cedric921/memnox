@@ -9,6 +9,7 @@ import {
   NodeWorktree,
   REPLAY_STEP,
   SessionHosts,
+  type CardExcerpt,
   type CardFile,
   type DisplayHost,
   type SessionCard,
@@ -25,7 +26,9 @@ import { changesTool } from '../session-tools/changes-tool';
 import type { SessionToolDeps } from '../session-tools/read-tools';
 import type { RewindSeams } from '../session-tools/rewind-tool';
 import { sessionsTool } from '../session-tools/sessions-tool';
+import { excerptOf, type ChangedFile } from '../session-tools/show-tool';
 import { readConversation, readLastAnswer, sessionTranscript } from './transcript';
+import { conversationOf } from './waiting-feed';
 
 /**
  * A session as it is right now, for the live window the Mac app opens on it: the same facts
@@ -48,6 +51,7 @@ interface SessionRow {
   turn?: string;
   repositories: string[];
   runningIn?: string;
+  where?: string;
   started?: string;
   lastActive?: string;
   waitingOnYou: number;
@@ -61,7 +65,7 @@ interface SessionRow {
 }
 
 export class SessionViews {
-  private readonly files = new Map<string, { at: number; files: CardFile[] }>();
+  private readonly files = new Map<string, { at: number; code: Code }>();
 
   constructor(
     private readonly home: string,
@@ -74,7 +78,12 @@ export class SessionViews {
   async list(): Promise<SessionCard[]> {
     const rows = ((await sessionsTool(this.deps(), { hours: '72' })) as SessionRow[])
       .filter((each) => each.notAnAgent === undefined)
-      .sort((a, b) => (b.lastActive ?? '').localeCompare(a.lastActive ?? ''))
+      // Work happening now first, since a turn in progress records little while it thinks.
+      .sort(
+        (a, b) =>
+          Number(workingNow(b)) - Number(workingNow(a)) ||
+          (b.lastActive ?? '').localeCompare(a.lastActive ?? ''),
+      )
       .slice(0, MOST_CARDS);
     const names = await readNames(this.home);
     const hosts = new SessionHosts(this.home);
@@ -88,7 +97,7 @@ export class SessionViews {
     const rows = (await sessionsTool(deps, { hours: '72' })) as SessionRow[];
     const row = rows.find((each) => each.session === sessionId);
     if (row === undefined) return null;
-    const [steps, files, names] = await Promise.all([
+    const [steps, { files, excerpt }, names] = await Promise.all([
       this.steps(sessionId),
       this.changed(deps, sessionId),
       readNames(this.home),
@@ -104,6 +113,7 @@ export class SessionViews {
       helpers: helpersOf(row),
       steps,
       files,
+      ...(excerpt === undefined ? {} : { excerpt }),
       ...(row.task === undefined ? {} : { task: row.task }),
       ...(repository === undefined ? {} : { repository: basename(repository) }),
       ...(row.runningIn === undefined ? {} : { runningIn: row.runningIn }),
@@ -142,23 +152,24 @@ export class SessionViews {
       .map(stepOf);
   }
 
-  /** The files it changed, kept a few seconds, since every poll would otherwise diff the tree. */
-  private async changed(deps: SessionToolDeps, sessionId: string): Promise<CardFile[]> {
+  /** The files it changed and the lines of the busiest, kept a few seconds, since every poll would otherwise diff the tree. */
+  private async changed(deps: SessionToolDeps, sessionId: string): Promise<Code> {
     const kept = this.files.get(sessionId);
     const moment = this.now().getTime();
-    if (kept !== undefined && moment - kept.at < FILES_FRESH_MS) return kept.files;
+    if (kept !== undefined && moment - kept.at < FILES_FRESH_MS) return kept.code;
     const answer = (await changesTool(deps, SEAMS, { session: sessionId }).catch(
       () => ({}),
-    )) as {
-      files?: { shown: { path: string; added: number | null; removed: number | null }[] };
-    };
-    const files = (answer.files?.shown ?? []).slice(0, MOST_FILES).map((each) => ({
+    )) as { files?: { shown: ChangedFile[] } };
+    const shown = answer.files?.shown ?? [];
+    const files = shown.slice(0, MOST_FILES).map((each) => ({
       path: each.path,
       ...(each.added === null ? {} : { added: each.added }),
       ...(each.removed === null ? {} : { removed: each.removed }),
     }));
-    this.files.set(sessionId, { at: moment, files });
-    return files;
+    const excerpt = await excerptOf(deps, SEAMS, sessionId, shown).catch(() => null);
+    const code: Code = excerpt === null ? { files } : { files, excerpt };
+    this.files.set(sessionId, { at: moment, code });
+    return code;
   }
 
   deps(): SessionToolDeps {
@@ -178,6 +189,10 @@ export class SessionViews {
   }
 }
 
+function workingNow(row: SessionRow): boolean {
+  return row.turn === 'in progress' || row.state === 'working';
+}
+
 /** As many cards as the switcher turns through before it is a list nobody can follow. */
 const MOST_CARDS = 7;
 
@@ -192,12 +207,14 @@ function cardOf(row: SessionRow, names: Names, host: SessionHost | null): Sessio
   const repository = row.repositories[0];
   return {
     sessionId: row.session,
+    agent: row.agent,
     agentName: nameOf(names, row.agent),
     state: row.state,
     thinking: row.turn === 'in progress',
     ...(row.task === undefined ? {} : { task: row.task }),
     ...(repository === undefined ? {} : { repository: basename(repository) }),
     ...(row.runningIn === undefined ? {} : { runningIn: row.runningIn }),
+    ...(row.where === undefined ? {} : { where: row.where }),
     ...(row.lastActive === undefined ? {} : { lastActive: row.lastActive }),
     ...(row.actions === undefined ? {} : { actions: row.actions }),
     ...(row.started === undefined || row.started === ''
@@ -213,7 +230,14 @@ function hostOf(host: SessionHost): DisplayHost {
     ...(host.appPath === undefined ? {} : { appPath: host.appPath }),
     ...(host.tty === undefined ? {} : { tty: host.tty }),
     ...(host.cwd === undefined ? {} : { cwd: host.cwd }),
+    ...conversationOf(host),
   };
+}
+
+/** What a session changed: its files, and the changed lines of the one it changed most. */
+interface Code {
+  files: CardFile[];
+  excerpt?: CardExcerpt;
 }
 
 const SEAMS: RewindSeams = {

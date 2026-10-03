@@ -20,6 +20,7 @@ import {
   type AgentEdits,
 } from './agent-edits';
 import { claimAll, type EditHookContext } from './edit-claims';
+import { answerAgentQuestion } from './agent-question';
 import { answerPicker } from './held-picker';
 import { checkpointBeforeFirstWrite } from './checkpoint-seam';
 import { canAskPerson } from './edit-hook';
@@ -67,6 +68,7 @@ async function main(): Promise<void> {
   await noteSessionHost(payload, context);
   if (await answeredSessionStart(payload, context, process.env)) return;
   if (await answeredPicker(payload, context)) return;
+  if (await answeredOutLoud(payload, context)) return;
 
   // The rules first, so nothing takes a lease on a write it was never allowed to make.
   const ruled = args.includes(TOOL_POLICY_FLAG)
@@ -282,6 +284,20 @@ function personName(): string {
   } catch {
     return 'a person';
   }
+}
+
+/** An agent's own question, answered out loud when the voice is there to read it. */
+async function answeredOutLoud(
+  payload: unknown,
+  context: EditHookContext,
+): Promise<boolean> {
+  const reply = await answerAgentQuestion(payload, context).catch((err: unknown) => {
+    log(`agent question failed: ${String(err)}`);
+    return null;
+  });
+  if (reply === null) return false;
+  emit({ stdout: reply });
+  return true;
 }
 
 /** A held question asked in the host's own picker is answered here, and nowhere else. */

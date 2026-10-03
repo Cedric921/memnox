@@ -61,8 +61,9 @@ The default command, so `npx memnox` runs it.
 | `--save` | keep this scan as a baseline for a later `--since` |
 | `--since <when>` | what changed since the last scan at or before then |
 | `--fail-on <gate>` | `any`, `write-capable` or `credential`; non-zero exit for CI |
+| `--sarif` | a comparison as SARIF 2.1.0 for code scanning; needs `--fail-on`, `--since` or `--from` |
 | `--no-probe` | do not start MCP servers; tools go uncounted |
-| `--json` | the capability inventory (version 2) |
+| `--json` | the capability inventory (version 4) |
 
 Agents are found by config file, never by a process list — JSON for the editors, TOML
 for Codex, YAML for Hermes. Claude Code, Claude Desktop, Cursor, Codex, Cline and VS
@@ -70,6 +71,33 @@ Code are one row each. Hermes, OpenClaw and Ruflo run other
 agents, so they get a `HARNESSES` block that counts the principals behind the row, and a
 `COMBINED CAPABILITY` block for paths a set of permitted tools opens together.
 [Harnesses](harnesses.md) explains both, and what Memnox deliberately leaves to them.
+
+Each agent is also read for how it decides. `no prompt` names an agent that approves its
+own actions, with the setting that says so (Claude Code's `defaultMode = "bypassPermissions"`
+or an unscoped `Bash` allow, Codex's `approval_policy = "never"`); paired with a sensitive
+path it can read, that is the critical `auto-approve` rule. `binary` names an agent whose
+command resolves from temp, Downloads or inside the work, which nothing installs to.
+`removed` names an agent an earlier kept scan held and this one does not. A product with
+no reader here is reported as unknown, never as asking.
+
+`hooks` counts the commands the agents here run on their own events: Claude Code's
+settings and the plugins they enable, Codex's `hooks.json`, Gemini CLI's settings,
+Cursor and Windsurf. A hook runs as you and no permission prompt sees it, so the row
+says how many can stop a tool call, how many write into what the model reads, and which
+plugin brought them. The program is named and the command line is not, since a line is
+where a token sits. Memnox's own hooks are the seam and are left out. A hook that arrives
+between two kept scans is drift, so `--since` lists it, `--fail-on any` fails on it, and
+the daemon sends a notice.
+
+Under `mcp servers`, a server launched through `npx`, `bunx`, `pnpm dlx`, `uvx` or
+`pipx run` without an exact version is named as downloading whatever was last published
+each time it starts, because the tools counted today are only what that publish held.
+`--mcp <server>` shows the package and whether it is pinned.
+
+In a pipeline, `memnox scan --fail-on write-capable --sarif > memnox.sarif` writes what
+widened as SARIF: the gate's matches are errors, other widenings are warnings, a removal is
+never a result, and a file inside the checkout is named relative to it so code scanning
+can open it. A first run with no kept scan writes an empty run rather than failing.
 
 ### `memnox setup`
 The whole first run, in one command: log in, find the agents on this machine,
@@ -291,8 +319,9 @@ What is reachable that should not be, ranked, each with the one change that clos
 `--wiring` answers a different question: is Memnox actually gating anything, or only
 installed? It checks the config mode, the rules, the interceptors, whether they are
 ahead of the real binaries on `PATH`, whether your MCP servers are routed through the
-proxy, the daemon and the ledger. Every line that is not `ok` names the command that
-fixes it.
+proxy, the daemon and the ledger, and where Claude Code's hook lives: in managed
+settings, in your own (which a local edit can remove), or in both (every call ruled on
+twice). Every line that is not `ok` names the command that fixes it.
 
 ### `memnox explain <subject>`
 A tool name gives its provenance: which server, which config, which agents reach it,
@@ -379,6 +408,11 @@ Proposes reversible steps by default and prints the undo before it runs anything
 | `--hooks` | install `pre-push` and `pre-commit` in this repository |
 | `--claude-hook` | make Claude Code take a lease before it writes a file |
 | `--revert-claude-hook` | take that hook back out of Claude Code |
+| `--managed` | move Claude Code's hook into its managed settings, where no local config can remove it |
+| `--revert-managed` | move it back into your own settings |
+| `--exclusive` | with `--managed`, run only managed hooks, so none a repository ships can |
+| `--vscode` | install the extension that lets the voice show the exact VS Code, Cursor or Windsurf terminal a session runs in |
+| `--revert-vscode` | take that extension back out of those editors |
 | `--os-guard` | write the kernel sandbox profile from your filesystem rules |
 | `--interactive` / `--yes` | walk the domains, or take the recommendation |
 
@@ -580,6 +614,13 @@ returns the file byte for byte as its author left it.
 A server declared by URL has no launch line to repoint, so it is named and left alone
 rather than turned into a command that would not start.
 
+`--managed` writes `/Library/Application Support/ClaudeCode/managed-settings.json` on
+macOS or `/etc/claude-code/managed-settings.json` on Linux. Memnox never runs as root:
+where the file needs it, the merged file is staged under `~/.memnox/managed` and the
+`sudo install` line is printed. Run `--managed` again once it is installed, which is when
+the copy in `~/.claude/settings.json` comes out, so no moment passes with neither in
+place. Codex has no managed hook file Memnox knows of, so its hook stays user level.
+
 ### `memnox run -- <command>`
 Starts an agent with the interceptor directory first on `PATH`, `SHELL` pointed at the
 governed shell, and a session id. Hands back the agent's own exit code. When
@@ -591,6 +632,29 @@ governed shell, and a session id. Hands back the agent's own exit code. When
 | `--transcript` | keep a local copy of what the agent printed |
 | `--no-guard` | start outside the kernel sandbox even when a profile exists |
 | `--untrusted` | a repository nobody here vouched for: see below |
+| `--hold-credentials` | keep tokens out of the agent's environment and hand each only to the CLI that uses it |
+| `--brief <id>` | hand the agent a workspace brief the voice gathered before its first turn: the ticket, what was said about it and the decisions it must keep to |
+
+**`--hold-credentials`** starts the agent without any variable that looks like a
+credential, except its own model key, and keeps them in the `memnox run` process, in
+memory only. When a fronted CLI is allowed to run, its interceptor asks that process
+for the variables the CLI's verb table names (`gh` gets `GH_TOKEN`, `aws` its `AWS_*`
+pair) and nothing else; `curl` and anything unmapped get nothing. So `env` and a
+prompt-injected `curl -d "$(env)"` find no token. It takes the token out of the
+environment and is not a vault: a process of the same user that speaks the broker's
+socket on purpose can still ask. A tool nothing fronts, such as a script calling an SDK,
+starts without the token too.
+
+**`--brief <id>`** is what the voice adds when you ask it to start an agent on a ticket. It
+puts the id in the agent's environment, and the agent's own session start hook reads the
+brief from this machine and adds it to the agent's context, so the agent begins knowing the
+ticket read whole, every message and document that names it by its title, its key or its
+link, with the documents and any cut message read whole too, and the settled decisions that
+bind it. It is told to stop and ask where they disagree, to write the change the way the
+repository already writes code, and to check the work against every point the ticket asked
+for before it says it is done. Full text comes through the workspace's `memnox_source`, at
+the same clearance as everything else a machine reads. Only an
+id the voice made is accepted. The same brief stays readable through the `work` session tool.
 
 The governed shell obeys the shell contract: `$SHELL -c "<line>"` is what an
 agent's Bash tool calls, and every command in that line is ruled on separately,
@@ -770,6 +834,13 @@ Four rules keep this usable rather than a thing people turn off:
   names the holder, and taking it anyway is a row in the record, never a silent
   allow.
 
+Worktrees and clones of one repository are one repository here. A lease is kept
+relative to its checkout and also names the project every checkout of it shares: its
+`origin`, or with no remote the git directory its worktrees have in common. So an agent
+in `api-feature/` writing `src/billing.ts` waits on the one already writing it in `api/`,
+and the refusal names the other checkout. This is the rule the workspace register
+already used across machines; this machine now agrees with it.
+
 The seams take a lease on their own: a session writing ten files in one
 directory holds one lease, not ten, and `memnox run` releases everything the
 session held when the agent exits — including when it crashed.
@@ -893,6 +964,13 @@ asking about everything is telling you a story about yourself.
 It prints counts, never hours. "Six hours a week you could get back" is a number
 nobody can check, on a screen you are being asked to act on.
 
+A handed-over rule allows what was approved and no more. It names the targets the yeses
+were about, so a push approved on `feature/a` five times is allowed on `feature/a`, never on
+`main`. An action is judged by the widest class it was ever recorded under. One approved on
+a target a rule would read as a pattern, or across more than twenty targets, stays a
+question with that reason beside it, since no single rule could allow it without allowing
+more than was said yes to.
+
 ### `memnox next --agent <name>`
 What that agent would do on its own, in three bands: runs on its own, waits for
 you, never. Under `next` rather than beside it, because it answers the same
@@ -921,6 +999,13 @@ trusted and the daemon never replaces it, so `forget-key` is how a person clears
 for a new Mac or a reinstalled app. It asks first and defaults to no, because the next
 key to register is the one trusted; open the app straight after. An agent is refused
 it, like every command that loosens what agents may do.
+
+### `memnox voice address [words]`
+How the voice addresses you, such as `sir`, `ma'am` or your name, said the way
+J.A.R.V.I.S. says it: now and then, at the end of a sentence. Nothing is guessed, so
+with none chosen it uses no form of address at all; `--clear` goes back to that, and
+with no words it says the current one. You can also just tell the voice, "call me
+sir". It applies from the voice's next conversation.
 
 ### `memnox ask "<anything>"`
 Ask about your agents in your own words, and get the answer your voice would

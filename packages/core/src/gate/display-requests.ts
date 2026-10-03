@@ -9,6 +9,7 @@ import type {
   DisplayKind,
   WalkPage,
 } from '../daemon/protocol';
+import { DISPLAY } from '../daemon/protocol';
 import { shortDigest } from '../domain/digest';
 import { JsonRecordDir } from '../store/json-records';
 
@@ -23,8 +24,11 @@ export const DISPLAYS_DIR = 'displays';
 /** Long enough for the app to pick it up, short enough that a late one is dropped. */
 export const DISPLAY_TTL_MS = 30_000;
 
-/** A card says a summary; a page of text is not one. */
+/** An instruction or a line of speech; a page of text is not one. */
 export const DISPLAY_TEXT_LIMIT = 600;
+
+/** A card lays out what happened in a session, read rather than heard, so it may run longer. */
+const CARD_TEXT_LIMIT = 2_400;
 
 /** As many files as a card can list and still be read at a glance. */
 export const CARD_FILES = 6;
@@ -46,6 +50,8 @@ export interface DisplayRequest {
   text?: string;
   /** The session's folder, for when where it runs on screen was never noted. */
   cwd?: string;
+  /** The terminal an instruction is typed into, which only the request itself may name. */
+  tty?: string;
   files?: CardFile[];
   excerpt?: CardExcerpt;
   pages?: WalkPage[];
@@ -72,6 +78,7 @@ export interface DisplayInput {
   title: string;
   text?: string;
   cwd?: string;
+  tty?: string;
   files?: CardFile[];
   excerpt?: CardExcerpt;
   pages?: WalkPage[];
@@ -88,7 +95,10 @@ export class DisplayRequests {
   }
 
   async request(input: DisplayInput): Promise<DisplayRequest> {
-    const text = input.text?.slice(0, DISPLAY_TEXT_LIMIT);
+    const text = input.text?.slice(
+      0,
+      input.display === DISPLAY.CARD ? CARD_TEXT_LIMIT : DISPLAY_TEXT_LIMIT,
+    );
     const request: DisplayRequest = {
       id: `dsp_${Date.parse(input.at).toString(36)}_${shortDigest(`${input.sessionId}${input.display}${input.title}`)}`,
       display: input.display,
@@ -97,6 +107,7 @@ export class DisplayRequests {
       title: input.title,
       ...(text === undefined ? {} : { text }),
       ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
+      ...(input.tty === undefined ? {} : { tty: input.tty }),
       ...(input.files === undefined ? {} : { files: input.files.slice(0, CARD_FILES) }),
       ...(input.excerpt === undefined
         ? {}
@@ -106,15 +117,7 @@ export class DisplayRequests {
               lines: input.excerpt.lines.slice(0, CARD_LINES),
             },
           }),
-      ...(input.pages === undefined
-        ? {}
-        : {
-            pages: input.pages.slice(0, WALK_PAGES).map((page) => ({
-              ...page,
-              note: page.note.slice(0, DISPLAY_TEXT_LIMIT),
-              lines: page.lines.slice(0, CARD_LINES),
-            })),
-          }),
+      ...(input.pages === undefined ? {} : { pages: walkPages(input.pages) }),
       ...(input.agents === undefined
         ? {}
         : { agents: input.agents.slice(0, SCAN_AGENTS) }),
@@ -150,4 +153,13 @@ export class DisplayRequests {
   async deliveryOf(id: string): Promise<DisplayDelivery | null> {
     return (await this.records.read(id))?.delivered ?? null;
   }
+}
+
+/** A walk through kept to what can be read along with the voice. */
+function walkPages(pages: readonly WalkPage[]): WalkPage[] {
+  return pages.slice(0, WALK_PAGES).map((page) => ({
+    ...page,
+    note: page.note.slice(0, DISPLAY_TEXT_LIMIT),
+    lines: page.lines.slice(0, CARD_LINES),
+  }));
 }

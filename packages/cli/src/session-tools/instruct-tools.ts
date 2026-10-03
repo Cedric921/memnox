@@ -22,6 +22,7 @@ import { changesTool } from './changes-tool';
 import { liveHost } from './live-host';
 import type { RewindSeams } from './rewind-tool';
 import { scopeOf } from './session-scope';
+import { withBrief } from './work-tools';
 
 /**
  * Telling an agent what the person said out loud, read back first since a recognizer hears
@@ -31,7 +32,7 @@ import { scopeOf } from './session-scope';
 const ROUTE = {
   /** Working: picked up after its next tool call, or as the next thing to do when its turn ends. */
   QUEUED: 'queued',
-  /** Waiting in a terminal: typed into its tab and sent. */
+  /** Waiting in a terminal, an editor's integrated one included: typed into its prompt and sent. */
   TYPED: 'typed',
   /** Waiting in an editor: typed into its message box and sent. */
   PREFILLED: 'prefilled',
@@ -52,7 +53,7 @@ const TERMINALS = /iterm|terminal/i;
 
 const SAID: Record<Route, string> = {
   queued:
-    'It is working, so it picks this up at its next step and carries on with it. Say it is passed on.',
+    'It is working, so Memnox hands this over at its next step, beside its work: it never appears in the message box, and nothing needs typing. Say that in one sentence, like "Claude Code is busy, so I have handed it over, and it will pick it up at its next step."',
   typed:
     'The Mac typed it into its prompt and sent it, so it is starting on it now. Say so in a few words.',
   prefilled:
@@ -67,14 +68,18 @@ const NOT_TYPED: Record<
   string
 > = {
   clipboard:
-    'The Mac could not type it in safely, so the words are on their clipboard, and it has already told them out loud how to paste it. Do not repeat that or say it was sent: say sorry in a few words and offer to open the session.',
+    'The Mac could not type it in safely, so the words are on their clipboard, and it has already said sorry and told them out loud how to paste it. Do not say sorry again, mention the clipboard or say it was sent: only ask, in one short question, whether to open the session, and keep listening for the answer.',
   failed:
     'The Mac could not type it in, and nothing was sent anywhere. Do not say it is on its way or started. Say sorry in a few words, and offer to open the session so they can see it, or to try again.',
+  'not-allowed':
+    'The Mac is not allowed to type yet, and it has already told them out loud how to allow it and that the words are on their clipboard. Write nothing at all this turn: every word you add repeats what they just heard. Only when they later say they switched it on, or ask you to try again, call propose_instruction with the same words and then send_instruction at once, with nothing said in between.',
 };
 
 /** The Mac never answered, so all that is known is that it was handed over. */
 const UNCONFIRMED =
   'Handed to the Mac to type into its prompt, which has not confirmed it landed yet. Say it is going in now; never say it was typed, sent or started.';
+
+const NEEDS_MESSAGE = "Pass message: the instruction in the person's words.";
 
 export async function proposeInstructionTool(
   deps: SessionToolDeps,
@@ -82,12 +87,7 @@ export async function proposeInstructionTool(
   seams?: RewindSeams,
 ): Promise<unknown> {
   const message = textArg(args, 'message');
-  if (message === undefined) {
-    return {
-      proposed: false,
-      said: "Pass message: the instruction in the person's words.",
-    };
-  }
+  if (message === undefined) return { proposed: false, said: NEEDS_MESSAGE };
   const scope = await withEvents(deps.home, (store) =>
     scopeOf(store, deps, textArg(args, 'session')),
   );
@@ -96,13 +96,14 @@ export async function proposeInstructionTool(
   }
   const said = textArg(args, 'said');
   const about = textArg(args, 'about');
+  const { text: told, found } = await withBrief(deps, args, message);
   const instruction = await new SpokenInstructions(deps.home).propose({
     sessionId: scope.sessionId,
     agent: scope.agent,
     message:
       about === undefined || seams === undefined
-        ? message
-        : await withWorkOf(deps, seams, about, message),
+        ? told
+        : await withWorkOf(deps, seams, about, told),
     ...(said === undefined ? {} : { said }),
     at: deps.now().toISOString(),
   });
@@ -112,7 +113,8 @@ export async function proposeInstructionTool(
     proposed: true,
     instruction: instruction.id,
     readBack: message,
-    said: 'Nothing is sent yet. Read it back in a sentence, like "I\'ll ask Claude Code to push the voice branch. Shall I send it?", and call send_instruction with this id only after they say yes.',
+    ...(found === undefined ? {} : { found }),
+    said: 'Nothing is sent yet. If you already asked them anything in this reply, write nothing more and wait for their answer, since a second question is the same question twice. When they asked for this plainly, call send_instruction with this id now, in this same turn, with no read back and no words before it. Only when you had to guess at their words or at which session, read the gist back once as a short question, such as "Shall I ask Claude Code to push the voice branch?", and call send_instruction after they say yes.',
   };
 }
 
@@ -155,7 +157,7 @@ export async function sendInstructionTool(
   if (instruction === null) {
     return {
       sent: false,
-      said: 'That instruction is gone or more than five minutes old. Read it back again with propose_instruction.',
+      said: 'That instruction was used already or is more than five minutes old. They said yes to these words, so call propose_instruction with the same words and then send_instruction straight away, in this turn, with nothing said in between. Never tell them it expired, was used or is being proposed again.',
     };
   }
   const recorded = await new SessionHosts(deps.home).read(instruction.sessionId);
@@ -198,12 +200,19 @@ async function routeFor(
     (turn?.endedAt === undefined || turn.endedAt < asked) &&
     deps.now().getTime() - Date.parse(asked) < WORKING_WITHIN_MS;
   if (working) return ROUTE.QUEUED;
+  return waitingRoute(host, inForeground);
+}
+
+/** A prompt in a terminal is typed into, an editor's own terminal too; an editor's chat panel is prefilled. */
+export function waitingRoute(
+  host: SessionHost | null,
+  inForeground: (tty: string) => boolean,
+): Route {
   if (host === null) return ROUTE.LATER;
   const app = host.app ?? host.appPath ?? '';
-  if (host.tty !== undefined && TERMINALS.test(app) && inForeground(host.tty)) {
-    return ROUTE.TYPED;
-  }
-  return EDITORS.test(app) ? ROUTE.PREFILLED : ROUTE.LATER;
+  const reachable = TERMINALS.test(app) || EDITORS.test(app);
+  if (host.tty !== undefined && reachable && inForeground(host.tty)) return ROUTE.TYPED;
+  return EDITORS.test(app) && host.tty === undefined ? ROUTE.PREFILLED : ROUTE.LATER;
 }
 
 async function showFor(
@@ -219,6 +228,8 @@ async function showFor(
     title: 'Instruction',
     text: instruction.message,
     ...(host?.cwd === undefined ? {} : { cwd: host.cwd }),
+    // What an editor's extension checks its link against, so a link cannot aim the words at another terminal.
+    ...(route === ROUTE.TYPED && host?.tty !== undefined ? { tty: host.tty } : {}),
     at: deps.now().toISOString(),
   });
 }

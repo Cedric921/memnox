@@ -1,4 +1,6 @@
 import {
+  AgentQuestions,
+  isAgentQuestionId,
   ConfirmKeys,
   DAEMON_EVENT,
   DAEMON_METHOD,
@@ -12,29 +14,34 @@ import {
   SessionPauses,
   SessionHosts,
   UNNAMED_AGENT,
-  VoiceFocusStore,
-  type DaemonAskChunk,
   type DaemonEvent,
   type DaemonRequest,
+  clearVoiceListening,
+  markVoiceListening,
   type DaemonResponse,
   type Delivery,
 } from '@memnox/core';
-import { BRAIN_CHUNK, type Brain } from '../operator/brain';
-import { keepOwner, readOwner } from '../operator/owner';
+import type { Brain } from '../operator/brain';
+import { keepOwner, readAddress, readOwner } from '../operator/owner';
 import {
   backBrief,
   heldBrief,
+  questionBrief,
   noticeBrief,
   pausedBrief,
 } from '../operator/voice-prompts';
 import { readVocabulary } from '../operator/vocabulary';
+import { AddressLimit } from './address-limit';
 import { BrainTurns } from './brain-turns';
 import { confirmAnswer } from './confirm';
 import { NoticeWatcher } from './notice-watch';
-import { askContext, FINISHED_NOTE } from './ask-context';
+import { RecentExchanges } from './recall';
+import { streamTurn } from './stream-turn';
+import { VoiceAsk } from './voice-ask';
+import { momentContext } from './ask-context';
 import { SessionViews } from './session-view';
 import { write, type Peer } from './socket-write';
-import { recordSpan, VoiceTurnTrace } from '../trace/voice-trace';
+import { recordSpan } from '../trace/voice-trace';
 import { WaitingFeed } from './waiting-feed';
 
 /**
@@ -95,15 +102,32 @@ export class VoiceSurface {
   private readonly notices: NoticeWatcher;
   private readonly turns: BrainTurns | null;
   private readonly views: SessionViews;
+  private readonly exchanges: RecentExchanges;
+  private readonly address: AddressLimit;
+  /** Their questions, and the guess at each started while they pause. */
+  private readonly asking: VoiceAsk | null;
 
   constructor(private readonly deps: VoiceDeps) {
     this.feed = new WaitingFeed(deps.home);
     this.notices = new NoticeWatcher(deps.home, deps.now());
     this.views = new SessionViews(deps.home);
+    this.exchanges = new RecentExchanges(deps.home);
+    this.address = new AddressLimit(deps.home);
     this.turns =
       deps.brain === undefined
         ? null
         : new BrainTurns(deps.brain, deps.brainIdleMs ?? BRAIN_IDLE_MS);
+    this.asking =
+      this.turns === null
+        ? null
+        : new VoiceAsk({
+            home: deps.home,
+            now: deps.now,
+            turns: this.turns,
+            views: this.views,
+            exchanges: this.exchanges,
+            address: this.address,
+          });
   }
 
   async respond(socket: Peer, request: DaemonRequest): Promise<void> {
@@ -143,7 +167,8 @@ export class VoiceSurface {
   }
 
   drop(socket: Peer): void {
-    this.subscribers.delete(socket);
+    if (!this.subscribers.delete(socket) || this.subscribers.size > 0) return;
+    void clearVoiceListening(this.deps.home).catch(() => undefined);
   }
 
   close(): void {
@@ -153,6 +178,7 @@ export class VoiceSurface {
     this.noticeTimer = null;
     for (const socket of this.subscribers.keys()) socket.destroy();
     this.subscribers.clear();
+    void clearVoiceListening(this.deps.home).catch(() => undefined);
     this.turns?.close();
   }
 
@@ -267,27 +293,53 @@ export class VoiceSurface {
       write(socket, { id: request.id, ok: false, error });
       return;
     }
-    await turns.ask(prompt, (chunk) =>
-      write(socket, { id: request.id, ok: true, chunk }),
+    // The same stream as an answer, so an unasked brief is never said twice or with a reminder in it.
+    const names = await this.address.names();
+    const turn = await streamTurn(
+      turns,
+      prompt,
+      (chunk) => write(socket, { id: request.id, ok: true, chunk }),
+      this.address.unsaid(names, this.deps.now()),
     );
+    this.address.noteSaid(turn.answered, names, this.deps.now());
+    // A brief often ends in an offer, which the next "yes" has to find even after a fresh start.
+    await this.exchanges.add({
+      at: this.deps.now(),
+      said: `(told unasked, about ${request.briefing ?? 'news'})`,
+      unasked: true,
+      answered: turn.answered,
+    });
+  }
+
+  /** An agent's question, read out with its choices, or nothing once it is answered or gone. */
+  private async questionFor(subject: string, agentName?: string): Promise<string | null> {
+    const question = await new AgentQuestions(this.deps.home).read(subject);
+    return question === null
+      ? null
+      : questionBrief(question, agentName ?? question.agent, await this.howToAddress());
   }
 
   private async briefFor(request: DaemonRequest): Promise<string | null> {
     if (request.briefing === BRIEFING.BACK) {
-      return request.since === undefined ? null : backBrief(request.since);
+      if (request.since === undefined) return null;
+      // Coming back to the Mac is not a call to Memnox, so it speaks only when something waits on them.
+      if ((await this.feed.current(this.deps.now())).length === 0) return null;
+      const now = this.deps.now();
+      const spoke = (await this.exchanges.read(now))
+        .filter((each) => each.unasked !== true)
+        .at(-1)?.at;
+      return `${momentContext(new Date(now), spoke)}\n${backBrief(request.since)}`;
     }
     const waiting = await this.feed.current(this.deps.now());
     const event = waiting.find((each) => each.subject === request.subject);
+    if (request.briefing === BRIEFING.NOTICE && isAgentQuestionId(request.subject ?? ''))
+      return this.questionFor(request.subject ?? '', event?.agentName);
     if (request.briefing === BRIEFING.NOTICE && request.subject !== undefined) {
       const notice = this.notices.recent(request.subject);
-      return notice === null
-        ? null
-        : noticeBrief(notice, await readOwner(this.deps.home));
+      return notice === null ? null : noticeBrief(notice, await this.howToAddress());
     }
     if (request.briefing === BRIEFING.HELD) {
-      return event === undefined
-        ? null
-        : heldBrief(event, await readOwner(this.deps.home));
+      return event === undefined ? null : heldBrief(event, await this.howToAddress());
     }
     if (request.briefing === BRIEFING.PAUSED && request.subject !== undefined) {
       const pause = await new SessionPauses(this.deps.home).read(request.subject);
@@ -307,40 +359,17 @@ export class VoiceSurface {
   /** What the person said, answered by their own brain one chunk per line. */
   private async ask(socket: Peer, request: DaemonRequest): Promise<void> {
     const said = request.said?.trim() ?? '';
-    const turns = this.turns;
-    if (said === '' || turns === null) {
+    if (said === '' || this.asking === null) {
       const error = said === '' ? 'ask needs what was said' : 'no brain is configured';
       write(socket, { id: request.id, ok: false, error });
       return;
     }
-    const trace = new VoiceTurnTrace(
-      this.deps.home,
-      this.deps.now,
-      said.split(/\s+/).length,
-    );
-    const building = this.deps.now();
-    // Best effort: without it the brain looks the sessions up itself, only slower.
-    const [cards, focus] = await Promise.all([
-      this.views.list().catch(() => []),
-      new VoiceFocusStore(this.deps.home).read().catch(() => null),
-    ]);
-    trace.contextBuilt(building, cards.length);
-    const context = askContext(cards, new Date(this.deps.now()), focus);
-    const whole = request.finished === true ? `${said}\n${FINISHED_NOTE}` : said;
-    const asked = context === '' ? whole : `${context}\n${whole}`;
-    await trace.brainStarted();
-    let held = false;
-    await turns.ask(asked, (chunk) => {
-      trace.chunk(chunk);
-      // Whatever the brain writes after holding would be dropped anyway, so the orb listens now.
-      if (held) return;
-      write(socket, { id: request.id, ok: true, chunk });
-      if (!isHold(chunk)) return;
-      held = true;
-      write(socket, { id: request.id, ok: true, chunk: { kind: BRAIN_CHUNK.DONE } });
-      turns.cancel();
-    });
-    await trace.finish();
+    await this.asking.ask(socket, request, said);
+  }
+
+  /** What a brief may open with: the address they chose, else their name, which a held call earns. */
+  private async howToAddress(): Promise<string | undefined> {
+    return (await readAddress(this.deps.home)) ?? (await readOwner(this.deps.home));
   }
 
   /** The Mac's own timings, hung on the question they belong to so one trace shows the whole answer. */
@@ -365,6 +394,10 @@ export class VoiceSurface {
     const told = new Set<string>();
     this.subscribers.set(socket, told);
     write(socket, { id, ok: true });
+    // So a held question waits a moment for a spoken answer rather than only opening a picker.
+    await markVoiceListening(this.deps.home, process.pid, this.deps.now()).catch(
+      () => undefined,
+    );
     // The Mac app is listening, so the first question should meet a brain that is already up.
     void this.turns?.warm();
     for (const event of await feed.everything(this.deps.now())) {
@@ -445,9 +478,4 @@ const DELIVERIES: readonly string[] = Object.values(DELIVERY);
 
 function isDelivery(value: string | undefined): value is Delivery {
   return value !== undefined && DELIVERIES.includes(value);
-}
-
-/** The brain saying the person is mid thought, by the tool's own name whatever server prefix it carries. */
-function isHold(chunk: DaemonAskChunk): boolean {
-  return chunk.kind === BRAIN_CHUNK.TOOL && (chunk.tool ?? '').endsWith('keep_listening');
 }

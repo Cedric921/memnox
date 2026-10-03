@@ -62,6 +62,29 @@ describe('what is worth saying without being asked', () => {
     expect(noticesFrom(first.watch, events, []).notices).toEqual([]);
   });
 
+  it('says once what a rule would have held while only watching, and never what no rule covered', () => {
+    const rule = {
+      name: 'voice-ask-git-push',
+      layer: 'project',
+      file: '/w/memnox.policies.toml',
+    };
+    const push = { surface: EVENT_SURFACE.GIT, operation: ACTION.GIT_PUSH, exitCode: 1 };
+    const events = [
+      row(1, { ...push, shadowEffect: DECISION_EFFECT.ASK, rule }),
+      row(2, { ...push, shadowEffect: DECISION_EFFECT.ASK, rule }),
+      row(3, { ...push, shadowEffect: DECISION_EFFECT.ASK }),
+    ];
+    const { notices } = noticesFrom(startWatch(START), events, []);
+    expect(notices).toEqual([
+      expect.objectContaining({
+        kind: NOTICE_KIND.WOULD_HAVE,
+        action: ACTION.GIT_PUSH,
+        rule: 'voice-ask-git-push',
+        wouldHave: DECISION_EFFECT.ASK,
+      }),
+    ]);
+  });
+
   it('says a long turn finished once the agent hands back, and never while it is still going', () => {
     const working = [{ sessionId: 'ses_1', agent: 'claude-code', promptAt: at(1) }];
     expect(noticesFrom(startWatch(START), [], working).notices).toEqual([]);

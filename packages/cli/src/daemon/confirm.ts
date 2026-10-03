@@ -16,6 +16,7 @@ import {
   type ProposalAnswer,
 } from '@memnox/core';
 import { mergeRules, WRITTEN_POLICY_FILE } from '../protect/merge-rules';
+import { registerPolicyFile } from '../policy-registry';
 import { recordAnswer } from './record-answer';
 import {
   commandResults,
@@ -40,6 +41,9 @@ interface ConfirmInput {
   /** How a confirmed memnox command is run; memnox itself unless a test hands in another. */
   run?: CommandRunner;
 }
+
+/** A confirmed command still running on its own, such as a login waiting on its browser page. */
+const STARTED = 'started';
 
 type ConfirmResult = { ok: true; outcome: string } | { ok: false; error: string };
 
@@ -140,6 +144,8 @@ async function apply(
   const change = proposal.change;
   if (change.kind === PROPOSAL_KIND.RULES) {
     await mergeRules(change.file, change.rules, home);
+    // Every seam loads only registered files, so a rule written anywhere else would be in force nowhere.
+    await registerPolicyFile(home, change.file);
     return { ok: true, outcome: PROPOSAL_ANSWER.CONFIRMED };
   }
   if (change.kind === PROPOSAL_KIND.RESUME) {
@@ -226,13 +232,13 @@ async function applyCommand(
 ): Promise<ConfirmResult> {
   const { id, argv, at } = signed;
   const command = voiceArguments(argv);
-  if (command === null || command.run === VOICE_RUN.NEVER) {
-    return {
-      ok: false,
-      error: `memnox ${argv.join(' ')} is not something a voice may run`,
-    };
-  }
   const results = commandResults(home);
+  if (command === null || command.run === VOICE_RUN.NEVER) {
+    const error = `memnox ${argv[0] ?? ''} is not something a voice may run`;
+    // Kept as its result, so the voice says it failed rather than that it is still waiting.
+    await results.write(id, { exitCode: 1, output: error, argv: [...argv], at });
+    return { ok: false, error };
+  }
   if (runsInBackground(command.argv)) {
     await results.write(id, {
       exitCode: 0,
@@ -250,7 +256,8 @@ async function applyCommand(
         doneAt: new Date().toISOString(),
       }),
     );
-    return { ok: true, outcome: PROPOSAL_ANSWER.CONFIRMED };
+    // Started rather than done, so the Mac never says it is done while a browser page still waits.
+    return { ok: true, outcome: STARTED };
   }
   const ran = await run(command.argv, COMMAND_TIMEOUT_MS);
   await results.write(id, { ...ran, argv: command.argv, at });

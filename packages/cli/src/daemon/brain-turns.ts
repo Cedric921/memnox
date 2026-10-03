@@ -17,9 +17,18 @@ export class BrainTurns {
     private readonly idleMs: number,
   ) {}
 
-  /** Queued behind any turn in flight, so two questions never interleave. */
-  ask(said: string, send: (chunk: DaemonAskChunk) => void): Promise<void> {
-    const turn = this.turns.then(() => this.turn(said, send));
+  /**
+   * Queued behind any turn in flight, so two questions never interleave. `wanted` is asked as
+   * the turn's moment comes, so a guess overtaken while it waited never reaches the brain.
+   */
+  ask(
+    said: string,
+    send: (chunk: DaemonAskChunk) => void,
+    wanted: () => boolean = () => true,
+  ): Promise<void> {
+    const turn = this.turns.then(() =>
+      wanted() ? this.turn(said, send) : send({ kind: BRAIN_CHUNK.CANCELLED }),
+    );
     this.turns = turn.catch(() => undefined);
     return turn;
   }

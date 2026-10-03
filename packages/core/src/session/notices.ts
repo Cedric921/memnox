@@ -16,6 +16,14 @@ export const NOTICE_KIND = {
   PUSHED: 'pushed',
   /** Something the person asked to be told about happened. */
   WATCHED: 'watched',
+  /** Only watching, a rule would have asked about or refused something that went through. */
+  WOULD_HAVE: 'would-have',
+  /** An agent asked its person something in its own picker, held so the voice can read it out. */
+  QUESTION: 'question',
+  /** A command the voice started ran on its own and worked, which needs nobody, so it is shown and not said. */
+  ENDED: 'ended',
+  /** Two agents on one piece of work, here or across machines, which the person sorts out. */
+  COLLISION: 'collision',
 } as const;
 
 export type NoticeKind = (typeof NOTICE_KIND)[keyof typeof NOTICE_KIND];
@@ -29,6 +37,10 @@ export interface SessionNotice {
   target?: string;
   /** For a finished turn, how long it ran, which is why it is worth saying. */
   minutes?: number;
+  /** For what a rule would have done: the action, the rule, and ask or deny. */
+  action?: string;
+  rule?: string;
+  wouldHave?: string;
 }
 
 /** What has been told so far, carried from one look to the next so nothing is told twice. */
@@ -55,9 +67,10 @@ export function noticesFrom(
   const fresh = events
     .filter((each) => each.at > watch.seen && each.sessionId !== UNNAMED_SESSION)
     .sort((a, b) => a.at.localeCompare(b.at));
-  const notices = fresh
-    .map(shippedNotice)
-    .filter((each): each is SessionNotice => each !== null);
+  const notices = [
+    ...fresh.map(shippedNotice),
+    ...onceEach(fresh.map(wouldHaveNotice)),
+  ].filter((each): each is SessionNotice => each !== null);
   let turnsSeen = watch.turnsSeen;
   for (const turn of turns) {
     if (turn.endedAt === undefined || turn.endedAt <= watch.turnsSeen) continue;
@@ -103,4 +116,33 @@ function shippedNotice(event: MemnoxEvent): SessionNotice | null {
     at: event.at,
     ...(event.target === undefined ? {} : { target: event.target }),
   };
+}
+
+/** Something a rule the person wrote would have held, let through because Memnox is only watching. */
+function wouldHaveNotice(event: MemnoxEvent): SessionNotice | null {
+  const shadow = event.shadowEffect;
+  if (event.effect !== DECISION_EFFECT.ALLOW || event.rule === undefined) return null;
+  if (shadow !== DECISION_EFFECT.ASK && shadow !== DECISION_EFFECT.DENY) return null;
+  return {
+    kind: NOTICE_KIND.WOULD_HAVE,
+    sessionId: event.sessionId,
+    agent: event.agent,
+    at: event.at,
+    action: event.operation,
+    rule: event.rule.name,
+    wouldHave: shadow,
+    ...(event.target === undefined ? {} : { target: event.target }),
+  };
+}
+
+/** One per rule and session in a look, since a loop tripping the same rule is one piece of news. */
+function onceEach(notices: readonly (SessionNotice | null)[]): (SessionNotice | null)[] {
+  const seen = new Set<string>();
+  return notices.filter((each) => {
+    if (each === null) return false;
+    const key = `${each.sessionId} ${each.rule ?? ''}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }

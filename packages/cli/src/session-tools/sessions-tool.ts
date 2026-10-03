@@ -1,4 +1,5 @@
 import {
+  describeHost,
   HOUR_MS,
   LEDGER_SCAN_LIMIT,
   msToMinutes,
@@ -15,6 +16,7 @@ import {
   UNNAMED_SESSION,
   type MemnoxEvent,
   type PendingApproval,
+  type SessionHost,
 } from '@memnox/core';
 import { withEvents } from '../event-store';
 import { repositoriesOf } from './changes-tool';
@@ -195,7 +197,7 @@ async function describe(
     ...countsOf(summary, events.length),
     waitingOnYou: waiting.filter((each) => each.request.sessionId === sessionId).length,
     ...(pause === null ? {} : { paused: pause.reason }),
-    ...(host?.app === undefined ? {} : { runningIn: host.app }),
+    ...runningIn(host),
     ...(helpers.length === 0 ? {} : { subagents }),
     ...(sessionId === UNNAMED_SESSION ? { notAnAgent: LOCAL_WORK } : {}),
   };
@@ -272,4 +274,16 @@ function turnInProgress(turn: SessionTurn, moment: Date): boolean {
   if (turn.promptAt === undefined) return false;
   if (turn.endedAt !== undefined && turn.endedAt >= turn.promptAt) return false;
   return moment.getTime() - Date.parse(turn.promptAt) < STALE_TURN_MS;
+}
+
+/**
+ * The app it runs in, short enough for a button, and where in it, in words the brain can match
+ * "the one in VS Code" against: a Terminal tab, an editor's terminal, or an agent's panel.
+ */
+function runningIn(host: SessionHost | null): { runningIn?: string; where?: string } {
+  const where = host === null ? undefined : describeHost(host);
+  return {
+    ...(host?.app === undefined ? {} : { runningIn: host.app }),
+    ...(where === undefined ? {} : { where }),
+  };
 }

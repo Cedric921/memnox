@@ -9,6 +9,7 @@ import {
   DisplayRequests,
   PROPOSAL_KIND,
   Proposals,
+  readPolicyRegistry,
   SessionTurns,
   sessionTrace,
   summarizeTrace,
@@ -19,6 +20,7 @@ import {
 import { confirmAnswer } from '../src/daemon/confirm';
 import { NoticeWatcher } from '../src/daemon/notice-watch';
 import { callOperatorTool } from '../src/session-tools/operator-tools';
+import { commandResults } from '../src/session-tools/voice-commands';
 import type { SessionToolDeps } from '../src/session-tools/read-tools';
 import type { RewindSeams } from '../src/session-tools/rewind-tool';
 import {
@@ -84,6 +86,9 @@ describe('what a voice may run', () => {
     expect(voiceCommand('uninstall')?.run).toBe('never');
     // Signing in changes what this Mac talks to, so it waits for Touch ID like any change.
     expect(voiceCommand('memnox login')?.run).toBe('confirm');
+    // Registering a rule file can loosen as well as tighten, so it is never a read.
+    expect(voiceCommand('policy test "git push"')?.run).toBe('now');
+    expect(voiceCommand('policy use ~/work/memnox.policies.toml')?.run).toBe('confirm');
     expect(voiceCommand('rm -rf /')).toBeNull();
   });
 
@@ -94,6 +99,43 @@ describe('what a voice may run', () => {
       '--json',
     ]);
     expect(argumentsOf(`status; rm -rf ~`)).toEqual(['status;', 'rm', '-rf', '~']);
+  });
+});
+
+describe('a rule asked for by voice', () => {
+  it('is registered once confirmed, so every seam loads it and not only policy test', async () => {
+    const deps = await depsAt();
+    const project = await mkdtemp(join(tmpdir(), 'memnox-voice-project-'));
+    const { proposed, rule } = (await callOperatorTool(deps, SEAMS, 'propose_rule', {
+      action: 'git push',
+      effect: 'ask',
+      project,
+    })) as { proposed: string; rule: { file: string } };
+    expect(
+      await confirmAnswer(deps.home, {
+        subject: proposed,
+        answer: 'confirmed',
+        signature: await signedBy(deps.home, proposed),
+        at: NOW.toISOString(),
+      }),
+    ).toMatchObject({ ok: true });
+    expect(
+      await readPolicyRegistry(join(deps.home, '.memnox', 'policies.json')),
+    ).toContain(rule.file);
+  });
+});
+
+describe('a rule for a project folder that is not there', () => {
+  it('is refused before anything is put to Touch ID', async () => {
+    const deps = await depsAt();
+    expect(
+      await callOperatorTool(deps, SEAMS, 'propose_rule', {
+        action: 'git push',
+        effect: 'ask',
+        project: join(deps.home, 'misheard-project'),
+      }),
+    ).toMatchObject({ refused: expect.stringContaining('not a folder') });
+    expect(await new Proposals(deps.home).open(NOW.toISOString())).toEqual([]);
   });
 });
 
@@ -149,8 +191,8 @@ describe('running memnox by voice', () => {
         });
       },
     });
-    // The confirmation ends while the login still waits on the browser.
-    expect(confirmed).toMatchObject({ ok: true });
+    // The confirmation ends while the login still waits on the browser, said as started, never done.
+    expect(confirmed).toMatchObject({ ok: true, outcome: 'started' });
     expect(ran).toEqual([['login', '--name', 'Studio Mac']]);
     expect(
       await callOperatorTool(deps, SEAMS, 'command_output', { proposal: proposed }),
@@ -160,9 +202,52 @@ describe('running memnox by voice', () => {
     finish({ exitCode: 0, output: 'This machine is enrolled.' });
     await new Promise((resolve) => setTimeout(resolve, 20));
     const [told] = await watcher.look(NOW.toISOString());
-    expect(told).toMatchObject({ kind: 'notice', notice: 'watched' });
+    // A login that worked needs nobody, so it is shown rather than said.
+    expect(told).toMatchObject({ kind: 'notice', notice: 'ended' });
     expect(told?.summary).toContain('it worked');
     expect(await watcher.look(NOW.toISOString())).toEqual([]);
+  });
+
+  it('tells an onboarding that ended by the agents it names, and the one still running as running', async () => {
+    const deps = await depsAt();
+    const results = commandResults(deps.home);
+    await results.write('prp_a', {
+      exitCode: 0,
+      output: 'onboarded',
+      argv: ['agents', 'onboard', 'claude-code', 'cursor'],
+      at: '2026-09-30T11:00:00.000Z',
+      doneAt: '2026-09-30T11:01:00.000Z',
+    });
+    await results.write('prp_b', {
+      exitCode: 0,
+      output: '',
+      argv: ['agents', 'onboard', 'codex-cli'],
+      at: '2026-09-30T11:00:00.000Z',
+      running: true,
+    });
+    const watcher = new NoticeWatcher(deps.home, '2000-01-01T00:00:00.000Z');
+    const told = await watcher.look(NOW.toISOString());
+    expect(told).toHaveLength(1);
+    expect(told[0]?.summary).toContain('Onboarding claude-code, cursor is done');
+    expect(told[0]?.summary).toContain(
+      'Still running, not done yet: Onboarding codex-cli',
+    );
+  });
+
+  it('says a command that failed, since that is the one ending that needs the person', async () => {
+    const deps = await depsAt();
+    await commandResults(deps.home).write('prp_failed', {
+      exitCode: 1,
+      output: 'enrolling\nthe control plane refused this machine',
+      argv: ['login'],
+      at: '2026-09-30T11:00:00.000Z',
+      doneAt: '2026-09-30T11:01:00.000Z',
+    });
+    const [told] = await new NoticeWatcher(deps.home, '2000-01-01T00:00:00.000Z').look(
+      NOW.toISOString(),
+    );
+    expect(told).toMatchObject({ kind: 'notice', notice: 'watched' });
+    expect(told?.summary).toContain('the control plane refused this machine');
   });
 
   it('runs a reading command at once and hands back what it printed', async () => {

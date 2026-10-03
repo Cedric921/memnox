@@ -85,6 +85,11 @@ export interface DaemonRequest {
   said?: string;
   /** On ASK: they were waited on for the rest and said nothing more, so `said` is the whole of it. */
   finished?: boolean;
+  /**
+   * On ASK: what they have said so far, sent at a pause before the Mac is sure they finished,
+   * so the answer can start early. Nothing of it is said until an ask with the same words.
+   */
+  speculative?: boolean;
   /** On any voice request: the name the person asked to be called. */
   owner?: string;
   /** On BRIEF: held, paused or back. */
@@ -159,6 +164,8 @@ export const DISPLAY = {
   SESSIONS: 'sessions',
   /** Close the live window on a session and its own terminal tab, which ends the agent there. */
   CLOSE: 'close',
+  /** Take every Memnox card and window off the screen, leaving every agent and its tab alone. */
+  DISMISS: 'dismiss',
 } as const;
 
 export type DisplayKind = (typeof DISPLAY)[keyof typeof DISPLAY];
@@ -169,6 +176,8 @@ export const DELIVERY = {
   TYPED: 'typed',
   /** It could not be typed safely, so the words were left on the clipboard. */
   CLIPBOARD: 'clipboard',
+  /** The Mac is not allowed to press keys until the person turns Memnox on under Accessibility, so the words were left on the clipboard. */
+  NOT_ALLOWED: 'not-allowed',
   /** Nothing was typed anywhere. */
   FAILED: 'failed',
 } as const;
@@ -195,12 +204,16 @@ export interface ConversationLine {
 /** A session as one card in the switcher: who, on what, in what state, and where it runs. */
 export interface SessionCard {
   sessionId: string;
+  /** Which agent it is, such as claude-code, so a screen can show its logo and keep its colour. */
+  agent: string;
   agentName: string;
   task?: string;
   state: string;
   thinking: boolean;
   repository?: string;
   runningIn?: string;
+  /** Where in that app, in words: a Terminal tab, an editor's terminal, or an agent's panel in it. */
+  where?: string;
   lastActive?: string;
   /** When it began, so sessions can be told apart by the order they were started in. */
   startedAt?: string;
@@ -242,6 +255,8 @@ export interface SessionView {
   /** Newest last, a dozen at most. */
   steps: SessionViewStep[];
   files: CardFile[];
+  /** The changed lines of the file it changed most, so the code it is writing can be shown. */
+  excerpt?: CardExcerpt;
   /** The conversation's latest lines, where the agent keeps a transcript Memnox can read. */
   conversation?: ConversationLine[];
 }
@@ -341,6 +356,18 @@ export interface AgentNode {
   /** Its sessions working right now, and open waiting on the person. */
   working: number;
   open: number;
+  /** Each MCP server its configs launch, by name, with what the last scan heard it hold. */
+  mcp?: AgentServer[];
+  /** Command line tools signed in on this Mac that its shell can run, by name. */
+  clis?: string[];
+}
+
+/** One MCP server as the scan screen names it; counts are absent where no scan has asked it. */
+export interface AgentServer {
+  name: string;
+  tools?: number;
+  /** Of those, the ones that change something outside it. */
+  changing?: number;
 }
 
 /** One file of a walk through: what the voice says about it and the lines it is about. */
@@ -358,6 +385,11 @@ export interface DisplayHost {
   appPath?: string;
   tty?: string;
   cwd?: string;
+  /**
+   * The agent's own id for the conversation, which is what an editor's agent panel opens by,
+   * where Memnox keyed the session by another.
+   */
+  conversation?: string;
 }
 
 export interface DaemonResponse {

@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { hostname } from 'node:os';
 import { minutesToMs, PROPOSAL_KIND, Proposals } from '@memnox/core';
 import { OPERATOR_AGENT } from './propose-tools';
@@ -49,7 +50,7 @@ export async function memnoxCommandTool(
       said: SUM_UP,
     };
   }
-  const argv = named(command.argv, deps.machineName ?? hostname);
+  const argv = named(command.argv, deps.machineName ?? computerName);
   const proposal = await new Proposals(deps.home).propose({
     change: { kind: PROPOSAL_KIND.COMMAND, argv },
     rationale: `Run memnox ${argv.join(' ')}`,
@@ -65,6 +66,21 @@ export async function memnoxCommandTool(
   };
 }
 
+/** The name a person gave this Mac in System Settings, else its hostname without `.local`. */
+function computerName(): string {
+  try {
+    const named = execFileSync('scutil', ['--get', 'ComputerName'], {
+      encoding: 'utf8',
+      timeout: 2_000,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+    if (named !== '') return named;
+  } catch {
+    // Not a Mac, or scutil refused: the hostname is the next best name.
+  }
+  return hostname().replace(/\.local$/, '');
+}
+
 /** A login with no name enrols as a bare id in the fleet, so it takes the name Enter would have kept. */
 function named(argv: readonly string[], machine: () => string): string[] {
   if (argv[0] !== 'login' || argv.includes('--name')) return [...argv];
@@ -72,7 +88,7 @@ function named(argv: readonly string[], machine: () => string): string[] {
 }
 
 const PROPOSED_ON_ITS_OWN =
-  'Nothing has run. Read back in a sentence what it will do, and that it needs their Touch ID. For login, say that once they touch the sensor a page opens in their browser to approve this Mac, and nothing else is needed. It then runs on its own with no terminal, and you are told when it finishes, so do not ask them to wait or check.';
+  'Nothing has run. Read back in a sentence what it will do, and that it needs their Touch ID. For login, say that once they touch the sensor a page opens in their browser to approve this Mac, and nothing else is needed; an onboarding needs only the touch. It then runs on its own with no terminal, and you are told when it finishes, so do not ask them to wait or check.';
 
 const STILL_RUNNING =
   'It is still running on its own: a login or an onboarding is waiting for them to approve this Mac in the browser page that opened. Say so in a sentence; they will be told when it is done.';

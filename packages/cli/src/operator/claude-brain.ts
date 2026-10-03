@@ -30,6 +30,10 @@ interface ClaudeBrainOptions {
   cwd?: string;
   /** The names this machine uses, read when the brain starts, so misheard ones are understood. */
   vocabulary?: () => Promise<string[]>;
+  /** How the person asked to be addressed, read when the brain starts; undefined is no honorific. */
+  address?: () => Promise<string | undefined>;
+  /** Every memnox command, one line each, so the brain knows all it can run before it is asked. */
+  catalogue?: () => Promise<string>;
 }
 
 export class ClaudeCodeBrain implements Brain {
@@ -54,6 +58,7 @@ export class ClaudeCodeBrain implements Brain {
     this.turns += 1;
     child.stdin.write(`${JSON.stringify(userTurn(said))}\n`);
     let spoke = false;
+    const announced = new Set<string>();
     for (;;) {
       const line = await this.lines.next();
       if (line === null) {
@@ -62,7 +67,7 @@ export class ClaudeCodeBrain implements Brain {
           : { kind: BRAIN_CHUNK.FAILED, text: 'Claude Code stopped before it answered' };
         return;
       }
-      const read = readStreamLine(line, spoke);
+      const read = readStreamLine(line, spoke, announced);
       if (read.sessionId !== undefined) await this.keep(read.sessionId);
       for (const chunk of read.chunks) {
         const ends = chunk.kind !== BRAIN_CHUNK.TEXT && chunk.kind !== BRAIN_CHUNK.TOOL;
@@ -127,12 +132,14 @@ export class ClaudeCodeBrain implements Brain {
     );
     this.turns = resume?.turns ?? 0;
     const words = (await this.options.vocabulary?.().catch(() => [])) ?? [];
+    const address = await this.options.address?.().catch(() => undefined);
+    const catalogue = (await this.options.catalogue?.().catch(() => '')) ?? '';
     // A fresh queue per process, since the last one ended when its process did.
     const lines = new LineQueue();
     this.lines = lines;
     const child = spawn(
       this.options.command ?? 'claude',
-      claudeArgs(this.options, resume, words),
+      claudeArgs(this.options, resume, { words, address, catalogue }),
       {
         env: brainEnv(this.options.env ?? process.env),
         ...(this.options.cwd === undefined ? {} : { cwd: this.options.cwd }),
@@ -184,7 +191,7 @@ export class ClaudeCodeBrain implements Brain {
 function claudeArgs(
   options: ClaudeBrainOptions,
   resume: Resumable | null,
-  words: readonly string[],
+  spoken: Spoken,
 ): string[] {
   const servers = {
     mcpServers: {
@@ -210,18 +217,25 @@ function claudeArgs(
     JSON.stringify(servers),
     '--allowedTools',
     `mcp__${OPERATOR_SERVER}`,
-    ...voiceFlags(options, words),
+    ...voiceFlags(options, spoken),
     ...(resume === null ? [] : ['--resume', resume.sessionId]),
   ];
 }
 
+/** What the prompt is shaped by on this machine: the names said here, and how the person is addressed. */
+interface Spoken {
+  words: readonly string[];
+  address: string | undefined;
+  catalogue: string;
+}
+
 /** How the brain talks: its own instructions, no settings of the person's, and a quick model. */
-function voiceFlags(options: ClaudeBrainOptions, words: readonly string[]): string[] {
+function voiceFlags(options: ClaudeBrainOptions, spoken: Spoken): string[] {
   return [
     // Replaces Claude Code's own coding prompt rather than adding to it, since that one asks
     // for thorough written answers and a voice needs one spoken sentence.
     '--system-prompt',
-    voicePrompt(words),
+    voicePrompt(spoken.words, spoken.address, spoken.catalogue),
     // Only a project's settings, and the brain starts where there is no project: no hooks on
     // every tool call, and nothing of the person's own memory or instructions rides along.
     '--setting-sources',
@@ -230,6 +244,9 @@ function voiceFlags(options: ClaudeBrainOptions, words: readonly string[]): stri
     ...(options.effort === undefined ? [] : ['--effort', options.effort]),
   ];
 }
+
+/** Claude Code's own setting for how much it thinks before answering; zero is none. */
+const THINKING_BUDGET_VAR = 'MAX_THINKING_TOKENS';
 
 /** How long an interrupted turn has to end before its process is ended instead. */
 const INTERRUPT_GRACE_MS = 2_000;
@@ -252,7 +269,12 @@ function userTurn(said: string): unknown {
 
 /** The person's own login, with the brain recorded as the operator and never as their work. */
 function brainEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  const out: NodeJS.ProcessEnv = { ...env, [ENV_AGENT_NAME]: OPERATOR_AGENT_NAME };
+  const out: NodeJS.ProcessEnv = {
+    ...env,
+    [ENV_AGENT_NAME]: OPERATOR_AGENT_NAME,
+    // Thinking first cost every spoken answer five to fifteen seconds for one sentence from tools.
+    [THINKING_BUDGET_VAR]: '0',
+  };
   delete out[SESSION_VAR];
   return out;
 }

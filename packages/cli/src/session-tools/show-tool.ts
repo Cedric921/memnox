@@ -19,6 +19,7 @@ import { mainCheckoutOf } from './main-checkout';
 import { noteFocus } from './focus';
 import { textArg, type SessionToolDeps, type ToolArgs } from './read-tools';
 import type { RewindSeams } from './rewind-tool';
+import { liveHost } from './live-host';
 import { scopeOf, type SessionScope } from './session-scope';
 
 /**
@@ -26,16 +27,24 @@ import { scopeOf, type SessionScope } from './session-scope';
  * the corner of the screen. It changes nothing an agent can do, so it waits on nobody.
  */
 
-/** What the person can ask to see; typing an instruction is the instruct tool's, never this one's. */
-const DISPLAYS: readonly string[] = [
-  DISPLAY.OPEN,
-  DISPLAY.FOCUS,
-  DISPLAY.CARD,
-  DISPLAY.CLOSE,
-];
+/**
+ * What the brain may ask for, and what the Mac is asked to do. "Open" takes the person to the
+ * session itself, as anybody saying it means; the live window is only ever asked for as "watch".
+ * Typing an instruction is the instruct tool's, never this one's.
+ */
+const DISPLAYS: Readonly<Record<string, DisplayKind>> = {
+  open: DISPLAY.FOCUS,
+  focus: DISPLAY.FOCUS,
+  watch: DISPLAY.OPEN,
+  card: DISPLAY.CARD,
+  close: DISPLAY.CLOSE,
+};
 
 /** How the brain asks for every session at once, which names no session. */
 const ALL = 'all';
+
+/** How the brain clears its own cards and windows, which names no session and ends nothing. */
+const DISMISS = 'dismiss';
 
 /** What a card is headed when the brain gave it no title. */
 const DEFAULT_TITLE = 'Session';
@@ -46,12 +55,12 @@ export async function showTool(
   args: ToolArgs,
 ): Promise<unknown> {
   const asked = textArg(args, 'display') ?? DISPLAY.CARD;
-  if (asked === ALL) return showAll(deps, args);
+  if (asked === ALL || asked === DISMISS) return withoutSession(deps, args, asked);
   const display = displayOf(asked);
   if (display === null) {
     return {
       shown: false,
-      said: `display is "open", "focus", "card", "close" or "all", not "${asked}".`,
+      said: `display is "open", "watch", "card", "close", "dismiss" or "all", not "${asked}".`,
     };
   }
   const scope = await withEvents(deps.home, (store) =>
@@ -59,27 +68,69 @@ export async function showTool(
   );
   if (scope.sessionId === null) return { ...scope, shown: false };
   if (display === DISPLAY.CLOSE) return closeSession(deps, scope, scope.sessionId);
+  return putUp(deps, seams, { scope, sessionId: scope.sessionId, display, args });
+}
+
+interface Showing {
+  scope: SessionScope;
+  sessionId: string;
+  display: DisplayKind;
+  args: ToolArgs;
+}
+
+/** The session put on screen as asked, and what the brain may say of it. */
+async function putUp(
+  deps: SessionToolDeps,
+  seams: RewindSeams,
+  { scope, sessionId, display, args }: Showing,
+): Promise<unknown> {
   const text = textArg(args, 'text');
   if (display === DISPLAY.CARD && text === undefined) {
     return { shown: false, said: 'A card needs text: the summary you are about to say.' };
   }
-  const { host, openAt } = await whereItRuns(deps, scope.sessionId);
-  const code =
-    display === DISPLAY.CARD ? await codeFor(deps, seams, scope.sessionId) : {};
-  await new DisplayRequests(deps.home).request({
+  const { host, openAt } = await whereItRuns(deps, sessionId);
+  const code = display === DISPLAY.CARD ? await codeFor(deps, seams, sessionId) : {};
+  const request = await new DisplayRequests(deps.home).request({
     ...code,
     display,
-    sessionId: scope.sessionId,
+    sessionId: sessionId,
     agent: scope.agent,
     title: textArg(args, 'title') ?? DEFAULT_TITLE,
     ...(text === undefined ? {} : { text }),
     ...(openAt === undefined ? {} : { cwd: openAt }),
     at: deps.now().toISOString(),
   });
-  const showing = await aboutSession(deps, scope.sessionId);
+  const [showing, failed] = await Promise.all([
+    aboutSession(deps, sessionId),
+    display === DISPLAY.FOCUS ? notBroughtForward(deps, request.id) : null,
+  ]);
   await noteFocus(deps, scope, 'opened');
+  if (failed !== null) return { ...scope, showing, ...failed };
   return { ...scope, showing, ...shownAs(display, host?.app), ...onCard(code) };
 }
+
+/** A few seconds, since bringing a window forward is quick and the voice is waiting to speak. */
+const FOCUS_WAIT_MS = 6_000;
+
+/**
+ * What the Mac said when it could not bring the session forward, or null when it did or said
+ * nothing in time, so "it is open" is never said of a window that never came up.
+ */
+async function notBroughtForward(
+  deps: SessionToolDeps,
+  requestId: string,
+): Promise<Record<string, unknown> | null> {
+  const delivery = (await deps.delivered?.(requestId, FOCUS_WAIT_MS)) ?? null;
+  if (delivery === null || delivery.outcome === DELIVERY.TYPED) return null;
+  return {
+    shown: false,
+    ...(delivery.reason === undefined ? {} : { why: delivery.reason }),
+    said: NOT_OPENED,
+  };
+}
+
+const NOT_OPENED =
+  'Its window did not come forward: why says the reason. Never say it is open or on screen. Say sorry in a few words, the reason in plain words, and offer to watch it live instead, which always opens.';
 
 /**
  * Closes its live window and its own terminal tab. A turn in progress is never cut off, since
@@ -93,11 +144,15 @@ async function closeSession(
   const showing = await aboutSession(deps, sessionId);
   if (showing['turn'] === 'in progress')
     return { ...scope, closed: false, said: MID_TURN };
+  const recorded = await new SessionHosts(deps.home).read(sessionId);
+  // The terminal it runs in now, which an editor's extension checks its close link against.
+  const tty = recorded === null ? undefined : liveHost(recorded)?.tty;
   const request = await new DisplayRequests(deps.home).request({
     display: DISPLAY.CLOSE,
     sessionId,
     agent: scope.agent,
     title: DEFAULT_TITLE,
+    ...(tty === undefined ? {} : { tty }),
     at: deps.now().toISOString(),
   });
   const delivery = deps.delivered === undefined ? null : await deps.delivered(request.id);
@@ -122,7 +177,31 @@ const CLOSED =
 const CLOSE_UNCONFIRMED =
   'Handed to the Mac to close its window and tab, which has not confirmed yet. Say you are closing it; never that it is closed.';
 const NOT_CLOSED =
-  'Its live window is closed but its tab could not be: why says the reason. Say sorry in a few words and the reason in plain words, and that they can close the tab themselves.';
+  'Its window on their screen is closed, but its own tab or terminal is still open: why says the reason. Say exactly that in one sentence, the reason in plain words, never that nothing closed and never that it is all closed. When closing several, say it once for all of them together, not once per session.';
+
+/** What names no session: every session up at once, or every card and window taken down. */
+function withoutSession(
+  deps: SessionToolDeps,
+  args: ToolArgs,
+  asked: string,
+): Promise<unknown> {
+  return asked === ALL ? showAll(deps, args) : dismissAll(deps);
+}
+
+/** Every Memnox card and window off the screen at once; no agent and no tab is touched. */
+async function dismissAll(deps: SessionToolDeps): Promise<unknown> {
+  await new DisplayRequests(deps.home).request({
+    display: DISPLAY.DISMISS,
+    sessionId: ALL,
+    agent: 'memnox',
+    title: 'Dismiss',
+    at: deps.now().toISOString(),
+  });
+  return { dismissed: true, said: DISMISSED };
+}
+
+const DISMISSED =
+  'Every Memnox card and window is off their screen; every agent and its tab is still running. Say it is cleared in a few words.';
 
 /** Every session as its own card, together; the Mac reads the sessions itself, so nothing is copied here. */
 async function showAll(deps: SessionToolDeps, args: ToolArgs): Promise<unknown> {
@@ -141,7 +220,7 @@ function onCard(code: { files?: CardFile[] }): { filesOnCard?: number } {
 }
 
 function displayOf(asked: string): DisplayKind | null {
-  return DISPLAYS.includes(asked) ? (asked as DisplayKind) : null; // narrowed by the includes check
+  return Object.hasOwn(DISPLAYS, asked) ? (DISPLAYS[asked] ?? null) : null;
 }
 
 /** What was put up, so the brain names the session it showed rather than the one it meant to. */
@@ -192,7 +271,7 @@ async function whereItRuns(
   return place === undefined ? { host } : { host, openAt: mainCheckoutOf(place) };
 }
 
-interface ChangedFile {
+export interface ChangedFile {
   path: string;
   added: number | null;
   removed: number | null;
@@ -211,10 +290,21 @@ async function codeFor(
   const shown = changes.files?.shown ?? [];
   if (shown.length === 0) return {};
   const files = shown.slice(0, CARD_FILES).map(cardFile);
+  const excerpt = await excerptOf(deps, seams, sessionId, shown);
+  return excerpt === null ? { files } : { files, excerpt };
+}
+
+/** The changed lines of the file a session changed most, leaving tests out, since that is the work. */
+export async function excerptOf(
+  deps: SessionToolDeps,
+  seams: RewindSeams,
+  sessionId: string,
+  shown: readonly ChangedFile[],
+): Promise<CardExcerpt | null> {
   const top = [...shown]
     .filter((each) => each.added !== null && each.kind !== 'test')
     .sort((a, b) => size(b) - size(a))[0];
-  if (top === undefined) return { files };
+  if (top === undefined) return null;
   const diff = (await changesTool(deps, seams, {
     session: sessionId,
     path: top.path,
@@ -222,7 +312,7 @@ async function codeFor(
     diff?: { lines: string[] };
   };
   const lines = changedLines(diff.diff?.lines ?? []);
-  return lines.length === 0 ? { files } : { files, excerpt: { path: top.path, lines } };
+  return lines.length === 0 ? null : { path: top.path, lines };
 }
 
 function cardFile(file: ChangedFile): CardFile {
@@ -252,7 +342,7 @@ const ALL_SHOWN =
   'Every session is on their screen now as a card of its own, all at once, each with Watch live and Open on it. Say so in one sentence, then how many are working, from the session list you were given. Never read the cards out one by one.';
 
 const ON_SCREEN =
-  'The card is on their screen in the top left corner, not in any app, with the files it changed and a few changed lines. Say in a whole sentence that the summary is on screen, then give it.';
+  'The card is on their screen in the top left corner, not in any app, with your summary laid out as written and the files it changed. Say in a whole sentence that the summary is on screen, then give the gist in two sentences of plain speech; never read the card out.';
 
 /** Said with every display, since naming the wrong session confidently is worse than naming none. */
 const NAME_IT =

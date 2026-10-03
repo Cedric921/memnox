@@ -23,6 +23,7 @@ export async function memoryTool(
   deps: SessionToolDeps,
   args: ToolArgs,
 ): Promise<unknown> {
+  await deps.refreshMemory?.();
   const memory = await readWorkspaceMemoryCached(deps.home);
   if (memory === null) return { connected: false, said: NOT_CONNECTED };
   const about = textArg(args, 'about');
@@ -73,6 +74,7 @@ function answerOf(
   return {
     about,
     from: `what this machine pulled from the workspace at ${memory.syncedAt}`,
+    held: memory.facts.length,
     facts: facts.map(factRow),
     ...(facts.length === 0
       ? { said: 'The workspace has settled nothing about this.' }

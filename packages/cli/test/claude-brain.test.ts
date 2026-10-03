@@ -14,7 +14,7 @@ import { MOST_CONVERSATION_TURNS } from '../src/operator/conversation';
 const FAKE_CLAUDE = `#!/usr/bin/env node
 const fs = require('node:fs');
 const log = process.env.FAKE_LOG;
-fs.appendFileSync(log, JSON.stringify({ argv: process.argv.slice(2), agent: process.env.MEMNOX_AGENT_NAME ?? null, session: process.env.MEMNOX_SESSION ?? null }) + '\\n');
+fs.appendFileSync(log, JSON.stringify({ argv: process.argv.slice(2), agent: process.env.MEMNOX_AGENT_NAME ?? null, session: process.env.MEMNOX_SESSION ?? null, thinking: process.env.MAX_THINKING_TOKENS ?? null }) + '\\n');
 let turn = 0;
 let pending = '';
 process.stdin.on('data', (chunk) => {
@@ -69,20 +69,19 @@ async function turn(brain: ClaudeCodeBrain, said: string): Promise<BrainChunk[]>
   return chunks;
 }
 
-async function launches(
-  log: string,
-): Promise<{ argv: string[]; agent: string | null; session: string | null }[]> {
+/** What the fake brain wrote down each time it was started. */
+interface Launch {
+  argv: string[];
+  agent: string | null;
+  session: string | null;
+  thinking: string | null;
+}
+
+async function launches(log: string): Promise<Launch[]> {
   return (await readFile(log, 'utf8'))
     .trim()
     .split('\n')
-    .map(
-      (each) =>
-        JSON.parse(each) as {
-          argv: string[];
-          agent: string | null;
-          session: string | null;
-        },
-    );
+    .map((each) => JSON.parse(each) as Launch);
 }
 
 describe("the person's own Claude Code as the brain", () => {
@@ -112,6 +111,8 @@ describe("the person's own Claude Code as the brain", () => {
     const [first] = await launches(setup.log);
     expect(first?.agent).toBe('memnox-operator');
     expect(first?.session).toBeNull();
+    // A spoken answer starts at once, rather than after the model thinks for seconds first.
+    expect(first?.thinking).toBe('0');
   });
 
   it('streams a turn: the tool it read, the words, then the end', async () => {
@@ -234,7 +235,7 @@ describe("the person's own Claude Code as the brain", () => {
     const argv = first?.argv ?? [];
     expect(argv[argv.indexOf('--model') + 1]).toBe('haiku');
     expect(argv[argv.indexOf('--effort') + 1]).toBe('low');
-    expect(argv[argv.indexOf('--system-prompt') + 1]).toContain('Never use their name');
+    expect(argv[argv.indexOf('--system-prompt') + 1]).toContain('never their name');
     expect(argv).not.toContain('--append-system-prompt');
     expect(argv[argv.indexOf('--setting-sources') + 1]).toBe('project');
   });

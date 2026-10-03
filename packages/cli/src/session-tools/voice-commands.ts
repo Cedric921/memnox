@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { MEMNOX_HOME, JsonRecordDir } from '@memnox/core';
+import { OPEN_BROWSER_VAR } from '../sync/browser';
 
 /**
  * Any memnox command by voice: what reads runs at once, what changes waits for Touch ID, and a few
@@ -96,9 +97,22 @@ const LISTS_WHEN: Readonly<Record<string, (args: readonly string[]) => boolean>>
   rewind: (args) => args.includes('--list'),
   config: (args) =>
     args[0] === undefined || ['get', 'list', 'show', 'path'].includes(args[0]),
-  agents: (args) => args[0] === undefined || ['list', 'show'].includes(args[0]),
+  agents: (args) => args[0] === undefined || ['list', 'show', 'status'].includes(args[0]),
+  allow: (args) => args.includes('--list'),
   mcp: (args) => args[0] === undefined || ['status', 'list'].includes(args[0]),
 };
+
+/** Subcommands of a reading command that change what is in force, such as registering a rule file. */
+const WRITING_SUBCOMMANDS: Readonly<Record<string, readonly string[]>> = {
+  policy: ['use'],
+  task: ['set', 'clear'],
+  repo: ['trust'],
+  budget: ['set', 'remove', 'suggest'],
+};
+
+function writesUnder(name: string, rest: readonly string[]): boolean {
+  return rest[0] !== undefined && (WRITING_SUBCOMMANDS[name] ?? []).includes(rest[0]);
+}
 
 /** Flags that turn a reading command into one that writes, or sends something off this Mac. */
 const CHANGING_FLAGS: readonly string[] = [
@@ -113,6 +127,7 @@ const CHANGING_FLAGS: readonly string[] = [
   '--to',
   '--yes',
   '--otlp',
+  '--prune',
 ];
 
 interface VoiceCommand {
@@ -132,11 +147,14 @@ export function voiceArguments(given: readonly string[]): VoiceCommand | null {
   const argv = given[0] === 'memnox' ? given.slice(1) : [...given];
   const [name, ...rest] = argv;
   if (name === undefined) return null;
+  // How it addresses them is theirs to say out loud, and reaches nothing but the voice itself.
+  if (name === 'voice' && rest[0] === 'address') return { argv, run: VOICE_RUN.NOW };
   const never = NEVER_BY_VOICE[name];
   if (never !== undefined) return { argv, run: VOICE_RUN.NEVER, why: never };
   const lists = LISTS_WHEN[name]?.(rest) ?? false;
   const changes = rest.some((arg) => CHANGING_FLAGS.includes(arg.split('=')[0] ?? arg));
-  if ((READS.includes(name) || lists) && !changes) return { argv, run: VOICE_RUN.NOW };
+  if ((READS.includes(name) || lists) && !changes && !writesUnder(name, rest))
+    return { argv, run: VOICE_RUN.NOW };
   if (READS.includes(name) || CHANGES.includes(name))
     return { argv, run: VOICE_RUN.CONFIRM };
   return null;
@@ -180,6 +198,7 @@ const MOST_OUTPUT_CHARS = 3_000;
 export function runMemnox(
   argv: readonly string[],
   timeoutMs: number,
+  mostChars: number = MOST_OUTPUT_CHARS,
 ): Promise<CommandRun> {
   const entry = cliEntry();
   return new Promise((resolve) => {
@@ -189,26 +208,31 @@ export function runMemnox(
       {
         timeout: timeoutMs,
         maxBuffer: 4 * 1_024 * 1_024,
-        env: { ...process.env, NO_COLOR: '1', FORCE_COLOR: '0', TERM: 'dumb' },
+        // A person asked out loud and is at the Mac, so a login's approval page opens for them.
+        env: {
+          ...process.env,
+          NO_COLOR: '1',
+          FORCE_COLOR: '0',
+          TERM: 'dumb',
+          [OPEN_BROWSER_VAR]: '1',
+        },
       },
       (error, stdout, stderr) => {
         const code = error === null ? 0 : typeof error.code === 'number' ? error.code : 1;
-        resolve({ exitCode: code, output: plainOutput(`${stdout}${stderr}`) });
+        resolve({ exitCode: code, output: plainOutput(`${stdout}${stderr}`, mostChars) });
       },
     );
   });
 }
 
 /** Without colour codes and box drawing, and cut to what can be answered from. */
-function plainOutput(text: string): string {
+function plainOutput(text: string, mostChars: number): string {
   // The escape character is built from its code, so no control character sits in the source.
   const escape = String.fromCharCode(27);
   const plain = text
     .replace(new RegExp(`${escape}\\[[0-9;]*[A-Za-z]`, 'g'), '')
     .replace(/[─│┌┐└┘├┤┬┴┼╭╮╰╯]/g, ' ');
-  return plain.length <= MOST_OUTPUT_CHARS
-    ? plain
-    : `${plain.slice(0, MOST_OUTPUT_CHARS)}\n…`;
+  return plain.length <= mostChars ? plain : `${plain.slice(0, mostChars)}\n…`;
 }
 
 /** The memnox entry beside this module, wherever the bundler put it. */

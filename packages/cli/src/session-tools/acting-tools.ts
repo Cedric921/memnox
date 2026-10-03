@@ -9,7 +9,7 @@ export const ACTING_TOOLS: readonly ToolDefinition[] = [
   {
     name: 'memnox_command',
     description:
-      'Run any memnox command the person asks for, like "status", "timeline --since 1h", "doctor", "mode autonomous", "freeze" or "protect --yes". What only reads runs now and its output comes back for you to sum up. What changes something is proposed and runs only after their Touch ID. "login" signs this Mac in to Memnox Cloud and "agents onboard <agent>" puts an agent under it: after Touch ID each runs on its own, with a browser page to approve and no terminal, and its end is told to you. A few never run by voice, and it says why. Run "help <command>" first when unsure of a flag. Commands that change something run with no terminal, so pass --yes to one that would otherwise stop to ask.',
+      'Run any memnox command the person asks for, like "status", "timeline --since 1h", "doctor", "mode autonomous", "freeze" or "protect --yes". What only reads runs now and its output comes back for you to sum up. What changes something is proposed and runs only after their Touch ID. "login" signs this Mac in to Memnox Cloud and "agents onboard <agent> [more agents]" puts one or several agents under it with one Touch ID: after Touch ID each runs on its own, with a browser page to approve and no terminal, and its end is told to you. A few never run by voice, and it says why. Run "help <command>" first when unsure of a flag. Commands that change something run with no terminal, so pass --yes to one that would otherwise stop to ask.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -110,11 +110,22 @@ export const ACTING_TOOLS: readonly ToolDefinition[] = [
       },
       repository: {
         type: 'string',
-        description: 'the repository as they named it, like "memnox cloud"',
+        description:
+          'the repository as they named it, like "memnox cloud"; leave it out when they named none, and the ticket\'s repository or the one their last session worked in is taken',
       },
       task: {
         type: 'string',
         description: 'what the new session should do, in their words',
+      },
+      work: {
+        type: 'string',
+        description:
+          'the ticket or task from the workspace this is about, by its title or key words, such as "Fix auth token refresh", when they ask an agent to implement, fix or work on one: the ticket, what was said about it and the decisions that bind it are gathered and handed to the agent',
+      },
+      hold_credentials: {
+        type: 'string',
+        description:
+          '"true" to start it with no token such as GITHUB_TOKEN or AWS keys in its environment, each CLI getting back only its own token when it runs, when they ask to keep tokens or credentials away from it',
       },
       said: SAID_ARG,
     },

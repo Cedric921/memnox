@@ -9,7 +9,7 @@ import {
   writeJsonFile,
   type HoldRequest,
 } from '@memnox/core';
-import { WaitingFeed } from '../src/daemon/waiting-feed';
+import { conversationOf, WaitingFeed } from '../src/daemon/waiting-feed';
 
 const NOW = '2026-09-30T12:00:00.000Z';
 
@@ -63,5 +63,22 @@ describe('a held call, as a person needs to hear it', () => {
     expect(event?.agentName).toBe('Claude Code');
     expect(event?.task).toBeUndefined();
     expect(event?.place).toBeUndefined();
+  });
+});
+
+describe("the agent's own conversation", () => {
+  const CONVERSATION = '9f1c2d3e-4b5a-4c6d-8e7f-0a1b2c3d4e5f';
+
+  it('is the session id itself for an editor session Memnox did not start', () => {
+    expect(conversationOf({ sessionId: CONVERSATION })).toEqual({
+      conversation: CONVERSATION,
+    });
+  });
+
+  it('is the agent id noted beside it under memnox run, never the ses_ key', () => {
+    expect(conversationOf({ sessionId: 'ses_run', agentSession: CONVERSATION })).toEqual({
+      conversation: CONVERSATION,
+    });
+    expect(conversationOf({ sessionId: 'ses_run' })).toEqual({});
   });
 });

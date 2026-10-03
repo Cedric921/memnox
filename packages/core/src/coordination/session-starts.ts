@@ -51,6 +51,10 @@ export interface SessionStart {
   /** The repository's root, checked to exist before it was ever proposed. */
   repository: string;
   task: string;
+  /** Started with `--hold-credentials`, so its environment carries no token for it to leak. */
+  holdCredentials?: boolean;
+  /** The workspace brief the agent is handed before its first turn, when the person named work. */
+  brief?: string;
   said?: string;
   proposedAt: string;
   expiresAt: string;
@@ -61,6 +65,8 @@ export interface StartProposal {
   command: string;
   repository: string;
   task: string;
+  holdCredentials?: boolean;
+  brief?: string;
   said?: string;
   at: string;
 }
@@ -78,7 +84,9 @@ export function startCommand(start: SessionStart): string {
   const command = BARE_COMMAND.test(start.command)
     ? start.command
     : shellQuoted(start.command);
-  return `cd ${shellQuoted(start.repository)} && memnox run -- ${command} ${shellQuoted(task)}`;
+  const hold = start.holdCredentials === true ? ' --hold-credentials' : '';
+  const brief = start.brief === undefined ? '' : ` --brief ${shellQuoted(start.brief)}`;
+  return `cd ${shellQuoted(start.repository)} && memnox run${hold}${brief} -- ${command} ${shellQuoted(task)}`;
 }
 
 /** A command name a shell reads as one word as it is, which a path with a space in it is not. */
@@ -103,12 +111,19 @@ export class SessionStarts {
       command: input.command,
       repository: input.repository,
       task: input.task,
+      ...(input.holdCredentials === true ? { holdCredentials: true } : {}),
+      ...(input.brief === undefined ? {} : { brief: input.brief }),
       ...(input.said === undefined ? {} : { said: input.said }),
       proposedAt: input.at,
       expiresAt: new Date(Date.parse(input.at) + START_TTL_MS).toISOString(),
     };
     await this.records.write(start.id, start);
     return start;
+  }
+
+  /** Read back and still waiting on a yes, so a brain that lost the thread can still be told. */
+  async waiting(moment: string): Promise<SessionStart[]> {
+    return (await this.records.all()).filter((each) => each.expiresAt > moment);
   }
 
   /** Taken once: a second yes to the same start finds nothing, so no session starts twice. */

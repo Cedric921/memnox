@@ -14,6 +14,7 @@ import {
 import { rewindTool, type RewindSeams } from './rewind-tool';
 import { briefTool, memoryTool } from './memory-tools';
 import { fingerprintTool } from './fingerprint-tool';
+import { workTool } from './work-tools';
 
 /** One argument a tool takes: a string, or a list of small objects, such as a walk through's pages. */
 export type ToolProperty =
@@ -130,6 +131,16 @@ export const SESSION_TOOLS: readonly ToolDefinition[] = [
       },
     },
   ),
+  readTool(
+    'work',
+    'The workspace brief your instruction named: the ticket, what people said about it, and the settled decisions it must keep to. Read it before you change anything when your task names one.',
+    {
+      brief: {
+        type: 'string',
+        description: 'the brief id your task or instruction named, such as wrk_1a2b3c',
+      },
+    },
+  ),
   {
     name: 'fingerprint',
     description:
@@ -187,6 +198,8 @@ export async function callTool(
       return memoryTool(deps, args);
     case 'brief':
       return briefTool(deps, args);
+    case 'work':
+      return workTool(deps, args);
     case 'fingerprint':
       return fingerprintTool(deps, args);
     case 'rewind':

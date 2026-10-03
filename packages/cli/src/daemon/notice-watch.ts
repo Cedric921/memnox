@@ -1,9 +1,15 @@
 import { basename } from 'node:path';
 import {
+  shortDigest,
   AGENT_ID_PREFIX,
+  Clashes,
+  concurrentWork,
   DAEMON_EVENT,
+  DECISION_EFFECT,
+  DEFAULT_COLLISION_WINDOW_MINUTES,
   LEDGER_SCAN_LIMIT,
   LEDGER_SESSION_LIMIT,
+  minutesToMs,
   NOTICE_KIND,
   noticesFrom,
   PendingApprovals,
@@ -14,6 +20,8 @@ import {
   SessionWatches,
   startWatch,
   watchFired,
+  workObservationsOf,
+  type Collision,
   type DaemonEvent,
   type NoticeWatch,
   type SessionNotice,
@@ -26,6 +34,7 @@ import { withEvents } from '../event-store';
 import { repositoriesWritten, touchesOf } from '../session-tools/session-writes';
 import { readTestRuns, sessionTranscript } from './transcript';
 import { commandResults, type CommandResult } from '../session-tools/voice-commands';
+import { SessionViews } from './session-view';
 
 /**
  * Looks at the ledger for what is worth saying unasked, and keeps what it told for a while
@@ -43,12 +52,17 @@ export class NoticeWatcher {
   private readonly told = new Map<string, DaemonEvent>();
   /** Background commands whose end was told, kept for the daemon's life so none is told twice. */
   private readonly ended = new Set<string>();
+  /** Pairs of sessions already told as colliding, so a pair working on for an hour is said once. */
+  private readonly collided = new Set<string>();
+  /** The newest clash told, so each held write is said once. */
+  private clashSeen: string;
 
   constructor(
     private readonly home: string,
     private readonly started: string,
   ) {
     this.watch = startWatch(started);
+    this.clashSeen = started;
   }
 
   /** New notices since the last look, as events ready to send. */
@@ -68,28 +82,83 @@ export class NoticeWatcher {
     }
     const watched = await this.watched(moment);
     const finished = await this.commandsEnded(moment);
-    for (const event of [...fresh, ...watched, ...finished])
+    const met = [...(await this.collisions(moment)), ...(await this.clashes(moment))];
+    for (const event of [...fresh, ...watched, ...finished, ...met])
       this.told.set(event.subject, event);
-    return [...fresh, ...watched, ...finished];
+    return [...fresh, ...watched, ...finished, ...met];
   }
 
-  /** A login or onboarding that ran on its own after Touch ID and has now ended, each told once. */
+  /** Two sessions working on the same files at once, each pair told once with what they share. */
+  private async collisions(moment: string): Promise<DaemonEvent[]> {
+    const windowStart =
+      Date.parse(moment) - minutesToMs(DEFAULT_COLLISION_WINDOW_MINUTES);
+    const since = new Date(Math.max(windowStart, Date.parse(this.started))).toISOString();
+    const events = await withEvents(this.home, (store) =>
+      store.query({ since, limit: LEDGER_SCAN_LIMIT }),
+    );
+    const pairs = new Map<string, Collision[]>();
+    for (const collision of concurrentWork(workObservationsOf(events), { now: moment })) {
+      const key = collision.agents
+        .map((agent) => agent.agentId)
+        .sort()
+        .join('\n');
+      if (this.collided.has(key)) continue;
+      pairs.set(key, [...(pairs.get(key) ?? []), collision]);
+    }
+    const names = await readNames(this.home);
+    return [...pairs].slice(0, MOST_AT_ONCE).map(([key, shared]) => {
+      this.collided.add(key);
+      return collisionEvent(key, shared, (agent) => nameOf(names, agent), moment);
+    });
+  }
+
+  /** A write held because another agent here or on another machine had it, each told once. */
+  private async clashes(moment: string): Promise<DaemonEvent[]> {
+    const fresh = await new Clashes(this.home)
+      .since(this.clashSeen, moment)
+      .catch(() => []);
+    const last = fresh.at(-1);
+    if (last !== undefined) this.clashSeen = last.at;
+    const names = await readNames(this.home);
+    return fresh.slice(-MOST_AT_ONCE).map((clash) => {
+      const agentName = nameOf(names, clash.agent);
+      return {
+        kind: DAEMON_EVENT.NOTICE,
+        subject: `ntc_collision_${clash.id}`,
+        agent: clash.agent,
+        agentName,
+        notice: NOTICE_KIND.COLLISION,
+        sessionId: clash.sessionId,
+        summary: `${agentName} was held off ${basename(clash.what)} because another agent has it: ${clash.said}`,
+        at: clash.at,
+      };
+    });
+  }
+
+  /** A login or onboarding that ran on its own after Touch ID and has now ended, each told once; only a failure needs the person. */
   private async commandsEnded(moment: string): Promise<DaemonEvent[]> {
     const events: DaemonEvent[] = [];
-    for (const result of await commandResults(this.home)
+    const results = await commandResults(this.home)
       .all()
-      .catch(() => [])) {
+      .catch(() => []);
+    // Said beside each ending, so one finishing is never told as all of them finishing.
+    const still = results.filter(
+      (each) => each.running === true && each.doneAt === undefined,
+    );
+    for (const result of results) {
       const key = `${result.at} ${result.argv.join(' ')}`;
       if (result.doneAt === undefined || result.doneAt < this.started) continue;
       if (this.ended.has(key)) continue;
       this.ended.add(key);
       events.push({
         kind: DAEMON_EVENT.NOTICE,
-        subject: `ntc_command_${Date.parse(result.at).toString(36)}`,
+        subject: `ntc_command_${shortDigest(key)}`,
         agent: 'memnox',
         agentName: 'Memnox',
-        notice: NOTICE_KIND.WATCHED,
-        summary: commandEnding(result),
+        notice: result.exitCode === 0 ? NOTICE_KIND.ENDED : NOTICE_KIND.WATCHED,
+        summary: [commandEnding(result), stillRunning(still)]
+          .filter((line) => line !== '')
+          .join(' '),
         at: moment,
       });
     }
@@ -105,13 +174,32 @@ export class NoticeWatcher {
       .filter((each) => each.answer === undefined)
       .map((each) => each.request.sessionId);
     const events: DaemonEvent[] = [];
-    for (const watch of open) {
+    for (const waiting of open) {
+      const watch = await this.bound(watches, waiting);
+      if (watch.sessionId === '') continue;
       const fired = watchFired(watch, await this.factsFor(watch, heldSessions));
       if (fired === null) continue;
       await watches.done(watch.id);
       events.push(await this.watchEvent(fired, moment));
     }
     return events;
+  }
+
+  /** A watch set on a session just started, tied to it as soon as that session shows up. */
+  private async bound(
+    watches: SessionWatches,
+    watch: SessionWatch,
+  ): Promise<SessionWatch> {
+    const awaiting = watch.awaiting;
+    if (awaiting === undefined || watch.sessionId !== '') return watch;
+    const place = basename(awaiting.repository);
+    const cards = await new SessionViews(this.home).list().catch(() => []);
+    const found = cards.find(
+      (card) =>
+        card.repository === place &&
+        (card.startedAt ?? card.lastActive ?? '') >= awaiting.since,
+    );
+    return found === undefined ? watch : watches.bind(watch, found.sessionId);
   }
 
   private async factsFor(
@@ -191,21 +279,76 @@ export class NoticeWatcher {
 
 /** How a command that ran on its own ended, plainly, with the last thing it printed when it failed. */
 function commandEnding(result: CommandResult): string {
-  const what =
-    result.argv[0] === 'login'
-      ? 'Connecting this Mac to the Memnox workspace'
-      : `memnox ${result.argv.slice(0, 2).join(' ')}`;
+  const what = commandWords(result);
   if (result.exitCode === 0) return `${what} is done; it worked.`;
   const lines = result.output.split('\n').filter((line) => line.trim() !== '');
   const last = lines[lines.length - 1]?.trim() ?? 'it stopped';
   return `${what} did not finish. It said: "${last.slice(0, 200)}".`;
 }
 
+/** Login by its purpose, and an onboarding by the agents it names, so the brain says which. */
+function commandWords(result: CommandResult): string {
+  if (result.argv[0] === 'login') return 'Connecting this Mac to the Memnox workspace';
+  if (result.argv[0] === 'agents' && result.argv[1] === 'onboard') {
+    const agents = result.argv.slice(2).filter((each) => !each.startsWith('-'));
+    return `Onboarding ${agents.length === 0 ? 'an agent' : agents.join(', ')}`;
+  }
+  return `memnox ${result.argv.slice(0, 2).join(' ')}`;
+}
+
+/** What has not ended yet, so it is never counted as done. */
+function stillRunning(still: readonly CommandResult[]): string {
+  if (still.length === 0) return '';
+  return `Still running, not done yet: ${still.map(commandWords).join('; ')}.`;
+}
+
 /** The facts as one plain sentence, said as they are when the brain cannot word them. */
 function sentenceFor(agent: string, notice: SessionNotice): string {
   if (notice.kind === NOTICE_KIND.COMMITTED) return `${agent} just made a commit.`;
+  if (notice.kind === NOTICE_KIND.WOULD_HAVE) {
+    const did = notice.wouldHave === DECISION_EFFECT.DENY ? 'refused' : 'asked you about';
+    return `${agent} just ran ${notice.action ?? 'something'}. Your rule ${notice.rule ?? ''} would have ${did} it, but Memnox is only watching on this Mac, so it went through.`;
+  }
   if (notice.kind === NOTICE_KIND.PUSHED) {
     return `${agent} just pushed${notice.target === undefined ? '' : ` to ${notice.target}`}.`;
   }
   return `${agent} finished a turn of about ${notice.minutes ?? 0} minutes and is waiting on you.`;
+}
+
+/** Most files named in one collision, so the sentence stays one sentence. */
+const MOST_FILES_NAMED = 3;
+
+/** One pair of sessions and the files they share, said plainly with who is writing. */
+function collisionEvent(
+  key: string,
+  shared: readonly Collision[],
+  named: (agent: string) => string,
+  moment: string,
+): DaemonEvent {
+  const agents = shared[0]?.agents ?? [];
+  const who = agents.map((agent) => named(agent.agentName));
+  const files = shared.map((each) => basename(each.target));
+  const listed = files.slice(0, MOST_FILES_NAMED).join(', ');
+  const more =
+    files.length > MOST_FILES_NAMED ? ` and ${files.length - MOST_FILES_NAMED} more` : '';
+  const writers = agents
+    .filter((agent) => agent.writing)
+    .map((agent) => named(agent.agentName));
+  const first = agents[0];
+  return {
+    kind: DAEMON_EVENT.NOTICE,
+    subject: `ntc_collision_${shortDigest(key)}`,
+    agent: first?.agentName ?? 'unknown',
+    agentName: who[0] ?? 'An agent',
+    notice: NOTICE_KIND.COLLISION,
+    ...(first === undefined ? {} : { sessionId: first.agentId }),
+    summary: `${who.join(' and ')} are working on the same files at once on this Mac: ${listed}${more}. ${writers.join(' and ')} ${writers.length > 1 ? 'are' : 'is'} writing.`,
+    at: moment,
+  };
+}
+
+/** The name the person chose for an agent, from its product name. */
+function nameOf(names: Awaited<ReturnType<typeof readNames>>, agent: string): string {
+  const id = agent.startsWith(AGENT_ID_PREFIX) ? agent : `${AGENT_ID_PREFIX}${agent}`;
+  return displayName(names, { id, kind: agent });
 }

@@ -44,6 +44,20 @@ interface Reach {
   clis: string[];
   /** CLIs signed in here, so any agent with a shell that runs them acts as the person. */
   signedIn: { cli: string; can: string }[];
+  /**
+   * Whether each agent stops to ask before it acts, and where its program came from, as the
+   * last kept scan read them. Left out for an agent that scan predates.
+   */
+  standing: AgentStanding[];
+}
+
+interface AgentStanding {
+  agent: string;
+  /** auto approves its own actions, asks stops for a person, unknown means nothing on disk says. */
+  approval?: string;
+  /** installed is where an installer puts programs; unusual is temp, Downloads or inside the work. */
+  installedFrom?: string;
+  signedBy?: string;
 }
 
 /** What the agents here can use, from the last scan and the CLIs Memnox watches. */
@@ -61,6 +75,14 @@ export async function readReach(home: string): Promise<Reach> {
     })),
     clis: (await watchedClis(home)).map((cli) => SPOKEN_CLI[cli] ?? cli),
     signedIn: await signedInOf(home),
+    standing: (snapshot?.agents ?? [])
+      .filter((agent) => agent.approval !== undefined || agent.host !== undefined)
+      .map((agent) => ({
+        agent: agentName(agent.id, agent.kind),
+        ...(agent.approval === undefined ? {} : { approval: agent.approval }),
+        ...(agent.host === undefined ? {} : { installedFrom: agent.host.location }),
+        ...(agent.host?.signer === undefined ? {} : { signedBy: agent.host.signer }),
+      })),
   };
 }
 

@@ -15,10 +15,12 @@ import {
   startCommand,
   type DisplayDelivery,
   type StartableAgent,
+  WorkBriefs,
 } from '@memnox/core';
 import { mainCheckoutOf } from './main-checkout';
 import { noteFocus } from './focus';
 import { textArg, type SessionToolDeps, type ToolArgs } from './read-tools';
+import { withBrief } from './work-tools';
 
 /**
  * Starting a new agent session out loud: "start Claude in memnox cloud on the failing test". It
@@ -41,30 +43,77 @@ export async function proposeStartTool(
   const task = textArg(args, 'task');
   if (task === undefined) return { proposed: false, said: NEEDS_TASK };
   const known = await knownRepositories(deps);
-  const repository = repositoryNamed(textArg(args, 'repository') ?? '', known);
-  if (repository === null) {
-    return {
-      proposed: false,
-      known: known.map((each) => basename(each)),
-      said: NO_SUCH_REPOSITORY,
-    };
-  }
+  const { text, brief, found } = await withBrief(deps, args, task, MOST_TASK_CHARS);
+  const chosen = await repositoryFor(deps, textArg(args, 'repository'), known, brief);
+  if (chosen === null) return noRepository(known);
   const said = textArg(args, 'said');
   const start = await new SessionStarts(deps.home).propose({
     agent,
     command,
-    repository,
-    task: task.slice(0, MOST_TASK_CHARS),
+    repository: chosen.path,
+    task: text,
+    ...(textArg(args, 'hold_credentials') === 'true' ? { holdCredentials: true } : {}),
+    ...(brief === undefined ? {} : { brief }),
     ...(said === undefined ? {} : { said }),
     at: deps.now().toISOString(),
   });
-  const named = basename(repository);
   return {
     proposed: true,
     start: start.id,
-    repository: named,
-    readBack: start.task,
+    repository: basename(chosen.path),
+    ...(chosen.from === undefined ? {} : { repositoryFrom: chosen.from }),
+    readBack: task,
+    ...(found === undefined ? {} : { found }),
+    ...(start.holdCredentials === true ? { holdsCredentials: true } : {}),
     said: READ_BACK,
+  };
+}
+
+/** Where the work goes, and how it was chosen when the person named no repository. */
+interface ChosenRepository {
+  path: string;
+  /** Said in the read back, so a guess can be corrected before anything starts. */
+  from?: string;
+}
+
+/**
+ * The repository they named, or with none named, the one the ticket lives in, and failing that
+ * the one their last session worked in.
+ */
+async function repositoryFor(
+  deps: SessionToolDeps,
+  named: string | undefined,
+  known: readonly string[],
+  brief: string | undefined,
+): Promise<ChosenRepository | null> {
+  if (named !== undefined) {
+    const path = repositoryNamed(named, known);
+    return path === null ? null : { path };
+  }
+  const ticket = brief === undefined ? null : await new WorkBriefs(deps.home).read(brief);
+  const fromTicket = ticket?.sources
+    .map((source) => source.link?.match(/github\.com\/[^/]+\/([^/#?]+)/)?.[1])
+    .find((name) => name !== undefined);
+  const byTicket = known.find((each) => basename(each) === fromTicket);
+  if (byTicket !== undefined)
+    return { path: byTicket, from: 'the repository its ticket is filed in' };
+  const hosts = (await new SessionHosts(deps.home).all())
+    .filter((host) => host.cwd !== undefined && isAbsolute(host.cwd))
+    .sort((a, b) => b.seenAt.localeCompare(a.seenAt));
+  const last = hosts
+    .map((host) => mainCheckoutOf(host.cwd ?? ''))
+    .find((each) => known.includes(each));
+  return last === undefined
+    ? null
+    : { path: last, from: 'the repository your last session worked in' };
+}
+
+/** The repositories it could see, so the voice offers the closest names rather than asking again. */
+function noRepository(known: readonly string[]): Record<string, unknown> {
+  return {
+    proposed: false,
+    known: known.map((each) => basename(each)),
+    said: NO_SUCH_REPOSITORY,
   };
 }
 
@@ -163,7 +212,7 @@ const NEEDS_TASK = 'Pass task: what the new session should do, in their words.';
 const NO_SUCH_REPOSITORY =
   'No repository on this Mac goes by that name. Offer the closest from known, by name.';
 const READ_BACK =
-  'Nothing has started. Read it back in a sentence, like "I\'ll start Claude Code in memnox cloud on the failing auth test. Shall I?", and call start_session with this id only after they say yes.';
+  'Nothing has started. Read it back once, as one whole sentence that ends in a courteous question, such as "Shall I start Codex in memnox macos to review the changes?" or "I can start Claude Code in memnox cloud on the failing auth test. Would you like me to go ahead?", varying the words. Say nothing before it and nothing after the question. Call start_session with this id only after they say yes.';
 const GONE =
   'That start is gone or more than five minutes old. Read it back again with propose_start.';
 const UNCONFIRMED =

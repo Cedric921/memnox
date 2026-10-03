@@ -72,6 +72,11 @@ export class SpokenInstructions implements SessionNotes {
     return instruction;
   }
 
+  /** Read back and still waiting on a yes, so a brain that lost the thread can still be told. */
+  async waiting(moment: string): Promise<SpokenInstruction[]> {
+    return (await this.proposed.all()).filter((each) => each.expiresAt > moment);
+  }
+
   /** The proposal said yes to, taken so it is sent once, or null when it is gone or stale. */
   async take(id: string, moment: string): Promise<SpokenInstruction | null> {
     const found = await this.proposed.read(id);
