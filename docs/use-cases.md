@@ -623,6 +623,7 @@ Ask in plain words. The agent calls a `memnox-session` tool and tells you the an
 | "Would `git push --force` be allowed here?" | `decisions` | the rules and remembered decisions that cover it, with nothing run |
 | "What did we decide about payment retries, and who said so?" | `memory` | what your workspace settled about it, each with who confirmed it, when and where it came from |
 | "Brief me on `src/payments` before you start" | `brief` | the decisions that bear on those paths, who owns them, which agent already holds them and what landed there lately |
+| "Read the brief your task names" | `work` | the ticket the voice handed it, what was said about it in Slack, and the settled decisions it must keep to, with what to do when they disagree |
 | "Undo what you did this session" | `rewind` | the working tree put back, after you approve it |
 
 Every tool but `rewind` only reads. None of them can allow, approve, trust, change the

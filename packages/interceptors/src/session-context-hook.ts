@@ -31,6 +31,10 @@ import {
   type DecisionSubject,
   type FactQuery,
   type ProtectionStop,
+  isWorkBriefId,
+  renderWorkBrief,
+  WORK_BRIEF_VAR,
+  WorkBriefs,
 } from '@memnox/core';
 
 import { CURSOR_EVENT } from './agent-edits';
@@ -114,6 +118,7 @@ export async function answerSessionStart(
   const text = [
     boundaryContext({ mode, rules, containment }),
     await memoryLine(deps.home),
+    await workBriefLine(deps.home, deps.env),
     fingerprint.told,
   ]
     .filter((each) => each !== '')
@@ -175,6 +180,17 @@ function sessionStartReply(
       additionalContext: text,
     },
   });
+}
+
+/**
+ * The work the person handed this session, read in before its first turn rather than left for it
+ * to fetch, so it starts knowing the ticket, what was said about it and the decisions that bind it.
+ */
+async function workBriefLine(home: string, env: NodeJS.ProcessEnv): Promise<string> {
+  const id = env[WORK_BRIEF_VAR];
+  if (id === undefined || !isWorkBriefId(id)) return '';
+  const brief = await new WorkBriefs(home).read(id).catch(() => null);
+  return brief === null ? '' : renderWorkBrief(brief);
 }
 
 /** Said once a session, so an agent knows to ask what was settled before it plans a change. */

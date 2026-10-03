@@ -157,6 +157,7 @@ with eight tools:
 | "Would `git push --force` be allowed here?" | `decisions` |
 | "What did we decide about retries, and who said so?" | `memory` |
 | "Brief me on `src/payments` before you start" | `brief` |
+| "Read the brief your task names" | `work` |
 | "Record how this repository's code is written" | `fingerprint` |
 | "Undo what you did this session" | `rewind` |
 

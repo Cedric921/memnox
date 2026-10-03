@@ -17,6 +17,8 @@ import {
   MOST_DECISIONS_PER_CALL,
   MOST_FACTS_PER_CALL,
   writeWorkspaceMemory,
+  WORK_BRIEF_VAR,
+  WorkBriefs,
   type WorkspaceFact,
   NOTICE_MODE,
   renderConfig,
@@ -130,6 +132,47 @@ describe('the boundary, when a session starts', () => {
     expect(text).toContain('Priya decided payments are reviewed');
     expect(text).toContain(`Project boundary: ${deps.cwd}`);
     expect(text.length).toBeLessThanOrEqual(MOST_BOUNDARY_CHARS);
+  });
+
+  it('hands a session started on a ticket its whole brief before the first turn', async () => {
+    const base = await machine();
+    await new WorkBriefs(base.home).write({
+      id: 'wrk_abc123',
+      about: 'Fix auth token refresh',
+      at: NOW.toISOString(),
+      sources: [
+        {
+          title: 'Fix auth token refresh',
+          excerpt: 'Refresh before the call fails.',
+          content: 'Refresh before the call fails. Acceptance: never log the token.',
+          system: 'linear',
+          at: '2026-09-20T09:00:00.000Z',
+          link: 'https://linear.app/acme/issue/ENG-12',
+        },
+      ],
+      decisions: [
+        { statement: 'Refresh stays in the session client.', settled: 'a decision' },
+      ],
+      withheld: 0,
+    });
+    const deps = { ...base, env: { ...base.env, [WORK_BRIEF_VAR]: 'wrk_abc123' } };
+    const text = (
+      JSON.parse(await answerSessionStart({ sessionId: 's1' }, deps)) as {
+        hookSpecificOutput: { additionalContext: string };
+      }
+    ).hookSpecificOutput.additionalContext;
+    expect(text).toContain('Workspace brief wrk_abc123, for: Fix auth token refresh.');
+    expect(text).toContain(
+      '"Refresh before the call fails. Acceptance: never log the token."',
+    );
+    expect(text).toContain('its code fingerprint and the rules in force on this session');
+    expect(text).toContain('Decision (a decision): Refresh stays in the session client.');
+    expect(text).toContain('stop before you change anything and ask your person');
+
+    const forged = { ...base, env: { ...base.env, [WORK_BRIEF_VAR]: '../../account' } };
+    expect(await answerSessionStart({ sessionId: 's1' }, forged)).not.toContain(
+      'Workspace brief',
+    );
   });
 
   /* A stop turns every seam off, and a session that heard nothing would assume it was
