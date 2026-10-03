@@ -240,6 +240,12 @@
     "id": "claude-code",
     "kind": "claude-code",
     "version": "2.1",
+    "approval": "auto",
+    "host": {
+     "location": "installed",
+     "signature": "signed",
+     "signer": "Developer ID Application: Example Inc (ABCDE12345)"
+    },
     "surfaces": [
      {
       "kind": "shell",
@@ -320,7 +326,13 @@
       "git",
       "network",
       "shell"
-     ]
+     ],
+     "approval": "auto",
+     "host": {
+      "location": "installed",
+      "signature": "signed",
+      "signer": "Developer ID Application: Example Inc (ABCDE12345)"
+     }
     }
    },
    {

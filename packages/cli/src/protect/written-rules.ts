@@ -8,6 +8,7 @@ import {
   TOOL_CLASS,
   TOOL_EFFECT,
   delegations,
+  describeHandedReach,
   discover,
   findUnusedGrants,
   handOverVerdict,
@@ -262,7 +263,7 @@ function newAllowRules(
 ): {
   name: string;
   description: string;
-  match: { actions: string[] };
+  match: { actions: string[]; targets?: string[] };
   decision: { effect: typeof DECISION_EFFECT.ALLOW; reason: string };
 }[] {
   const taken = new Set(existing.map((rule) => rule.name));
@@ -270,8 +271,12 @@ function newAllowRules(
     .filter((each) => !taken.has(allowRuleName(each.action)))
     .map((each) => ({
       name: allowRuleName(each.action),
-      description: `Handed over after ${each.approvals} approvals and no refusal.`,
-      match: { actions: [each.action] },
+      description: `Handed over after ${each.approvals} approvals and no refusal, ${describeHandedReach(each)}.`,
+      // The targets the yeses named and no others, so the rule reaches no further than they did.
+      match: {
+        actions: [each.action],
+        ...(each.targets.length === 0 ? {} : { targets: [...each.targets] }),
+      },
       decision: { effect: DECISION_EFFECT.ALLOW, reason: each.because },
     }));
 }
@@ -298,7 +303,12 @@ async function writeAllowRules(
 
   flow.list(
     `Written to ${path}`,
-    added.map((rule) => ({ tone: TONE.OK, text: `allow  ${rule.match.actions[0]}` })),
+    added.map((rule) => ({
+      tone: TONE.OK,
+      text: `allow  ${rule.match.actions[0]}`,
+      detail:
+        rule.match.targets === undefined ? [] : [`on ${rule.match.targets.join(', ')}`],
+    })),
   );
   flow.close(`Wrote ${added.length} allow rule(s).`);
   // Said out loud, because an allow rule is the one change that widens what may happen.

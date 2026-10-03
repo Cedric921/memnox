@@ -1,5 +1,7 @@
 import { join } from 'node:path';
 import { agentRefOf, type AgentRef, type DiscoveredAgent } from './agent';
+import { agentHostOf, type HostInspector } from './agent-host';
+import { approvalPostureOf } from './approval-posture';
 import { findBrowserAutomation, type BrowserFinding } from './browser';
 import { chainsFor, type AgentChains } from './composition';
 import {
@@ -16,6 +18,7 @@ import type { AgentDetector, DetectionContext } from './detectors/detector';
 import { DEFAULT_DETECTORS } from './detectors/index';
 import { SENSITIVITY, SURFACE_KIND } from './discovery.constants';
 import { harnessOf, type Harness } from './harness';
+import { discoverHooks, type DiscoveredHook } from './hooks';
 import { probeNetwork, SANDBOX_PATHS, type NetworkProbe } from './network';
 import type { MachineReader, McpLister } from './ports';
 import {
@@ -86,6 +89,8 @@ export interface DiscoveryReport {
    * out of `read`, where three hundred paths would bury the credentials.
    */
   definitions: DiscoveredSkill[];
+  /** Commands the agents here run on their own events, outside their own permission prompt. */
+  hooks: DiscoveredHook[];
 }
 
 export interface DiscoveryOptions {
@@ -101,6 +106,8 @@ export interface DiscoveryOptions {
    * runs somebody else's code. Omitted, every MCP surface reports no tools.
    */
   lister?: McpLister;
+  /** Supplied, each agent's binary is asked who signed it. Omitted, the signer is unknown. */
+  inspector?: HostInspector;
 }
 
 /**
@@ -112,6 +119,9 @@ export async function discover(
   options: DiscoveryOptions,
 ): Promise<DiscoveryReport> {
   const detected = await runDetectors(reader, options);
+  detected.agents = await Promise.all(
+    detected.agents.map((agent) => withStanding(agent, reader, options)),
+  );
   const { surfaces, probed } = await probeServers(detected.surfaces, options.lister);
   const { resources, read } = await scanResources(reader, options.projectDirs ?? []);
   // Derived from the surfaces already found, never asserted on its own.
@@ -148,6 +158,7 @@ type MachineFacts = Pick<
   | 'browsers'
   | 'envFiles'
   | 'definitions'
+  | 'hooks'
 >;
 
 async function readMachineFacts(
@@ -175,6 +186,7 @@ async function readMachineFacts(
     envFiles: await findEnvFiles(reader, projectDirs),
     // The work as well as home: a definition in a repository is installed by cloning it.
     definitions: await discoverDefinitions(reader, [reader.homeDir(), ...projectDirs]),
+    hooks: await discoverHooks(reader, projectDirs),
   };
 }
 
@@ -199,6 +211,22 @@ async function runDetectors(
     if (harness !== null) detected.harnesses.push(harness);
   }
   return detected;
+}
+
+/** How it decides and what it runs as, read after detection so no detector needs to know. */
+async function withStanding(
+  agent: DiscoveredAgent,
+  reader: MachineReader,
+  options: DiscoveryOptions,
+): Promise<DiscoveredAgent> {
+  const projectDirs = options.projectDirs ?? [];
+  const approval = await approvalPostureOf(agent.kind, reader, projectDirs);
+  const host = await agentHostOf(agent.kind, reader, {
+    path: options.env?.['PATH'],
+    projectDirs,
+    ...(options.inspector === undefined ? {} : { inspector: options.inspector }),
+  });
+  return { ...agent, approval, ...(host === null ? {} : { host }) };
 }
 
 async function sandboxMarkers(reader: MachineReader): Promise<string[]> {

@@ -8,6 +8,7 @@ import {
   describeLevel,
   ENFORCEMENT_MODE,
   handable,
+  handOverVerdict,
   interruptions,
   loadOrCreateConfig,
   LocalGate,
@@ -181,10 +182,16 @@ function renderReady(context: CliContext, ready: readonly Delegation[]): void {
         each.because,
         handable(each)
           ? `memnox protect --allow ${each.action}  (or keep being asked)`
-          : 'stays a question: nothing hands this one over',
+          : `stays a question: ${heldBecause(each)}`,
       ],
     })),
   );
+}
+
+/** The same sentence `--allow` would print for it, so the screen and the command agree. */
+function heldBecause(each: Delegation): string {
+  const verdict = handOverVerdict(each.action, [each]);
+  return verdict.ready ? 'nothing holds it back' : verdict.because;
 }
 
 function renderVerdict(

@@ -3,6 +3,7 @@ import {
   CHECK,
   CHECK_NAME,
   checkInstallation,
+  HOOK_SEAT,
   summarizeHealth,
   type HealthFacts,
 } from '../src/discovery/health';
@@ -31,6 +32,7 @@ const HEALTHY: HealthFacts = {
   waitingApprovals: 0,
   heldLeases: 0,
   spentBudgets: [],
+  claudeHook: 'managed',
 };
 
 const check = (facts: Partial<HealthFacts>, name: string) =>
@@ -349,5 +351,31 @@ describe('rules the seams load, and files they do not', () => {
 
     expect(check.detail).toContain('one.yaml');
     expect(check.detail).toContain('2 more');
+  });
+});
+
+describe('where the Claude Code hook lives', () => {
+  it('is fine in managed settings, and fine but reachable in the user file', () => {
+    expect(check({ claudeHook: HOOK_SEAT.MANAGED }, CHECK_NAME.HOOKS)?.state).toBe(
+      CHECK.OK,
+    );
+    const user = check({ claudeHook: HOOK_SEAT.USER }, CHECK_NAME.HOOKS);
+    expect(user?.state).toBe(CHECK.OK);
+    expect(user?.detail).toContain('memnox protect --managed');
+  });
+
+  it('is broken in both, since every call is then ruled on twice', () => {
+    const both = check({ claudeHook: HOOK_SEAT.BOTH }, CHECK_NAME.HOOKS);
+    expect(both?.state).toBe(CHECK.BROKEN);
+    expect(both?.fix).toBe('memnox protect --managed');
+  });
+
+  it('is inert with no hook, and says nothing is wrong where Claude Code is absent', () => {
+    expect(check({ claudeHook: HOOK_SEAT.NONE }, CHECK_NAME.HOOKS)?.state).toBe(
+      CHECK.INERT,
+    );
+    expect(check({ claudeHook: HOOK_SEAT.ABSENT }, CHECK_NAME.HOOKS)?.state).toBe(
+      CHECK.OK,
+    );
   });
 });

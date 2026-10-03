@@ -3,6 +3,8 @@ import { readdir, readFile, stat } from 'node:fs/promises';
 import { delimiter, join, resolve } from 'node:path';
 
 import {
+  HOOK_SEAT,
+  type HookSeat,
   CONFIG_FORMAT,
   configPathFor,
   formatOf,
@@ -44,6 +46,8 @@ import { serviceState } from './daemon/service';
 import { withEvents } from './event-store';
 import { POLICY_FILES } from './policy-path';
 import { policyRegistryPath } from './policy-registry';
+import { CLAUDE_SETTINGS } from './protect/claude-hook';
+import { hookSeatOf, managedSettingsPath } from './protect/managed-hook';
 
 /** Reads the machine once for `doctor`, so every health check downstream stays a pure function. */
 
@@ -94,6 +98,7 @@ export async function readHealth(
   dir: string,
   env: NodeJS.ProcessEnv = process.env,
   now: Date = new Date(),
+  managed: string | null = managedSettingsPath(),
 ): Promise<HealthFacts> {
   const config = await loadOrCreateConfig(home);
   // What the seams load, which is a different list from what `policy test` reads.
@@ -113,7 +118,31 @@ export async function readHealth(
     enrolled: (await readAccount(home)) !== null,
     daemonStartsItself: serviceState(home).installed,
     ...(await readLedgerCounts(home)),
+    claudeHook: await readClaudeHookSeat(home, managed),
   };
+}
+
+/** Where Claude Code's hook is, or absent where Claude Code has never run here. */
+async function readClaudeHookSeat(
+  home: string,
+  managed: string | null,
+): Promise<HookSeat> {
+  const claudeHere =
+    (await exists(join(home, '.claude'))) || (await exists(join(home, '.claude.json')));
+  if (!claudeHere) return HOOK_SEAT.ABSENT;
+  return hookSeatOf(
+    await readOrNull(join(home, CLAUDE_SETTINGS)),
+    managed === null ? null : await readOrNull(managed),
+  );
+}
+
+async function readOrNull(path: string): Promise<string | null> {
+  try {
+    return await readFile(path, 'utf8');
+  } catch {
+    // Absent or unreadable both mean no hook can be read from it.
+    return null;
+  }
 }
 
 async function isDaemonAnswering(home: string): Promise<boolean> {

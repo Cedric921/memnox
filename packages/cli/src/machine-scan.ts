@@ -3,11 +3,13 @@ import { join } from 'node:path';
 import {
   discover,
   NodeMachineReader,
+  NodeHostInspector,
   NodeMcpLister,
   NodeSnapshotStore,
   snapshotOf,
   type DiscoveryReport,
   type EnvironmentSnapshot,
+  type HostInspector,
   type MachineReader,
   type McpLister,
   type SnapshotStore,
@@ -35,6 +37,10 @@ export interface ScanSeams {
   now: () => string;
   /** Rule files the runtime would read, so "no rule covers this" is checkable offline. */
   policyFiles: () => Promise<string[]>;
+  /** The environment an agent would start with, which is where PATH finds its binary. */
+  env?: NodeJS.ProcessEnv;
+  /** Asks who signed each agent's binary. Absent, the signer reads as unknown. */
+  inspector?: HostInspector;
 }
 
 export function defaultScanSeams(cwd: string = process.cwd()): ScanSeams {
@@ -46,6 +52,8 @@ export function defaultScanSeams(cwd: string = process.cwd()): ScanSeams {
     projectDirs: [cwd],
     now: () => new Date().toISOString(),
     policyFiles: () => readPolicyRegistry(policyRegistryPath(home)),
+    env: process.env,
+    inspector: new NodeHostInspector(),
   };
 }
 
@@ -66,6 +74,8 @@ export async function scanMachine(
   const report = await discover(seams.reader, {
     now,
     projectDirs: seams.projectDirs,
+    ...(seams.env === undefined ? {} : { env: seams.env }),
+    ...(seams.inspector === undefined ? {} : { inspector: seams.inspector }),
     // Starting somebody else's server is the one thing here that runs code.
     ...(options.probe ? { lister: seams.lister() } : {}),
   });

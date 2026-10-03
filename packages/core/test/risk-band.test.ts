@@ -16,6 +16,7 @@ function report(overrides: Partial<DiscoveryReport> = {}): DiscoveryReport {
     harnesses: [],
     combined: [],
     definitions: [],
+    hooks: [],
     browsers: [],
     envFiles: [],
     authenticated: [],
