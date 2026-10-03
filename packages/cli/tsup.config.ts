@@ -1,4 +1,7 @@
+import { cpSync } from 'node:fs';
+import { join } from 'node:path';
 import { defineConfig } from 'tsup';
+import { KNOWLEDGE_DIR, KNOWLEDGE_SOURCES } from './src/operator/knowledge-sources';
 
 export default defineConfig({
   // Every binary the plan installs ships from this package: npm exposes the bins of
@@ -17,4 +20,11 @@ export default defineConfig({
   format: ['esm'],
   clean: true,
   banner: { js: '#!/usr/bin/env node' },
+  // The VS Code extension ships inside memnox, so `protect --vscode` installs the version beside it.
+  onSuccess: async () => {
+    cpSync('../vscode/dist/extension.js', 'dist/vscode/extension.js');
+    // The project's own documents ship too, so the voice answers about Memnox from what it says.
+    for (const [source, name] of Object.entries(KNOWLEDGE_SOURCES))
+      cpSync(join('../..', source), join('dist', KNOWLEDGE_DIR, name));
+  },
 });
