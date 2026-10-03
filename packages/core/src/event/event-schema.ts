@@ -44,6 +44,8 @@ export const EVENT_SCHEMA = {
     agent: { type: 'string', minLength: 1 },
     actorType: { enum: Object.values(ACTOR_TYPE) },
     principal: { type: 'string' },
+    subagent: { type: 'string' },
+    subagentType: { type: 'string' },
     surface: { enum: Object.values(EVENT_SURFACE) },
     operation: { type: 'string', minLength: 1 },
     target: { type: 'string' },

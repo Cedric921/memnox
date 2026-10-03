@@ -20,6 +20,7 @@ import {
   readPullRequest,
   type SqliteEventStore,
   type MemnoxEvent,
+  delegationChain,
 } from '@memnox/core';
 import type { CliContext } from '../cli-context';
 import { withEvents } from '../event-store';
@@ -182,7 +183,8 @@ function decisionRows(event: MemnoxEvent): FlowRow[] {
 // The actor type only when the name does not already say it, or "an agent (agent)".
 function describeActor(event: MemnoxEvent): string {
   const named = event.agent.toLowerCase().includes(event.actorType.toLowerCase());
-  return named ? event.agent : `${event.agent} (${event.actorType})`;
+  const chain = delegationChain(event);
+  return named ? chain : `${chain} (${event.actorType})`;
 }
 
 function describeRule(event: MemnoxEvent): string {

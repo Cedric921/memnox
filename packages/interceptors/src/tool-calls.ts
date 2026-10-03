@@ -31,10 +31,12 @@ import {
   changeIn,
   CODEX_PATCH_TOOL,
   cwdOf,
+  delegationOf,
   fieldsOf,
   firstText,
   folderOf,
   sessionOf,
+  type Delegation,
   type HookFields,
 } from './hook-payload';
 import { EGRESS_REQUEST_ACTION } from './tool-hook.constants';
@@ -73,6 +75,8 @@ export interface ToolCall {
   nativeAsk: boolean;
   /** What this event reads as a go-ahead, where silence would be read as a refusal. */
   allowReply?: string;
+  /** The helper the agent handed this call to, where the host names one. */
+  delegation?: Delegation;
 }
 
 /** Tools that read one file or folder by path. */
@@ -357,7 +361,13 @@ function baseOf(input: BaseInput): ToolCall {
     ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
     requests: [],
     nativeAsk: false,
+    ...delegated(input.hook),
   };
+}
+
+function delegated(hook: HookFields): { delegation?: Delegation } {
+  const delegation = delegationOf(hook);
+  return delegation.subagent === undefined ? {} : { delegation };
 }
 
 function withRequests(base: ToolCall, requests: ToolRequest[]): ToolCall | null {

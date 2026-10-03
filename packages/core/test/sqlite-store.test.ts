@@ -45,6 +45,8 @@ describe('the event store', () => {
     const db = await store();
     const original = event({
       principal: 'tresor',
+      subagent: 'a1b2c3d4e5f6',
+      subagentType: 'Explore',
       target: 'memnox/runtime#41',
       shadowEffect: 'allow',
       rule: { name: 'no-merge-on-friday', layer: 'project', file: 'p.yaml', line: 12 },

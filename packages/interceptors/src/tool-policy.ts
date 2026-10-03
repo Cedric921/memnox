@@ -308,6 +308,7 @@ export function toolEventFor(
     sessionId: context.sessionId,
     agent: context.agent,
     actorType: ACTOR_TYPE.AGENT,
+    ...(call.delegation ?? {}),
     surface: surfaceOf(ruling.action),
     operation: ruling.action,
     class: ruling.class,

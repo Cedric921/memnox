@@ -13,6 +13,7 @@ import {
   type DecisionEffect,
   type EventQuery,
   type MemnoxEvent,
+  helperOf,
 } from '@memnox/core';
 
 import type { CliContext } from '../cli-context';
@@ -59,9 +60,15 @@ function cells(context: CliContext, event: MemnoxEvent): string[] {
     timeOfDay(event.at),
     `${style.symbol(event.effect)}${style.effect(event.effect, event.effect)}`,
     // "preview" and "production" are the words that make a deploy line readable.
-    `${what}${verbNote(event.operation)}`,
+    `${what}${verbNote(event.operation)}${helperNote(context, event)}`,
     outcome,
   ];
+}
+
+/** Which helper did it, since a session's rows are otherwise all filed under its agent. */
+function helperNote(context: CliContext, event: MemnoxEvent): string {
+  if (event.subagent === undefined) return '';
+  return context.style.dim(`  ${helperOf(event.subagent, event.subagentType)}`);
 }
 
 function render(context: CliContext, events: readonly MemnoxEvent[]): void {

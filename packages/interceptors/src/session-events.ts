@@ -29,10 +29,12 @@ import { EDIT_HOOK_EVENT, EDIT_TOOLS } from './edit-hook';
 import {
   CODEX_PATCH_TOOL,
   cwdOf,
+  delegationOf,
   fieldsOf,
   firstText,
   folderOf,
   sessionOf,
+  type Delegation,
   type HookFields,
 } from './hook-payload';
 
@@ -63,6 +65,8 @@ export interface SessionEvent {
   input?: Record<string, unknown>;
   /** What the person asked, on a `prompt` event, read for a decision it names. */
   prompt?: string;
+  /** The helper whose tool just ran, where the host names one. */
+  delegation?: Delegation;
 }
 
 /** Which agent sent a pause and which pause it is, by the event name each one uses. */
@@ -120,10 +124,12 @@ export function sessionEventOf(payload: unknown): SessionEvent | null {
   if (pause.moment !== SESSION_MOMENT.AFTER_TOOL) return base;
   const tool = hook['tool_name'];
   const input = fieldsOf(hook['tool_input']);
+  const delegation = delegationOf(hook);
   return {
     ...base,
     ...(typeof tool === 'string' ? { tool } : {}),
     ...(input === null ? {} : { input }),
+    ...(delegation.subagent === undefined ? {} : { delegation }),
   };
 }
 
@@ -317,6 +323,7 @@ function fileRow(input: FileRowInput): MemnoxEvent {
     sessionId: event.sessionId,
     agent: input.agent,
     actorType: ACTOR_TYPE.AGENT,
+    ...(event.delegation ?? {}),
     surface: EVENT_SURFACE.FILESYSTEM,
     operation: input.operation,
     class: input.toolClass,

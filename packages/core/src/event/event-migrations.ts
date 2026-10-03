@@ -37,6 +37,8 @@ export const IMMUTABLE_COLUMNS = [
   'bundleHash',
   'conditionsInForce',
   'decisionIds',
+  'subagent',
+  'subagentType',
 ] as const;
 
 /** The column a held call's release fills in, and the only one that may change. */
@@ -150,6 +152,15 @@ export const MIGRATIONS: readonly Migration[] = [
     version: 5,
     sql: `
       ALTER TABLE events ADD COLUMN decisionIds TEXT;
+      DROP TRIGGER IF EXISTS events_no_update;
+      ${appendOnlyTrigger()}
+    `,
+  },
+  {
+    version: 6,
+    sql: `
+      ALTER TABLE events ADD COLUMN subagent TEXT;
+      ALTER TABLE events ADD COLUMN subagentType TEXT;
       DROP TRIGGER IF EXISTS events_no_update;
       ${appendOnlyTrigger()}
     `,

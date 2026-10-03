@@ -37,6 +37,8 @@ Published as JSON Schema at `https://memnox.dev/schema/event-v1.json`, and expor
 | Field | Notes |
 |---|---|
 | `principal` | whose authority it ran under |
+| `subagent` | the helper the agent handed this to, by the id its host gave it. Absent is the agent's own turn |
+| `subagentType` | what kind of helper, as the host named it, e.g. `Explore` |
 | `target` | a path, a branch, a host. Never a payload |
 | `shadowEffect` | what enforce would have said, when the mode stopped it applying |
 | `rule` | `{ name, layer, file, line }` — enough to open the file |

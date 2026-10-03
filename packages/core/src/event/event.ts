@@ -74,6 +74,13 @@ export interface MemnoxEvent {
   actorType: ActorType;
   /** The person whose authority this ran under, where one is known. */
   principal?: string;
+  /**
+   * The helper the agent handed this to, by the id its host gave it. Absent means the
+   * agent's own turn: a session busy through three helpers is otherwise one agent doing everything.
+   */
+  subagent?: string;
+  /** What kind of helper, as the host named it, e.g. "Explore". */
+  subagentType?: string;
 
   surface: EventSurface;
   /** What was attempted, e.g. "github.merge_pull_request" or "rm". */
