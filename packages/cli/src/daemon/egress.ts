@@ -17,7 +17,6 @@ import {
 } from '@memnox/core';
 import {
   containmentFor,
-  EGRESS_DEFAULT_PORT,
   EgressSeam,
   HookAuthorizer,
   recordEgress,
@@ -122,17 +121,15 @@ export class DaemonEgress {
     await rm(egressStatePath(this.home), { force: true });
   }
 
-  /** The usual port first, then any free one, since another proxy may hold 8888. */
+  /** Any free port, because a run reads it from the state file and 8888 is Jupyter's. */
   private async listen(seam: EgressSeam): Promise<EgressProxy | null> {
     const start = this.options.start ?? startEgressProxy;
-    for (const port of [EGRESS_DEFAULT_PORT, 0]) {
-      try {
-        return await start({ seam, port, log: this.options.log });
-      } catch (err) {
-        this.options.log(`The egress proxy could not listen on ${port}: ${String(err)}`);
-      }
+    try {
+      return await start({ seam, port: 0, log: this.options.log });
+    } catch (err) {
+      this.options.log(`The egress proxy could not listen: ${String(err)}`);
+      return null;
     }
-    return null;
   }
 }
 

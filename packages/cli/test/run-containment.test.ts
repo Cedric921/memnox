@@ -296,7 +296,7 @@ describe('the hint toward --untrusted', () => {
 });
 
 describe('the daemon holding the egress proxy', () => {
-  it('starts with the daemon, takes another port when 8888 is held, and says where', async () => {
+  it('starts with the daemon on a port the system picks, never a fixed one, and says where', async () => {
     const dir = await home();
     const tried: number[] = [];
     const egress = new DaemonEgress(dir, {
@@ -304,13 +304,12 @@ describe('the daemon holding the egress proxy', () => {
       now: () => NOW,
       start: async (options) => {
         tried.push(options.port);
-        if (options.port !== 0) throw new Error('EADDRINUSE');
         expect(options.seam).toBeInstanceOf(EgressSeam);
         return { port: 40123, close: async () => undefined };
       },
     });
     expect(await egress.start()).toBe(40123);
-    expect(tried).toEqual([8888, 0]);
+    expect(tried).toEqual([0]);
     expect(await daemonEgressPort(dir, () => true)).toBe(40123);
     // A daemon that died without stopping is not leaned on.
     expect(await daemonEgressPort(dir, () => false)).toBeNull();
@@ -321,7 +320,7 @@ describe('the daemon holding the egress proxy', () => {
     const close = vi.fn(async () => undefined);
     const egress = new DaemonEgress(dir, {
       log: () => undefined,
-      start: async () => ({ port: 8888, close }),
+      start: async () => ({ port: 40123, close }),
     });
     await egress.start();
     await egress.stop();

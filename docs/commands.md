@@ -657,8 +657,9 @@ was served or ended is never started again because a config was rewritten.
 ### `memnox daemon`
 Holds the rules in one process so an interceptor pays a connect instead of a file
 read. Optional: an interceptor that cannot reach it evaluates in process instead.
-It also runs the egress proxy on `127.0.0.1:8888` (any free port when that is taken),
-bounded in connections and idle time, started and stopped with it.
+It also runs the egress proxy on a free loopback port the system picks, so it never
+takes a port another tool expects. `memnox run` reads which one from the daemon. The
+proxy is bounded in connections and idle time, and starts and stops with the daemon.
 
 ## What happened
 
