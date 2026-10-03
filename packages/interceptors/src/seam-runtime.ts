@@ -21,7 +21,7 @@ import {
   type LeaseHolder,
   type WrittenRegion,
 } from '@memnox/core';
-import { remoteIdentityOf } from './git-branch';
+import { projectIdentityOf, remoteIdentityOf } from './git-branch';
 import { HookAuthorizer } from './hook-authorizer';
 import { readHookConfig } from './hook-config';
 import { loadHookGate } from './hook-gate-loader';
@@ -102,6 +102,7 @@ export function buildLeases(
   // The daemon watches the repositories seams have
   // seen, so an agent with no hooks is seen too.
   rememberRepository(homedir(), root);
+  const remote = remoteIdentityOf(root);
 
   return {
     gate: new LeaseGate({
@@ -112,10 +113,12 @@ export function buildLeases(
         globalThis.fetch,
         SHARED_LEASE_TIMEOUT_MS,
         // Named by its remote, so two clones of one project meet and two projects named alike do not.
-        remoteIdentityOf(root),
+        remote,
       ),
       // This machine's register serves every checkout on it, so each lease says which.
       repository: root,
+      // And which project, so two worktrees of one repository meet here as they do in the workspace.
+      ...withProject(projectIdentityOf(root, remote)),
       ...(unattended === undefined
         ? { prompt: new TtyLeasePrompt() }
         : { ceilingMs: unattended.waitMs }),
@@ -127,6 +130,10 @@ export function buildLeases(
     repositoryRoot: root,
     isDirectory: (path: string) => isDirectoryIn(root, path),
   };
+}
+
+function withProject(project: string | undefined): { project?: string } {
+  return project === undefined ? {} : { project };
 }
 
 /**

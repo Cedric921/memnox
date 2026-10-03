@@ -107,6 +107,7 @@ export class LeaseRegistry {
       const wanted = {
         path: request.path,
         ...(request.repository === undefined ? {} : { repository: request.repository }),
+        ...(request.project === undefined ? {} : { project: request.project }),
         ...regionFields(request.region),
       };
       const overlapping = standing.filter((lease) => regionsMeet(lease, wanted));
@@ -150,6 +151,7 @@ export class LeaseRegistry {
           path: held.path,
           holder: by,
           ...(held.repository === undefined ? {} : { repository: held.repository }),
+          ...(held.project === undefined ? {} : { project: held.project }),
         },
         now,
       );

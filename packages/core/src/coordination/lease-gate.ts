@@ -41,6 +41,8 @@ export interface LeasePrompt {
     wanted: string,
     moment: string,
     waitMs: number,
+    /** The asker's checkout, so a holder in another worktree is named by where it is. */
+    from?: string,
   ): Promise<LeaseAsked | null>;
 }
 
@@ -89,6 +91,8 @@ export interface LeaseGateDeps {
   region?: (path: string) => Promise<WrittenRegion>;
   /** The checkout this gate claims in, so one machine's register keeps its repositories apart. */
   repository?: string;
+  /** What every checkout of this repository shares, so two worktrees of it meet. */
+  project?: string;
   /** The clock, injected so a replay gives the same answer twice. */
   now: () => string;
   sleep?: (ms: number) => Promise<void>;
@@ -190,6 +194,7 @@ export class LeaseGate {
       minutes,
       ...(region === undefined ? {} : { region }),
       ...(this.deps.repository === undefined ? {} : { repository: this.deps.repository }),
+      ...(this.deps.project === undefined ? {} : { project: this.deps.project }),
     };
     const first = await this.deps.registry.take(request, this.deps.now());
     if (first.outcome === LEASE_OUTCOME.TAKEN)
@@ -209,7 +214,7 @@ export class LeaseGate {
     return {
       outcome: LEASE_GATE.REFUSED,
       holding: held.holding,
-      message: `Stood down: ${describeLease(held.holding, this.deps.now())}`,
+      message: `Stood down: ${describeLease(held.holding, this.deps.now(), this.deps.repository)}`,
     };
   }
 
@@ -265,7 +270,13 @@ export class LeaseGate {
   ): Promise<LeaseAsked | null> {
     if (this.deps.prompt === undefined) return null;
     try {
-      return await this.deps.prompt.ask(holding, path, this.deps.now(), budget);
+      return await this.deps.prompt.ask(
+        holding,
+        path,
+        this.deps.now(),
+        budget,
+        this.deps.repository,
+      );
     } catch {
       // A prompt that threw is a prompt nobody saw; wait it out rather than guessing.
       return null;
@@ -296,7 +307,7 @@ export class LeaseGate {
     return {
       outcome: LEASE_GATE.TIMED_OUT,
       holding: held.holding,
-      message: `${describeLease(held.holding, this.deps.now())} and did not let go. Wait, or take it with "memnox lock ${held.request.path}".`,
+      message: `${describeLease(held.holding, this.deps.now(), this.deps.repository)} and did not let go. Wait, or take it with "memnox lock ${held.request.path}".`,
     };
   }
 

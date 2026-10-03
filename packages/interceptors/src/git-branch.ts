@@ -145,6 +145,25 @@ export function remoteIdentityOf(root: string): string | undefined {
   return repositoryIdentity(git(['-C', root, 'remote', 'get-url', 'origin']));
 }
 
+/**
+ * What every checkout of one repository shares: its remote, or with none the git
+ * directory its worktrees have in common. Undefined outside a repository.
+ */
+export function projectIdentityOf(
+  root: string,
+  remote: string | undefined = remoteIdentityOf(root),
+): string | undefined {
+  if (remote !== undefined) return remote;
+  const common = git([
+    '-C',
+    root,
+    'rev-parse',
+    '--path-format=absolute',
+    '--git-common-dir',
+  ]);
+  return common ?? undefined;
+}
+
 const localCheckout: Checkout = {
   currentBranch: () => git(['symbolic-ref', '--short', 'HEAD']),
   remoteUrl: (remote) => git(['remote', 'get-url', remote]),
