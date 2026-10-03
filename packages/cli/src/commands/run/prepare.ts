@@ -23,6 +23,8 @@ import {
   ENV_PARENT_AGENTS,
   parentAgentsOf,
   SESSION_VAR,
+  isWorkBriefId,
+  WORK_BRIEF_VAR,
 } from '@memnox/core';
 import {
   DEFAULT_AGENT_NAME,
@@ -76,6 +78,12 @@ export interface RunDeps {
   familiarity?: (home: string, root: string) => Familiarity | null;
   egress?: EgressSeams;
   guard?: GuardSeams;
+  /** Injected so a test holds credentials without listening on a socket. */
+  broker?: (
+    home: string,
+    sessionId: string,
+    held: Readonly<Record<string, string>>,
+  ) => Promise<{ path: string; held: number; close: () => Promise<void> }>;
 }
 
 export interface RunOptions {
@@ -91,7 +99,9 @@ export interface RunOptions {
   envs?: string;
   expect?: string;
   role?: string;
+  brief?: string;
   investigate?: boolean;
+  holdCredentials?: boolean;
 }
 
 /** Everything the run set up before the agent took the terminal, and what the rail says about it. */
@@ -162,12 +172,22 @@ function startingPoint(input: PrepareRunInput): StartingPoint {
       : untrustedHint((deps.familiarity ?? familiarityOf)(home, root));
   const env = input.environment(home, sessionId);
   if (options.role !== undefined) env[ENV_AGENT_ROLE] = options.role;
+  if (options.brief !== undefined) env[WORK_BRIEF_VAR] = briefIdOf(options.brief);
   const agent = agentOfRun(env, binary);
   // Every seam the agent's children reach reads this, so none of them reports it anonymous.
   env[ENV_AGENT_NAME] = agent;
   const parents = parentsOfRun(agent);
   if (parents.length > 0) env[ENV_PARENT_AGENTS] = parents.join(',');
   return { binary, home, sessionId, agent, env, cwd, root, hint };
+}
+
+/** Refused rather than passed on, so a mistyped id is said at the start and never read as a path. */
+function briefIdOf(id: string): string {
+  if (!isWorkBriefId(id))
+    throw new Error(
+      `--brief takes the id the voice gathered, such as wrk_1a2b3c, not "${id}"`,
+    );
+  return id;
 }
 
 /**

@@ -4,6 +4,8 @@ import { rm } from 'node:fs/promises';
 import { delimiter } from 'node:path';
 import type { Command } from 'commander';
 import {
+  BROKER_VAR,
+  holdCredentials,
   CloudLeases,
   LeaseRegistry,
   SESSION_VAR,
@@ -26,6 +28,7 @@ import {
   type RunDeps,
   type RunOptions,
 } from './run/prepare';
+import { startBroker, type CredentialBroker } from './run/credential-broker';
 import { SESSION_GUARD_EXTENSIONS } from './run/sandbox';
 import { defaultStart, interceptorsIn, wiringRow } from './run/start';
 
@@ -82,6 +85,14 @@ export function registerRunCommand(
       'the task is an investigation: nothing outside this machine changes',
     )
     .option('--role <name>', 'the job this agent is enrolled under, matched by roles:')
+    .option(
+      '--brief <id>',
+      'a workspace brief the voice gathered, handed to the agent before its first turn',
+    )
+    .option(
+      '--hold-credentials',
+      'keep tokens out of the agent environment and hand each only to the CLI that uses it',
+    )
     .action(async (command: readonly string[], options: RunOptions) =>
       runAgent(context, deps, command, options),
     );
@@ -108,8 +119,21 @@ async function runAgent(
     environment: (home, sessionId) =>
       environmentFor(deps.env ?? process.env, home, sessionId, options.shell),
   });
-  renderStart(context, run, deps);
-  await startAndRelease(context, run, deps);
+  const broker = options.holdCredentials === true ? await brokerFor(run, deps) : null;
+  renderStart(context, run, deps, broker);
+  await startAndRelease(context, run, deps, broker);
+}
+
+/**
+ * The tokens taken out of the environment the agent starts with, held by this process,
+ * and the one variable that tells an interceptor where to ask for the ones its binary uses.
+ */
+async function brokerFor(run: PreparedRun, deps: RunDeps): Promise<CredentialBroker> {
+  const { passed, held } = holdCredentials(run.env, run.binary);
+  const broker = await (deps.broker ?? startBroker)(run.home, run.sessionId, held);
+  for (const name of Object.keys(run.env)) delete run.env[name];
+  Object.assign(run.env, passed, { [BROKER_VAR]: broker.path });
+  return broker;
 }
 
 /** Refused before a session, a milestone or the sandbox, so nothing is kept for a run that never starts. */
@@ -127,11 +151,24 @@ function resolveBinary(command: readonly string[], deps: RunDeps): string {
   throw new Error(`"${binary}" is not on PATH, so there is nothing to start.${hint}`);
 }
 
-function renderStart(context: CliContext, run: PreparedRun, deps: RunDeps): void {
+function renderStart(
+  context: CliContext,
+  run: PreparedRun,
+  deps: RunDeps,
+  broker: CredentialBroker | null,
+): void {
   const rows: FlowRow[] = [
     { label: 'session', value: run.sessionId },
     wiringRow(context, run.home, deps.interceptorsIn ?? interceptorsIn),
     ...containmentRows(context, run),
+    ...(broker === null
+      ? []
+      : [
+          {
+            label: 'credentials',
+            value: `${describeCount(broker.held, 'variable')} held back, each handed only to the CLI that uses it`,
+          },
+        ]),
   ];
   if (run.declared !== null) {
     rows.push({ label: 'task', value: `"${run.declared.statement}"` });
@@ -187,6 +224,7 @@ async function startAndRelease(
   context: CliContext,
   run: PreparedRun,
   deps: RunDeps,
+  broker: CredentialBroker | null,
 ): Promise<void> {
   const start = deps.start ?? defaultStart;
   const [executable, ...args] = run.sandbox.command;
@@ -201,6 +239,8 @@ async function startAndRelease(
     // In a `finally`, because an agent that crashed is the one whose paths must not stay held.
     const released = await releaseLeases(run.home, run.sessionId, deps);
     await endContainment(run);
+    // The held values die with this process; closing removes the socket that served them.
+    await broker?.close().catch(() => undefined);
     // Off the rail, because it closed when the agent took over the terminal.
     const said = [
       released > 0 ? `released ${describeCount(released, 'lease')}` : null,

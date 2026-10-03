@@ -10,6 +10,7 @@ export * from './interceptor';
 export * from './interceptor-install';
 export * from './git-hooks';
 export * from './daemon-client';
+export * from './broker-client';
 export * from './browser-seam';
 export * from './record';
 export * from './breaker-seam';

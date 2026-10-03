@@ -17,7 +17,7 @@ import { describe, expect, it } from 'vitest';
 const ROOT = join(__dirname, '..', 'src');
 
 /**
- * Every file allowed to name a socket, and why. Two entries, both deliberate.
+ * Every file allowed to name a socket, and why. Three entries, each deliberate.
  *
  * `node:net` is in the pattern rather than excluded from it, because the same
  * import opens a unix socket and a TCP one — so the daemon is named here and
@@ -26,6 +26,8 @@ const ROOT = join(__dirname, '..', 'src');
 const ALLOWED: Record<string, string> = {
   'sync/client.ts': 'the one outbound module; nothing runs until `memnox login`',
   'daemon-server.ts': 'a unix socket on this machine, pinned by the next test',
+  'commands/run/credential-broker.ts':
+    'a unix socket a session holds its credentials behind, pinned below',
 };
 
 /** Anything that opens a socket or resolves a name. */
@@ -61,5 +63,17 @@ describe('nothing reaches the network but the sync client', () => {
 
     expect(daemon).toContain('createServer');
     expect(daemon).not.toMatch(/listen\(\s*\d/);
+  });
+
+  /* Credentials held for a session are served to its own interceptors and to nothing
+     off this machine, so the broker is pinned to a path exactly as the daemon is. */
+  it('leaves the credential broker on a unix socket', () => {
+    const broker = readFileSync(
+      join(ROOT, 'commands', 'run', 'credential-broker.ts'),
+      'utf8',
+    );
+
+    expect(broker).toContain('server.listen(path');
+    expect(broker).not.toMatch(/listen\(\s*\d/);
   });
 });
