@@ -12,6 +12,7 @@ import {
   type Account,
 } from '@memnox/core';
 import { EGRESS_LOOPBACK } from '@memnox/interceptors';
+import { underServiceManager, watchOwnCode } from '../daemon/code-watch';
 import { EditWatcher } from '../edit-watcher';
 import { ownBrain } from '../operator/own-brain';
 import type { CliContext } from '../cli-context';
@@ -179,6 +180,19 @@ async function runLoop(
     };
     process.once('SIGINT', stop);
     process.once('SIGTERM', stop);
+    restartOnRebuild(log, stop);
+  });
+}
+
+/** Under launchd or systemd only, since stopping is a restart there and an exit anywhere else. */
+function restartOnRebuild(log: (message: string) => void, stop: () => void): void {
+  const entry = process.argv[1];
+  if (entry === undefined || !underServiceManager(process.env)) return;
+  watchOwnCode(entry, () => {
+    log(
+      'memnox was rebuilt or updated, so this daemon stops to be started on the new code.',
+    );
+    stop();
   });
 }
 
