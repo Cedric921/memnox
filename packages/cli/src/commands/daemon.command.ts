@@ -153,8 +153,9 @@ async function runLoop(
   home: () => string,
   options: DaemonOptions,
 ): Promise<void> {
-  const state = await buildLoop(context, home(), options);
-  const path = await state.daemon.listen(home());
+  const claimed = await claimOrWait(context, home(), options);
+  if (claimed === null) return;
+  const { state, path } = claimed;
   renderListening(context, path, state, options.sync);
   let running = true;
   // One log for everything this process says for as long as it lives.
@@ -182,6 +183,40 @@ async function runLoop(
     process.once('SIGTERM', stop);
     restartOnRebuild(log, stop);
   });
+}
+
+/** How often a service-started daemon looks again while another one holds the socket. */
+const SOCKET_RETRY_MS = 5_000;
+
+/**
+ * The loop and its socket, or null once a person has been told another daemon holds it.
+ * Under launchd or systemd it waits instead of exiting, because an exit is restarted at
+ * once and the machine's own daemon should take over the moment one started by hand stops.
+ */
+async function claimOrWait(
+  context: CliContext,
+  home: string,
+  options: DaemonOptions,
+): Promise<{ state: LoopState; path: string } | null> {
+  let waiting = false;
+  for (;;) {
+    // Read again on every attempt, so a daemon that waited an hour holds today's rules.
+    const state = await buildLoop(context, home, options);
+    const path = await state.daemon.listen(home);
+    if (path !== null) return { state, path };
+    if (!underServiceManager(process.env)) {
+      context.flow.close('Another memnox daemon is already running, so this one stops.');
+      context.flow.hint('memnox status   shows the one that is running');
+      return null;
+    }
+    if (!waiting) {
+      context.out.note(
+        'Another memnox daemon holds the socket; this one waits for it to stop.',
+      );
+      waiting = true;
+    }
+    await new Promise((resolve) => setTimeout(resolve, SOCKET_RETRY_MS));
+  }
 }
 
 /** Under launchd or systemd only, since stopping is a restart there and an exit anywhere else. */

@@ -1,4 +1,4 @@
-import { createServer, type Server, type Socket } from 'node:net';
+import { connect, createServer, type Server, type Socket } from 'node:net';
 import { chmod, mkdir, rm } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import {
@@ -66,6 +66,51 @@ const SOCKET_PATH_LIMIT = 103;
 const SOCKET_DIR_MODE = 0o700;
 const SOCKET_MODE = 0o600;
 
+/**
+ * Binds the path, or reports that a live daemon holds it. The bind comes first, so of two
+ * daemons starting together the kernel picks one, and a file is only removed once nothing
+ * answers on it, which is a socket left behind by a daemon that was killed.
+ */
+async function claimSocket(server: Server, path: string): Promise<boolean> {
+  try {
+    await bind(server, path);
+    return true;
+  } catch (err) {
+    if (!isAddressInUse(err)) throw err;
+  }
+  if (await answers(path)) return false;
+  await rm(path, { force: true });
+  await bind(server, path);
+  return true;
+}
+
+function bind(server: Server, path: string): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    const failed = (err: Error): void => reject(err);
+    server.once('error', failed);
+    server.listen(path, () => {
+      server.removeListener('error', failed);
+      resolve();
+    });
+  });
+}
+
+function isAddressInUse(err: unknown): boolean {
+  return err instanceof Error && 'code' in err && err.code === 'EADDRINUSE';
+}
+
+/** Whether a process accepts connections on the path, which only a running daemon does. */
+function answers(path: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = connect(path);
+    socket.once('connect', () => {
+      socket.destroy();
+      resolve(true);
+    });
+    socket.once('error', () => resolve(false));
+  });
+}
+
 export class MemnoxDaemon {
   private readonly limits: SessionLimits;
   private readonly violations: ViolationMemory;
@@ -85,7 +130,12 @@ export class MemnoxDaemon {
     this.pauses = deps.pauses ?? null;
   }
 
-  async listen(home: string): Promise<string> {
+  /**
+   * The socket path once this process holds it, or null when another daemon already
+   * answers there: two daemons each run an egress proxy, and whichever lost the socket
+   * still hands its port to `memnox run`, which is a port the rules are not behind.
+   */
+  async listen(home: string): Promise<string | null> {
     const path = socketPathFor(home);
     // Over the kernel's cap `listen` fails with EADDRINUSE, which sends somebody hunting
     // for a process that does not exist, so the real cause is named here.
@@ -96,10 +146,9 @@ export class MemnoxDaemon {
       );
     }
     await mkdir(dirname(path), { recursive: true, mode: SOCKET_DIR_MODE });
-    // A stale socket from a killed daemon would refuse every connection.
-    await rm(path, { force: true });
 
     const server = createServer((socket) => this.serve(socket));
+    if (!(await claimSocket(server, path))) return null;
     this.server = server;
     this.voice = new VoiceSurface({
       home,
@@ -112,11 +161,9 @@ export class MemnoxDaemon {
       ...(this.deps.brainIdleMs === undefined
         ? {}
         : { brainIdleMs: this.deps.brainIdleMs }),
-    });
-
-    await new Promise<void>((resolve, reject) => {
-      server.once('error', reject);
-      server.listen(path, () => resolve());
+      ...(this.deps.voiceAgents === undefined
+        ? {}
+        : { voiceAgents: this.deps.voiceAgents }),
     });
     // Owner only, because anything that can talk to this socket can ask about your rules.
     await chmod(path, SOCKET_MODE);
