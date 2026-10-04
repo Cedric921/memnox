@@ -11,6 +11,7 @@ import {
   type SessionContainment,
 } from '@memnox/core';
 import {
+  RELAY_STATE,
   EgressSeam,
   type EgressProxy,
   type EgressProxyOptions,
@@ -24,7 +25,7 @@ import {
   normalizedOrigin,
   untrustedHint,
 } from '../src/commands/run/familiar';
-import { proxyEnvironment } from '../src/commands/run/network';
+import { proxyEnvironment, relayNotice } from '../src/commands/run/network';
 import { untrustedPreset } from '../src/commands/run/untrusted';
 import { DaemonEgress, daemonEgressPort } from '../src/daemon/egress';
 import { egressStatePath } from '../src/memnox-paths';
@@ -83,7 +84,11 @@ async function runWith(setup: RunSetup, proxy = fakeProxy(5555)) {
       remembered: [],
       authored: setup.familiar === true,
     }),
-    egress: { daemonPort: async () => setup.daemonPort ?? null, start: proxy.start },
+    egress: {
+      daemonPort: async () => setup.daemonPort ?? null,
+      start: proxy.start,
+      relay: async () => ({ port: 7777, close: async () => undefined }),
+    },
     guard: {
       platform: setup.platform ?? 'darwin',
       kernel: '23.5.0',
@@ -115,17 +120,26 @@ describe('pointing the agent at the egress proxy', () => {
     expect(env['NODE_USE_ENV_PROXY']).toBe('1');
   });
 
-  it('uses the daemon’s proxy when one is running, with the session as its credentials', async () => {
+  it('relays to the daemon’s proxy when one is running, with the session as its credentials', async () => {
     const { started, out } = await runWith({
       home: await home(),
       args: ['--', 'claude'],
       daemonPort: 8888,
     });
     expect(started[0]?.env['HTTPS_PROXY']).toBe(
-      'http://ses_run:claude-code@127.0.0.1:8888',
+      'http://ses_run:claude-code@127.0.0.1:7777',
     );
     expect(out.notes.join('\n')).toContain(
-      'through the daemon egress proxy on port 8888',
+      'through the daemon egress proxy on port 7777',
+    );
+  });
+
+  it('tells the person Memnox is not watching when the daemon goes, and when it is back', () => {
+    expect(relayNotice(RELAY_STATE.UNWATCHED, 'claude-code')).toContain(
+      'Memnox is not watching claude-code',
+    );
+    expect(relayNotice(RELAY_STATE.WATCHED, 'claude-code')).toContain(
+      'watching claude-code again',
     );
   });
 
@@ -315,7 +329,7 @@ describe('the daemon holding the egress proxy', () => {
     expect(await daemonEgressPort(dir, () => false)).toBeNull();
   });
 
-  it('stops with the daemon, closing the proxy and taking its port back', async () => {
+  it('stops with the daemon, closing the proxy so no run leans on its port', async () => {
     const dir = await home();
     const close = vi.fn(async () => undefined);
     const egress = new DaemonEgress(dir, {
@@ -325,7 +339,49 @@ describe('the daemon holding the egress proxy', () => {
     await egress.start();
     await egress.stop();
     expect(close).toHaveBeenCalledOnce();
-    expect(existsSync(egressStatePath(dir))).toBe(false);
+    expect(existsSync(egressStatePath(dir))).toBe(true);
+    expect(await daemonEgressPort(dir, () => true)).toBeNull();
+  });
+
+  it('takes back the port the last daemon held, so a running agent is not refused', async () => {
+    const dir = await home();
+    const first = new DaemonEgress(dir, {
+      log: () => undefined,
+      start: async () => ({ port: 40123, close: async () => undefined }),
+    });
+    await first.start();
+    await first.stop();
+    const tried: number[] = [];
+    const second = new DaemonEgress(dir, {
+      log: () => undefined,
+      start: async (options) => {
+        tried.push(options.port);
+        return { port: options.port, close: async () => undefined };
+      },
+    });
+    expect(await second.start()).toBe(40123);
+    expect(tried).toEqual([40123]);
+  });
+
+  it('falls back to a fresh port when the old one was taken meanwhile', async () => {
+    const dir = await home();
+    const first = new DaemonEgress(dir, {
+      log: () => undefined,
+      start: async () => ({ port: 40123, close: async () => undefined }),
+    });
+    await first.start();
+    await first.stop();
+    const tried: number[] = [];
+    const second = new DaemonEgress(dir, {
+      log: () => undefined,
+      start: async (options) => {
+        tried.push(options.port);
+        if (options.port !== 0) throw new Error('EADDRINUSE');
+        return { port: 40999, close: async () => undefined };
+      },
+    });
+    expect(await second.start()).toBe(40999);
+    expect(tried).toEqual([40123, 0]);
   });
 
   it('survives having no port at all, and says so', async () => {

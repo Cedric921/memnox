@@ -27,3 +27,4 @@ export * from './tool-policy';
 export * from './tool-hook';
 export * from './containment-loader';
 export * from './egress-server';
+export * from './egress-relay';

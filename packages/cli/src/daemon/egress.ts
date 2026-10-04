@@ -3,7 +3,7 @@
  * gets when there is no daemon or its repository is untrusted. Every request is ruled on
  * by host, written to the ledger, and entered in the calling agent's destination record.
  */
-import { readFile, rm } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 
 import {
   DestinationRecords,
@@ -101,7 +101,7 @@ export class DaemonEgress {
       log: this.options.log,
       ...(this.options.gate === undefined ? {} : { gate: this.options.gate }),
     });
-    const proxy = await this.listen(seam);
+    const proxy = await this.listen(seam, await previousPort(this.home));
     if (proxy === null) return null;
     this.proxy = proxy;
     const state: EgressState = {
@@ -116,20 +116,55 @@ export class DaemonEgress {
   async stop(): Promise<void> {
     const proxy = this.proxy;
     this.proxy = null;
-    if (proxy !== null) await proxy.close();
-    // Gone with the process, or a run would point an agent at a port nobody holds.
-    await rm(egressStatePath(this.home), { force: true });
+    if (proxy === null) return;
+    await proxy.close();
+    // No pid, so no run leans on a port nobody holds, but the next daemon can take it back.
+    const stopped: StoppedEgress = { lastPort: proxy.port };
+    await writeJsonFile(egressStatePath(this.home), stopped);
   }
 
-  /** Any free port, because a run reads it from the state file and 8888 is Jupyter's. */
-  private async listen(seam: EgressSeam): Promise<EgressProxy | null> {
+  /**
+   * The port the last daemon held first, because an agent already running was pointed at it
+   * and a restart on a new port refuses every call it makes; otherwise any free port, since
+   * a run reads it from the state file and 8888 is Jupyter's.
+   */
+  private async listen(
+    seam: EgressSeam,
+    previous: number | null,
+  ): Promise<EgressProxy | null> {
     const start = this.options.start ?? startEgressProxy;
+    if (previous !== null) {
+      try {
+        return await start({ seam, port: previous, log: this.options.log });
+      } catch {
+        // Somebody else took it while no daemon was running; a fresh port is all that is left.
+      }
+    }
     try {
       return await start({ seam, port: 0, log: this.options.log });
     } catch (err) {
       this.options.log(`The egress proxy could not listen: ${String(err)}`);
       return null;
     }
+  }
+}
+
+/** What a stopped daemon leaves behind: the port to ask for again, and no pid to lean on. */
+interface StoppedEgress {
+  lastPort: number;
+}
+
+/** The port the previous daemon held, whether it stopped cleanly or died holding it. */
+async function previousPort(home: string): Promise<number | null> {
+  try {
+    const parsed: unknown = JSON.parse(await readFile(egressStatePath(home), 'utf8'));
+    if (parsed === null || typeof parsed !== 'object') return null;
+    const record = parsed as Record<string, unknown>;
+    const port = record['lastPort'] ?? record['port'];
+    return typeof port === 'number' && port > 0 ? port : null;
+  } catch {
+    // No file is a first start, or one whose state was cleared by hand.
+    return null;
   }
 }
 

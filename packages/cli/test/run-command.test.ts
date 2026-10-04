@@ -17,7 +17,10 @@ const HOME = '/home/dev';
 /** No repository, no proxy started and no profile read, so a run touches nothing real. */
 const QUIET = {
   rootOf: () => null,
-  egress: { daemonPort: async () => 4321 },
+  egress: {
+    daemonPort: async () => 4321,
+    relay: async () => ({ port: 4322, close: async () => undefined }),
+  },
   guard: { exists: () => false },
 };
 
