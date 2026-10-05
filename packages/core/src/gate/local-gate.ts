@@ -6,6 +6,7 @@ import { DECISION_EFFECT, EFFECT_PRECEDENCE } from '../constants/decision.consta
 import { PolicyEngine, type Policy } from '../policy/index';
 import { matchesAny } from '../policy/pattern-matcher';
 import { scopeOf, TASK_INTENT, type SessionTask } from '../session/session-task';
+import { describeStrain, isStrained, type SessionStrain } from '../session/strain';
 import { reachesOutside } from '../notice/turn';
 import { TOOL_CLASS } from '../discovery/classify';
 import { SCOPE_MATCH, type ScopeComparison } from '../domain/task';
@@ -44,6 +45,8 @@ export interface LocalGateOptions {
   parents?: readonly string[];
   /** Scopes a person allowed for a while, which turn an ask inside them into an allow. */
   allowances?: readonly Allowance[] | (() => readonly Allowance[]);
+  /** What this session has failed at and not got past, read from the ledger by the seam. */
+  strain?: SessionStrain | null;
 }
 
 export interface LocalVerdict {
@@ -120,9 +123,14 @@ export class LocalGate {
       selfProtection(request) ??
       hiddenCode(request) ??
       offIntent(this.options.task ?? null, request, evaluation.effect) ??
+      underStrain(this.options.strain, request, evaluation.effect) ??
       this.contained(request, evaluation.effect);
     const effect = effectUnder(evaluation.effect, contained);
-    const allowed = this.allowedWithin(request, effect, at);
+    const allowed = this.allowedWithin(
+      request,
+      { effect, matchedPolicies: evaluation.matchedPolicies },
+      at,
+    );
     return {
       effect: allowed === null ? effect : DECISION_EFFECT.ALLOW,
       reason: reasonOf(allowed, contained, evaluation.reason),
@@ -186,13 +194,14 @@ export class LocalGate {
     });
   }
 
-  /** Last, and only over an ask: a scope a person allowed for a while. */
+  /** Last, and only over an ask: a scope a person allowed for a while, and never over the workspace's own ask. */
   private allowedWithin(
     request: ActionRequest,
-    effect: DecisionEffect,
+    evaluation: { effect: DecisionEffect; matchedPolicies: readonly MatchedPolicy[] },
     at: Date,
   ): Allowance | null {
-    if (effect !== DECISION_EFFECT.ASK) return null;
+    if (evaluation.effect !== DECISION_EFFECT.ASK) return null;
+    if (askedByWorkspace(evaluation.matchedPolicies)) return null;
     return allowanceFor(allowancesOf(this.options.allowances), request, {
       agentName: this.options.agentName,
       now: at.toISOString(),
@@ -215,7 +224,8 @@ function effectUnder(
   effect: DecisionEffect,
   contained: ContainmentAsk | null,
 ): DecisionEffect {
-  if (contained === null) return effect;
+  // A milestone covers it, so the rules' allow stands and only the reason says why.
+  if (contained === null || contained.checkpointed === true) return effect;
   return contained.refuses === true ? DECISION_EFFECT.DENY : DECISION_EFFECT.ASK;
 }
 
@@ -244,6 +254,26 @@ function offIntent(
   };
 }
 
+/**
+ * A session that keeps failing keeps working on this machine, and asks before it reaches
+ * past it or deletes anything, since a broader change after failed fixes is the moment a
+ * confused agent does the most damage. Only an allow is narrowed.
+ */
+function underStrain(
+  strain: SessionStrain | null | undefined,
+  request: ActionRequest,
+  effect: DecisionEffect,
+): ContainmentAsk | null {
+  if (!isStrained(strain) || effect !== DECISION_EFFECT.ALLOW) return null;
+  const toolClass = request.toolClass ?? '';
+  const destroys = toolClass === TOOL_CLASS.DESTRUCTIVE;
+  const reachesOut = CHANGES.includes(toolClass) && reachesOutside(request.action);
+  if (!destroys && !reachesOut) return null;
+  return { reason: describeStrain(strain), signal: STRAIN_SIGNAL };
+}
+
+export const STRAIN_SIGNAL = 'strain:failures';
+
 /** A long-lived gate reads them at each decision, since one granted later must count. */
 function allowancesOf(given: LocalGateOptions['allowances']): readonly Allowance[] {
   if (given === undefined) return [];
@@ -267,4 +297,14 @@ function hiddenCode(request: ActionRequest): ContainmentAsk | null {
       'this runs code nobody could read before it runs, so a person should look first',
     signal: 'hidden-code',
   };
+}
+
+/** A workspace rule that asks is the team's question, so a local allowance never answers it. */
+function askedByWorkspace(matched: readonly MatchedPolicy[]): boolean {
+  return matched.some(
+    (policy) =>
+      policy.workspace === true &&
+      policy.observed !== true &&
+      policy.effect === DECISION_EFFECT.ASK,
+  );
 }
