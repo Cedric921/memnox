@@ -52,6 +52,21 @@ describe('a hold something else can answer', () => {
     expect(already.answeredBy).toBe('first');
   });
 
+  it('takes exactly one of five answers that arrive at once', async () => {
+    const approvals = new PendingApprovals(await home());
+    const raised = await approvals.raise(REQUEST, NOW, 120_000);
+
+    const outcomes = await Promise.all(
+      ['phone', 'workspace', 'terminal', 'mac', 'chat'].map((by) =>
+        approvals.answer(raised.id, HOLD_ANSWER.ONCE, by, NOW),
+      ),
+    );
+
+    expect(outcomes.filter((each) => each !== null && 'answered' in each)).toHaveLength(
+      1,
+    );
+  });
+
   it('is null for something nobody raised', async () => {
     const approvals = new PendingApprovals(await home());
     expect(await approvals.answer('apr_nope', HOLD_ANSWER.ONCE, 'x', NOW)).toBeNull();
