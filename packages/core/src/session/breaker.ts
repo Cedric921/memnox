@@ -247,7 +247,7 @@ export function breachIn(
 }
 
 /** "git symbolic-ref" rather than "git.unknown", since a verb no table knows says nothing on its own. */
-function commandOf(outcome: ActionOutcome): string {
+export function commandOf(outcome: Pick<ActionOutcome, 'action' | 'target'>): string {
   if (outcome.target === undefined || outcome.target === '') return outcome.action;
   const tool = outcome.action.split('.')[0] ?? outcome.action;
   return outcome.action.endsWith('.unknown')
