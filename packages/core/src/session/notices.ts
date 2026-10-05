@@ -6,7 +6,7 @@
 import { ACTION } from '../constants/action.constants';
 import { DECISION_EFFECT } from '../constants/decision.constants';
 import { UNNAMED_SESSION } from '../constants/session.constants';
-import type { MemnoxEvent } from '../event/event';
+import { EVENT_SURFACE, type MemnoxEvent } from '../event/event';
 import type { SessionTurn } from './session-turns';
 
 export const NOTICE_KIND = {
@@ -24,9 +24,19 @@ export const NOTICE_KIND = {
   ENDED: 'ended',
   /** Two agents on one piece of work, here or across machines, which the person sorts out. */
   COLLISION: 'collision',
+  /** A session has failures it has not got past, so its changes outside this machine ask first. */
+  STRUGGLING: 'struggling',
 } as const;
 
 export type NoticeKind = (typeof NOTICE_KIND)[keyof typeof NOTICE_KIND];
+
+/**
+ * The one id a piece of news has on every route that carries it, the live broadcast, the
+ * waiting feed and a phone's wake, so a surface told twice shows it once.
+ */
+export function noticeSubject(kind: NoticeKind, sessionId: string, at: string): string {
+  return `ntc_${kind}_${sessionId}_${Date.parse(at).toString(36)}`;
+}
 
 export interface SessionNotice {
   kind: NoticeKind;
@@ -49,6 +59,46 @@ export interface NoticeWatch {
   seen: string;
   /** The newest turn ending already counted. */
   turnsSeen: string;
+}
+
+/** What a turn came to, counted from the ledger, so "it asked you nothing" is a count and never a guess. */
+export interface RunTally {
+  actions: number;
+  /** Put to a person, whatever they answered. */
+  asked: number;
+  /** Refused, by a rule or a person. */
+  stopped: number;
+}
+
+/** Agent work between two moments; a config change or a summary row is Memnox's own and never counted. */
+export function runTally(
+  events: readonly MemnoxEvent[],
+  from: string,
+  to: string,
+): RunTally {
+  const work = events.filter(
+    (event) =>
+      event.at >= from && event.at <= to && event.surface !== EVENT_SURFACE.CONFIG,
+  );
+  return {
+    actions: work.length,
+    asked: work.filter((event) => event.effect === DECISION_EFFECT.ASK).length,
+    stopped: work.filter((event) => event.effect === DECISION_EFFECT.DENY).length,
+  };
+}
+
+/** The tally as a sentence a person hears at the end of a run they were not watching. */
+export function describeRun(tally: RunTally): string {
+  if (tally.actions === 0) return '';
+  const asked =
+    tally.asked === 0
+      ? 'asked you nothing'
+      : `asked you ${tally.asked} time${tally.asked === 1 ? '' : 's'}`;
+  const stopped =
+    tally.stopped === 0
+      ? ''
+      : ` Memnox stopped ${tally.stopped} action${tally.stopped === 1 ? '' : 's'} along the way.`;
+  return `It ran ${tally.actions} action${tally.actions === 1 ? '' : 's'} and ${asked}.${stopped}`;
 }
 
 /** A turn this long is one the person likely stepped away from, so its end is news; a short one they watched. */

@@ -57,8 +57,8 @@ export function statementOfPrompt(prompt: string): string {
 }
 
 /**
- * The task a prompt declares, or null for one that declares nothing to go on. A task a
- * person declared by hand is never replaced by one read from a prompt.
+ * The task a prompt declares, or null for one that declares nothing. A hand declared task is never
+ * replaced; the first prompt stays the mission and a follow up like "go ahead" is the latest ask.
  */
 export function taskFromPrompt(
   prompt: string,
@@ -68,18 +68,24 @@ export function taskFromPrompt(
   if (existing !== null && existing.declaredBy !== DECLARED_BY_PROMPT) return null;
   const statement = statementOfPrompt(prompt);
   if (statement === '') return null;
+  // The intent follows the latest prompt, so "now fix it" still lifts an investigation.
   const intent = intentOfPrompt(prompt);
+  const task = taskFor(
+    {
+      sessionId: moment.sessionId,
+      statement: existing?.statement ?? statement,
+      scope: {},
+      ...(intent === undefined ? {} : { intent }),
+    },
+    moment.now,
+  );
+  if (existing === null) return { ...task, declaredBy: DECLARED_BY_PROMPT };
   return {
-    ...taskFor(
-      {
-        sessionId: moment.sessionId,
-        statement,
-        scope: {},
-        ...(intent === undefined ? {} : { intent }),
-      },
-      moment.now,
-    ),
+    ...task,
+    id: existing.id,
+    declaredAt: existing.declaredAt,
     declaredBy: DECLARED_BY_PROMPT,
+    latestAsk: statement,
   };
 }
 

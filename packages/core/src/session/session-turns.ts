@@ -1,5 +1,6 @@
 import { join } from 'node:path';
 import { MEMNOX_HOME } from '../config/config';
+import { exclusively } from '../store/exclusive';
 import { JsonRecordDir } from '../store/json-records';
 
 /**
@@ -32,11 +33,23 @@ export interface SessionTurn {
 export class SessionTurns {
   private readonly records: JsonRecordDir<SessionTurn>;
 
+  private readonly dir: string;
+
   constructor(home: string) {
-    this.records = new JsonRecordDir(join(home, MEMNOX_HOME, TURNS_DIR));
+    this.dir = join(home, MEMNOX_HOME, TURNS_DIR);
+    this.records = new JsonRecordDir(this.dir);
   }
 
   async prompted(sessionId: string, agent: string, at: string): Promise<void> {
+    await exclusively(this.dir, () => this.recordPrompt(sessionId, agent, at));
+  }
+
+  // A prompt and an ending land from two hook processes at once often enough to lose one.
+  private async recordPrompt(
+    sessionId: string,
+    agent: string,
+    at: string,
+  ): Promise<void> {
     const was = await this.records.read(idFor(sessionId));
     const windows = [...(was?.windows ?? []), { promptAt: at }].slice(-MOST_WINDOWS);
     await this.records.write(idFor(sessionId), {
@@ -49,6 +62,14 @@ export class SessionTurns {
   }
 
   async ended(sessionId: string, agent: string, at: string): Promise<void> {
+    await exclusively(this.dir, () => this.recordEnding(sessionId, agent, at));
+  }
+
+  private async recordEnding(
+    sessionId: string,
+    agent: string,
+    at: string,
+  ): Promise<void> {
     const was = await this.records.read(idFor(sessionId));
     const windows = [...(was?.windows ?? [])];
     const open = windows[windows.length - 1];

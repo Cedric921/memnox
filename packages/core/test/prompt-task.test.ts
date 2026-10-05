@@ -66,4 +66,16 @@ describe('the task a prompt declares', () => {
     expect(fromPrompt?.intent).toBe('investigate');
     expect(taskFromPrompt('now fix it', fromPrompt, moment)?.intent).toBeUndefined();
   });
+
+  it('keeps the first prompt as the mission and a follow up as the latest ask', () => {
+    const first = taskFromPrompt('review the current git history', null, moment);
+    expect(first?.latestAsk).toBeUndefined();
+    const followUp = taskFromPrompt('go ahead', first, moment);
+    expect(followUp?.statement).toBe('review the current git history');
+    expect(followUp?.latestAsk).toBe('go ahead');
+    expect(followUp?.declaredAt).toBe(first?.declaredAt);
+    expect(taskFromPrompt('and check the tags too', followUp, moment)?.latestAsk).toBe(
+      'and check the tags too',
+    );
+  });
 });
