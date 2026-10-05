@@ -1,18 +1,20 @@
 /** `memnox run`: starts an agent with the interceptors, the shell wrapper, a session and a milestone in place. */
 
 import { rm } from 'node:fs/promises';
-import { delimiter } from 'node:path';
 import type { Command } from 'commander';
 import {
   BROKER_VAR,
   holdCredentials,
   CloudLeases,
   LeaseRegistry,
+  pathValueOf,
+  prependedPath,
   SESSION_VAR,
   SessionContainments,
   LEDGER_SESSION_LIMIT,
   summarizeSession,
   describeSummary,
+  withPathValue,
 } from '@memnox/core';
 import { FALLBACK_SHELL, interceptorDirFor, REAL_SHELL_VAR } from '@memnox/interceptors';
 import type { CliContext } from '../cli-context';
@@ -42,11 +44,10 @@ export function environmentFor(
   sessionId: string,
   shellBinary: string,
 ): NodeJS.ProcessEnv {
-  const interceptors = interceptorDirFor(home);
-  const path = base['PATH'] ?? '';
+  // Under the spelling the environment already uses, since Windows keeps it as `Path`.
+  const path = prependedPath(pathValueOf(base), interceptorDirFor(home));
   return {
-    ...base,
-    PATH: path.startsWith(interceptors) ? path : `${interceptors}${delimiter}${path}`,
+    ...withPathValue(base, path),
     SHELL: shellBinary,
     // The displaced shell, so the wrapper hands off to it and never reads `SHELL` to find itself.
     [REAL_SHELL_VAR]: base['SHELL'] ?? FALLBACK_SHELL,
@@ -89,6 +90,7 @@ export function registerRunCommand(
       '--brief <id>',
       'a workspace brief the voice gathered, handed to the agent before its first turn',
     )
+    .option('--mission <id>', 'join this session to a mission, from memnox mission start')
     .option(
       '--hold-credentials',
       'keep tokens out of the agent environment and hand each only to the CLI that uses it',
@@ -170,15 +172,7 @@ function renderStart(
           },
         ]),
   ];
-  if (run.declared !== null) {
-    rows.push({ label: 'task', value: `"${run.declared.statement}"` });
-    if (run.declared.expectedActions !== undefined) {
-      rows.push({
-        label: 'expecting',
-        value: `about ${run.declared.expectedActions} actions`,
-      });
-    }
-  }
+  rows.push(...askedRows(run));
   if (run.kept !== null) {
     rows.push({
       label: 'working tree',
@@ -190,6 +184,26 @@ function renderStart(
   context.flow.rows(`Starting ${run.binary}`, rows);
   context.flow.close(`${run.binary} is running under session ${run.sessionId}.`);
   if (run.hint !== null) context.flow.hint(run.hint);
+}
+
+/** What the session is here to do: the mission it is one run of, and its own task. */
+function askedRows(run: PreparedRun): FlowRow[] {
+  const rows: FlowRow[] = [];
+  if (run.mission !== null) {
+    rows.push({
+      label: 'mission',
+      value: `"${run.mission.statement}", session ${run.mission.sessions.length}`,
+    });
+  }
+  if (run.declared === null) return rows;
+  rows.push({ label: 'task', value: `"${run.declared.statement}"` });
+  if (run.declared.expectedActions !== undefined) {
+    rows.push({
+      label: 'expecting',
+      value: `about ${run.declared.expectedActions} actions`,
+    });
+  }
+  return rows;
 }
 
 /** The wall and the network, said as they are, including where there is neither. */

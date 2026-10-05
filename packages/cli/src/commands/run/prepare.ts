@@ -25,6 +25,9 @@ import {
   SESSION_VAR,
   isWorkBriefId,
   WORK_BRIEF_VAR,
+  MISSION_VAR,
+  Missions,
+  type Mission,
 } from '@memnox/core';
 import {
   DEFAULT_AGENT_NAME,
@@ -102,6 +105,7 @@ export interface RunOptions {
   brief?: string;
   investigate?: boolean;
   holdCredentials?: boolean;
+  mission?: string;
 }
 
 /** Everything the run set up before the agent took the terminal, and what the rail says about it. */
@@ -112,6 +116,8 @@ export interface PreparedRun {
   agent: string;
   env: NodeJS.ProcessEnv;
   declared: SessionTask | null;
+  /** The goal this session is one run of, named or inherited from the run that started it. */
+  mission: Mission | null;
   kept: string | null;
   sandbox: Sandboxed;
   egress: SessionEgress | null;
@@ -214,10 +220,14 @@ async function settle(
   input: PrepareRunInput,
   base: StartingPoint,
   egress: SessionEgress | null,
-): Promise<Pick<PreparedRun, 'declared' | 'kept' | 'sandbox' | 'transcript'>> {
+): Promise<
+  Pick<PreparedRun, 'declared' | 'mission' | 'kept' | 'sandbox' | 'transcript'>
+> {
   const { options, deps } = input;
   const { home, sessionId, agent, root, env } = base;
   const untrusted = options.untrusted === true;
+  // First, so a mistyped or closed mission is said before anything is kept for this run.
+  const mission = await joinMission(home, sessionId, options.mission, env);
   // Declared before the agent starts, because every drift check compares against it.
   const declared = await declareTask(home, sessionId, options, deps);
   await declareContainment({ home, sessionId, agent, root, untrusted, deps });
@@ -230,7 +240,32 @@ async function settle(
   const sandbox = wallFor({ input, home, sessionId, workspace, egress, env });
   const transcript =
     options.transcript === true ? transcriptPathFor(home, sessionId) : undefined;
-  return { declared, kept, sandbox, transcript };
+  return { declared, mission, kept, sandbox, transcript };
+}
+
+/**
+ * A mission named on the command line must exist and be open. One inherited from the run
+ * that started this one is joined when it can be, and a closed one is left without a word,
+ * since the child did not choose it.
+ */
+async function joinMission(
+  home: string,
+  sessionId: string,
+  named: string | undefined,
+  env: NodeJS.ProcessEnv,
+): Promise<Mission | null> {
+  const id = named ?? env[MISSION_VAR];
+  if (id === undefined || id === '') return null;
+  let mission: Mission;
+  try {
+    mission = await new Missions(home).attach(id, sessionId);
+  } catch (err) {
+    if (named !== undefined) throw err;
+    delete env[MISSION_VAR];
+    return null;
+  }
+  env[MISSION_VAR] = mission.id;
+  return mission;
 }
 
 function newSessionId(): string {
