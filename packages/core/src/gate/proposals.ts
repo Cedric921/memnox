@@ -1,6 +1,8 @@
 import { join } from 'node:path';
 import { MEMNOX_HOME } from '../config/config';
 import { shortDigest } from '../domain/digest';
+import type { DaemonEvent } from '../daemon/protocol';
+import type { RuleScope } from '../daemon/voice-cards';
 import type { Policy } from '../policy/policy';
 import { JsonRecordDir } from '../store/json-records';
 import type { HoldAnswer } from './hold';
@@ -23,6 +25,10 @@ export const PROPOSAL_KIND = {
   REWIND: 'rewind',
   /** A memnox command that changes something, run once the person confirms. */
   COMMAND: 'command',
+  /** Something only the Mac can do, asked for from a phone, shown on the Mac once that phone signs. */
+  MAC: 'mac',
+  /** An answer to a team's question, carried out by the device holding the person's sign in. */
+  TEAM: 'team',
 } as const;
 
 export const PROPOSAL_ANSWER = {
@@ -33,7 +39,14 @@ export const PROPOSAL_ANSWER = {
 export type ProposalAnswer = (typeof PROPOSAL_ANSWER)[keyof typeof PROPOSAL_ANSWER];
 
 export type ProposedChange =
-  | { kind: typeof PROPOSAL_KIND.RULES; file: string; rules: readonly Policy[] }
+  | {
+      kind: typeof PROPOSAL_KIND.RULES;
+      /** Where a plain "confirmed" puts the rules: the suggested scope's file. */
+      file: string;
+      rules: readonly Policy[];
+      /** The places offered on the Mac; the one picked is the signed answer, and decides the file and the reach. */
+      scopes?: readonly RuleScope[];
+    }
   | { kind: typeof PROPOSAL_KIND.ANSWER; pendingId: string; answer: HoldAnswer }
   | { kind: typeof PROPOSAL_KIND.RESUME; sessionId: string }
   | {
@@ -42,7 +55,14 @@ export type ProposedChange =
       milestone: string;
       sessionId?: string;
     }
-  | { kind: typeof PROPOSAL_KIND.COMMAND; argv: string[] };
+  | { kind: typeof PROPOSAL_KIND.COMMAND; argv: string[] }
+  | { kind: typeof PROPOSAL_KIND.MAC; deviceId: string; event: DaemonEvent }
+  | {
+      kind: typeof PROPOSAL_KIND.TEAM;
+      callId: string;
+      answer: HoldAnswer;
+      label: string;
+    };
 
 export interface Proposal {
   id: string;

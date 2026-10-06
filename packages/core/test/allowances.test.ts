@@ -66,6 +66,33 @@ describe('a scope a person allowed for a while', () => {
     ).toBe('deny');
   });
 
+  it("never answers the workspace's own ask, since that question belongs to the team", () => {
+    const workspaceAsk = [
+      {
+        name: 'team-cli-ask',
+        match: { actions: ['railway.*'], classes: ['write'] },
+        decision: { effect: 'ask', reason: 'the team looks at CLI changes' },
+        workspace: true,
+        decidedBy: 'Ada',
+      },
+    ];
+    const verdict = new LocalGate(workspaceAsk as never, {
+      agentName: 'claude-code',
+      allowances: [STAGING],
+      now: NOW,
+    }).evaluate({
+      action: 'railway.restart',
+      toolClass: 'write',
+      environment: 'staging',
+    });
+
+    expect(verdict.effect).toBe('ask');
+    expect(verdict.matchedPolicies[0]).toMatchObject({
+      workspace: true,
+      decidedBy: 'Ada',
+    });
+  });
+
   it('ends on its own', () => {
     const later = new Date('2026-09-26T10:30:00.000Z');
     expect(

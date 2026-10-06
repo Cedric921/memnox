@@ -14,6 +14,9 @@ import {
   handOverVerdict,
   matchesPattern,
   readPolicyDocumentFile,
+  readPolicyFiles,
+  loadPoliciesFromFile,
+  asksToRelax,
   rollUpUsage,
   usageFrom,
   verbAction,
@@ -258,13 +261,14 @@ export async function runAllow(
 
 /** One allow rule per thing handed over, skipping any a rule of that name already covers. */
 function newAllowRules(
-  existing: readonly { name: string }[],
+  existing: readonly Policy[],
   handing: readonly Delegation[],
+  inForce: readonly Policy[],
 ): {
   name: string;
   description: string;
   match: { actions: string[]; targets?: string[] };
-  decision: { effect: typeof DECISION_EFFECT.ALLOW; reason: string };
+  decision: { effect: typeof DECISION_EFFECT.ALLOW; reason: string; relaxes?: string[] };
 }[] {
   const taken = new Set(existing.map((rule) => rule.name));
   return handing
@@ -277,8 +281,30 @@ function newAllowRules(
         actions: [each.action],
         ...(each.targets.length === 0 ? {} : { targets: [...each.targets] }),
       },
-      decision: { effect: DECISION_EFFECT.ALLOW, reason: each.because },
+      decision: {
+        effect: DECISION_EFFECT.ALLOW,
+        reason: each.because,
+        // An allow beside the ask that held it would still be asked about, so it names that ask.
+        ...relaxing(asksToRelax(inForce, each.action)),
+      },
     }));
+}
+
+function relaxing(names: readonly string[]): { relaxes?: string[] } {
+  return names.length === 0 ? {} : { relaxes: [...names] };
+}
+
+/** Every rule this machine loads, so a handed-over allow can name the asks that would hold it. */
+export async function rulesInForce(
+  written: readonly Policy[],
+  home: string,
+): Promise<Policy[]> {
+  const files = await readPolicyFiles(undefined, home);
+  const loaded = await Promise.all(
+    // A file that will not load holds no ask to name.
+    files.map((file) => loadPoliciesFromFile(file).catch(() => [])),
+  );
+  return [...written, ...loaded.flat()];
 }
 
 /** Appended rather than written over, so handing a second thing over keeps the first. */
@@ -290,7 +316,7 @@ async function writeAllowRules(
   const { flow } = context;
   const document = await readPolicyDocumentFile(path);
   const existing = document?.policies ?? [];
-  const added = newAllowRules(existing, handing);
+  const added = newAllowRules(existing, handing, await rulesInForce(existing, homedir()));
   if (added.length === 0) {
     flow.close('Every one of those is already allowed here.');
     return;

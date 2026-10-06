@@ -38,6 +38,11 @@ const LOOSENING: readonly string[] = [
   'rewind',
   // Clearing the confirmation key lets the next key to register confirm for the person.
   'voice',
+  // A paired device answers held calls, so pairing one, or giving it more, is the person's alone.
+  'pair',
+  'devices',
+  // Signing in as a person lets this terminal answer the team's questions, which is theirs alone.
+  'team',
 ];
 
 /** Reads that share a subcommand with a loosening one. */
@@ -53,10 +58,11 @@ const READING: readonly string[] = [
   'agents list',
   'mcp list',
   'rewind --list',
+  'devices list',
 ];
 
 /** Subcommands that only read when nothing follows them, and loosen once anything does. */
-const BARE_READS: readonly string[] = ['mode', 'voice'];
+const BARE_READS: readonly string[] = ['mode', 'voice', 'devices'];
 
 const WRITES: readonly string[] = [ACTION.FILESYSTEM_WRITE, ACTION.FILESYSTEM_DELETE];
 
