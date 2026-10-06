@@ -4,6 +4,8 @@ export const HTTP = {
   CREATED: 201,
   ACCEPTED: 202,
   NO_CONTENT: 204,
+  /** The first status past success, so a range check names its end. */
+  MULTIPLE_CHOICES: 300,
   /** The bundle is unchanged, which is what a conditional GET asks for. */
   NOT_MODIFIED: 304,
   BAD_REQUEST: 400,

@@ -2,7 +2,13 @@ import { homedir } from 'node:os';
 
 import type { Command } from 'commander';
 
-import { forgetAccount, readAccount, type Account } from '@memnox/core';
+import {
+  EXIT,
+  forgetAccount,
+  isMachineClass,
+  readAccount,
+  type Account,
+} from '@memnox/core';
 
 import type { CliContext } from '../cli-context';
 import { connectMachine, DEFAULT_BASE_URL, type ConnectSeams } from '../sync/connect';
@@ -26,6 +32,14 @@ export function registerLoginCommand(
     // Asked for on a terminal, so the flag is for a script enrolling a fleet.
     .option('--name <name>', 'what your workspace calls this machine')
     .option('--no-open', 'print the code and the URL instead of opening a browser')
+    .option(
+      '--class <class>',
+      'server or workstation, when what this machine looks like is wrong',
+    )
+    .option(
+      '--token <token>',
+      `join with a token from the console instead of a browser; ${JOIN_TOKEN_VAR} keeps it out of shell history`,
+    )
     .action(async (options: LoginOptions) => runLogin(context, home, seams, options));
 
   program
@@ -45,7 +59,12 @@ interface LoginOptions {
   enforce?: boolean;
   name?: string;
   open: boolean;
+  class?: string;
+  token?: string;
 }
+
+/** Where a join token can be given without it landing in shell history. */
+const JOIN_TOKEN_VAR = 'MEMNOX_JOIN_TOKEN';
 
 /** Binds this machine to a workspace and prints its id on stdout, so the rail is commentary. */
 async function runLogin(
@@ -58,7 +77,21 @@ async function runLogin(
   flow.commentary();
   flow.open('memnox login');
 
-  const connected = await connectMachine(context, home(), options, seams);
+  const given = options.class;
+  if (given !== undefined && !isMachineClass(given)) {
+    flow.fail(`--class is server or workstation, and ${given} is neither.`);
+    process.exitCode = EXIT.MISUSED;
+    return;
+  }
+  const machineClass = given === undefined ? {} : { machineClass: given };
+  const joinToken = options.token ?? process.env[JOIN_TOKEN_VAR];
+  const joining = joinToken === undefined || joinToken === '' ? {} : { joinToken };
+  const connected = await connectMachine(
+    context,
+    home(),
+    { ...options, ...machineClass, ...joining },
+    seams,
+  );
 
   flow.close(style.ok('This machine is enrolled.'));
   flow.hint('It now pulls your workspace rules. Nothing else leaves this machine.');
