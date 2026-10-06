@@ -1,6 +1,8 @@
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { MEMNOX_HOME, POLICY_REGISTRY_FILE } from '../config/config';
+import { orgPolicyPathFor } from '../policy/org-bundle';
 import { readPolicyRegistry } from './policy-file';
 
 /**
@@ -18,8 +20,8 @@ export const ENV_AGENT_NAME = 'MEMNOX_AGENT_NAME';
 export const POLICY_PATH_SEPARATOR = ',';
 
 /**
- * The files named in the environment, or the ones
- * this machine registered when it names none.
+ * The files named in the environment, or the ones this machine registered when it names none.
+ * The workspace's rules are kept either way, so naming other files never sets the team's aside.
  */
 export async function readPolicyFiles(
   configured: string | undefined,
@@ -28,8 +30,10 @@ export async function readPolicyFiles(
   if (configured === undefined || configured.trim().length === 0) {
     return readPolicyRegistry(join(home, MEMNOX_HOME, POLICY_REGISTRY_FILE));
   }
-  return configured
+  const named = configured
     .split(POLICY_PATH_SEPARATOR)
     .map((path) => path.trim())
     .filter((path) => path.length > 0);
+  const org = orgPolicyPathFor(home);
+  return named.includes(org) || !existsSync(org) ? named : [...named, org];
 }
