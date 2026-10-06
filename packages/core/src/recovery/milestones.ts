@@ -69,6 +69,9 @@ function globRegex(shape: string): RegExp {
 /** A scratch index, so `git add -A` never touches the one the person is staging into. */
 const SCRATCH_INDEX = '.git/memnox-index';
 
+/** Counts scratch indexes this process made, so each operation's is its own. */
+let scratchCount = 0;
+
 /** The index the person stages into, only ever read from. */
 const PERSON_INDEX = '.git/index';
 
@@ -98,8 +101,17 @@ export interface RestoreResult {
 
 type ScratchEnv = Record<string, string>;
 
+/**
+ * Its own scratch index per operation: a shared one let two reads at once, or one killed
+ * midway, leave a lock that made every later comparison in that repository fail unseen.
+ */
 function scratchEnv(root: string): ScratchEnv {
-  return { GIT_INDEX_FILE: `${root}/${SCRATCH_INDEX}` };
+  scratchCount += 1;
+  return { GIT_INDEX_FILE: `${root}/${SCRATCH_INDEX}-${process.pid}-${scratchCount}` };
+}
+
+function indexOf(env: ScratchEnv): string {
+  return env['GIT_INDEX_FILE'] ?? '';
 }
 
 function nonEmptyLines(text: string): string[] {
@@ -144,14 +156,26 @@ export class Milestones {
   /** The tree object for the working tree, built in the scratch index, and its file count. */
   private async writeWorkingTree(root: string): Promise<{ tree: string; files: number }> {
     const env = scratchEnv(root);
-    await this.seedIndex(root, env);
-    await this.git.run(['add', '-A', '--', '.', ...SECRET_PATHSPECS], env);
-    const kept = await this.smallIgnored(root);
-    // Forced, since they are ignored; only here, never into the person's own index.
-    if (kept.length > 0) await this.git.run(['add', '-f', '--', ...kept], env);
-    const tree = await this.git.run(['write-tree'], env);
-    const files = nonEmptyLines(await this.git.run(['ls-files', '--', '.'], env)).length;
-    return { tree, files };
+    try {
+      await this.seedIndex(root, env);
+      await this.git.run(['add', '-A', '--', '.', ...SECRET_PATHSPECS], env);
+      const kept = await this.smallIgnored(root);
+      // Forced, since they are ignored; only here, never into the person's own index.
+      if (kept.length > 0) await this.git.run(['add', '-f', '--', ...kept], env);
+      const tree = await this.git.run(['write-tree'], env);
+      const files = nonEmptyLines(
+        await this.git.run(['ls-files', '--', '.'], env),
+      ).length;
+      return { tree, files };
+    } finally {
+      await this.dropIndex(env);
+    }
+  }
+
+  /** The operation's scratch index and any lock git left on it, since nothing reads either again. */
+  private async dropIndex(env: ScratchEnv): Promise<void> {
+    await this.tree.remove(indexOf(env));
+    await this.tree.remove(`${indexOf(env)}.lock`);
   }
 
   /**
@@ -181,7 +205,7 @@ export class Milestones {
   private async seedIndex(root: string, env: ScratchEnv): Promise<void> {
     const copied =
       this.tree.copy !== undefined &&
-      (await this.tree.copy(`${root}/${PERSON_INDEX}`, `${root}/${SCRATCH_INDEX}`));
+      (await this.tree.copy(`${root}/${PERSON_INDEX}`, indexOf(env)));
     if (copied) return;
     // Seed from HEAD so the tree is a delta and not a fresh copy of the repository.
     await this.git.run(['read-tree', 'HEAD'], env).catch(async () => {
@@ -234,8 +258,12 @@ export class Milestones {
     // Computed before the checkout, which would blur what the agent added into the rest.
     const added = await this.filesAddedBetween(target, kept);
     const env = scratchEnv(root);
-    await this.git.run(['read-tree', target.commit], env);
-    await this.git.run(['checkout-index', '-a', '-f'], env);
+    try {
+      await this.git.run(['read-tree', target.commit], env);
+      await this.git.run(['checkout-index', '-a', '-f'], env);
+    } finally {
+      await this.dropIndex(env);
+    }
     // Unlinked rather than `git rm`, which would consult the person's own index. An ignored
     // file made since is left, since a rewind never deletes what git would never track.
     const ignored = new Set(await this.ignoredAmong(added));
