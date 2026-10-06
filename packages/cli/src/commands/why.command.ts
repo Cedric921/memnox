@@ -26,6 +26,7 @@ import type { CliContext } from '../cli-context';
 import { withEvents } from '../event-store';
 import type { FlowRow } from '../flow';
 import { leadUpTo, renderLeadUp, type LeadUp } from './why/lead-up';
+import { decidedLine, workspaceRuleOf, type WorkspaceRule } from './why/workspace-rule';
 
 /** How long `gh` is given to answer, because `why` is read while somebody waits. */
 const FORGE_TIMEOUT_MS = 3_000;
@@ -79,7 +80,15 @@ async function runWhy(
       return;
     }
     const leadUp = await leadUpTo(store, event, deps.home());
-    await renderAnswer(context, { event, leadUp }, options.evidence === true, deps.now());
+    const rule = event.rule;
+    const team =
+      rule === undefined ? null : await workspaceRuleOf(deps.home(), rule.name);
+    await renderAnswer(
+      context,
+      { event, leadUp, team },
+      options.evidence === true,
+      deps.now(),
+    );
   });
 }
 
@@ -111,12 +120,16 @@ function renderNothingFound(context: CliContext, id: string | undefined): void {
 
 async function renderAnswer(
   context: CliContext,
-  { event, leadUp }: { event: MemnoxEvent; leadUp: LeadUp },
+  {
+    event,
+    leadUp,
+    team,
+  }: { event: MemnoxEvent; leadUp: LeadUp; team: WorkspaceRule | null },
   withEvidence: boolean,
   now: Date,
 ): Promise<void> {
   const { flow, style } = context;
-  renderDecision(context, event);
+  renderDecision(context, event, team);
   renderLeadUp(context, leadUp);
   if (withEvidence) {
     renderEvidence(context, event);
@@ -130,12 +143,16 @@ async function renderAnswer(
   }
 }
 
-function renderDecision(context: CliContext, event: MemnoxEvent): void {
+function renderDecision(
+  context: CliContext,
+  event: MemnoxEvent,
+  team: WorkspaceRule | null,
+): void {
   const { flow, style } = context;
   const target = event.target === undefined ? '' : ` ${event.target}`;
   flow.rows(
     `${style.effect(event.effect, event.effect.toUpperCase())}  ${event.operation}${target}`,
-    decisionRows(event),
+    decisionRows(event, team),
   );
   const alternative = event.alternative;
   if (alternative !== undefined) {
@@ -150,7 +167,7 @@ function renderDecision(context: CliContext, event: MemnoxEvent): void {
   }
 }
 
-function decisionRows(event: MemnoxEvent): FlowRow[] {
+function decisionRows(event: MemnoxEvent, team: WorkspaceRule | null): FlowRow[] {
   const rows: FlowRow[] = [
     { label: 'when', value: event.at },
     { label: 'agent', value: describeActor(event) },
@@ -158,10 +175,15 @@ function decisionRows(event: MemnoxEvent): FlowRow[] {
     { label: 'class', value: event.class },
     { label: 'does', value: capabilityOf(event.operation, event.class) },
     { label: 'reason', value: event.reason },
-    { label: 'rule', value: describeRule(event) },
+    { label: 'rule', value: describeRule(event, team) },
   ];
-  const declaredIn = declaredInOf(event);
-  if (declaredIn !== undefined) rows.push({ label: 'declared in', value: declaredIn });
+  // A workspace rule was decided by a person in the team, which says more than a file name.
+  if (team !== null) {
+    rows.push({ label: 'decided by', value: decidedLine(team, event.bundleHash) });
+  } else {
+    const declaredIn = declaredInOf(event);
+    if (declaredIn !== undefined) rows.push({ label: 'declared in', value: declaredIn });
+  }
   if (event.policyHash !== undefined) {
     rows.push({
       label: 'ruleset',
@@ -187,9 +209,10 @@ function describeActor(event: MemnoxEvent): string {
   return named ? chain : `${chain} (${event.actorType})`;
 }
 
-function describeRule(event: MemnoxEvent): string {
+function describeRule(event: MemnoxEvent, team: WorkspaceRule | null): string {
   const rule = event.rule;
   if (rule === undefined) return 'none matched, so the default for this mode applied';
+  if (team !== null) return `${rule.name}  (the workspace's rule)`;
   return `${rule.name}  (${rule.layer} layer)`;
 }
 
