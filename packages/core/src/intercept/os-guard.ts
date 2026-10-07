@@ -54,6 +54,13 @@ export function guardFor(platform: string, kernelRelease: string): GuardSupport 
           because: `Linux ${kernelRelease} predates Landlock (needs 5.13+); the interceptors are the only gate`,
         };
   }
+  if (platform === 'win32') {
+    return {
+      guard: OS_GUARD.NONE,
+      because:
+        'Windows has neither sandbox-exec nor Landlock, so the interceptors, the hook and the proxy are the only gate',
+    };
+  }
   return {
     guard: OS_GUARD.NONE,
     because: `${platform} has no OS guard here; the interceptors are the only gate`,
