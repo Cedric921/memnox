@@ -36,6 +36,29 @@ importers:
         specifier: ^4.1.10
         version: 4.1.11(@types/node@20.19.43)(@vitest/coverage-v8@4.1.11)(vite@8.2.2(@types/node@20.19.43)(esbuild@0.27.7)(jiti@2.7.0)(yaml@2.9.0))
 
+  native/noise:
+    optionalDependencies:
+      '@memnox/noise-darwin-arm64':
+        specifier: workspace:*
+        version: link:npm/darwin-arm64
+      '@memnox/noise-darwin-x64':
+        specifier: workspace:*
+        version: link:npm/darwin-x64
+      '@memnox/noise-linux-arm64-gnu':
+        specifier: workspace:*
+        version: link:npm/linux-arm64-gnu
+      '@memnox/noise-linux-x64-gnu':
+        specifier: workspace:*
+        version: link:npm/linux-x64-gnu
+
+  native/noise/npm/darwin-arm64: {}
+
+  native/noise/npm/darwin-x64: {}
+
+  native/noise/npm/linux-arm64-gnu: {}
+
+  native/noise/npm/linux-x64-gnu: {}
+
   packages/cli:
     dependencies:
       '@memnox/core':
@@ -63,6 +86,10 @@ importers:
       '@memnox/vscode':
         specifier: workspace:*
         version: link:../vscode
+    optionalDependencies:
+      '@memnox/noise':
+        specifier: workspace:*
+        version: link:../../native/noise
 
   packages/core:
     dependencies:
@@ -79,6 +106,12 @@ importers:
       '@types/better-sqlite3':
         specifier: ^9.6.0
         version: 9.6.0
+
+  packages/guard:
+    dependencies:
+      '@memnox/core':
+        specifier: workspace:*
+        version: link:../core
 
   packages/interceptors:
     dependencies:

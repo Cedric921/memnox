@@ -20,7 +20,10 @@
     "changeset": "changeset",
     "version": "changeset version && node scripts/sync-cli-version.mjs",
     "release": "pnpm build && changeset publish",
-    "ship": "node scripts/ship.mjs"
+    "ship": "node scripts/ship.mjs",
+    "relay-stub": "node scripts/relay-stub.mjs",
+    "phone-sim": "node scripts/phone-sim.mjs",
+    "machine-sim": "node scripts/machine-sim.mjs"
   },
   "devDependencies": {
     "@types/node": "^20.14.0",
