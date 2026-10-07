@@ -1,5 +1,5 @@
 import { accessSync, constants, statSync } from 'node:fs';
-import { basename, delimiter, join } from 'node:path';
+import { basename, delimiter, join, win32 } from 'node:path';
 
 import {
   DECISION_EFFECT,
@@ -26,6 +26,7 @@ import {
 } from '@memnox/core';
 
 import { NOBODY_TO_ASK } from './tool-hook.constants';
+import { WINDOWS, windowsCandidatesIn } from './windows-exec';
 
 /**
  * One command line ruled on before its binary runs: the verb
@@ -256,22 +257,42 @@ export function isExecutableFile(candidate: string): boolean {
   }
 }
 
+/** The platform a lookup is for, injected so a test on a Mac can ask as Windows would. */
+export interface ResolveHost {
+  platform?: NodeJS.Platform;
+  /** PATHEXT, read from the environment when absent. */
+  pathExt?: string;
+}
+
 /** Where the real binary lives, found along PATH with our own directory removed. */
 export function resolveReal(
   binary: string,
   path: string,
   exists: (candidate: string) => boolean,
+  host: ResolveHost = {},
 ): string | null {
   // A second line under `realPath`: one stray PATH
   // entry would otherwise spawn itself without end.
-  if (basename(binary) === INTERCEPT_BINARY) return null;
-  for (const entry of path.split(delimiter)) {
+  if (isSelf(binary)) return null;
+  const windows = (host.platform ?? process.platform) === WINDOWS;
+  const pathExt = host.pathExt ?? process.env['PATHEXT'];
+  for (const entry of path.split(windows ? ';' : delimiter)) {
     if (entry === '') continue;
-    const candidate = join(entry, binary);
-    if (basename(candidate) === INTERCEPT_BINARY) continue;
-    if (exists(candidate)) return candidate;
+    const candidates = windows
+      ? windowsCandidatesIn(entry, binary, pathExt)
+      : [join(entry, binary)];
+    const found = candidates.find((candidate) => !isSelf(candidate) && exists(candidate));
+    if (found !== undefined) return found;
   }
   return null;
+}
+
+/** Our own name in either separator and with any Windows extension, which is never exec'd. */
+function isSelf(candidate: string): boolean {
+  return (
+    win32.basename(candidate).replace(/\.(?:cmd|bat|exe|com|ps1)$/i, '') ===
+    INTERCEPT_BINARY
+  );
 }
 
 /** The one resolver in core, so every surface agrees on what a command line is. */

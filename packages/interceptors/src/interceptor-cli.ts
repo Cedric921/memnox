@@ -11,6 +11,7 @@ import {
   exitCodeForChild,
   exitCodeForSpawnError,
   holderPid,
+  pathValueOf,
   isBrowserLauncher,
   openLedger,
   overlaysInForce,
@@ -19,6 +20,7 @@ import {
   SESSION_VAR,
   splitCommandLine,
   urlArgumentIn,
+  withPathValue,
   type EventSink,
   type LocalGate,
   type Overlay,
@@ -46,6 +48,7 @@ import { buildHold, log, pidSessionId } from './seam-runtime';
 import { ancestorsOf } from './process-ancestry';
 import { claimShellAction, shellAction, type ShellClaim } from './shell-action';
 import { DEFAULT_AGENT_NAME } from './tool-hook.constants';
+import { spawnPlanFor } from './windows-exec';
 
 /**
  * One binary behind every interceptor: it reads which name it was called as, rules on the
@@ -318,7 +321,7 @@ async function anotherAgentHasIt(
  * back, so the agent sees what it would without us.
  */
 async function hand(command: Command, home: string): Promise<number> {
-  const path = realPath(process.env['PATH'] ?? '', home);
+  const path = realPath(pathValueOf(process.env), home);
   const real = resolveReal(command.binary, path, isExecutableFile);
   if (real === null) {
     process.stderr.write(
@@ -332,10 +335,13 @@ async function hand(command: Command, home: string): Promise<number> {
   // Ruled on already: only a command allowed to run reaches here to be handed its token.
   const env = await brokeredEnvironment(process.env, command.binary);
   for (const signal of FORWARDED) process.on(signal, ignore);
+  // A batch file on Windows runs under cmd.exe with its arguments escaped, never spliced in raw.
+  const plan = spawnPlanFor(real, command.args, { comspec: process.env['ComSpec'] });
   return new Promise((resolve) => {
-    const child = spawn(real, [...command.args], {
+    const child = spawn(plan.file, plan.args, {
       stdio: 'inherit',
-      env: { ...env, PATH: path },
+      env: withPathValue(env, path),
+      windowsVerbatimArguments: plan.verbatim,
     });
     child.on('error', (err: unknown) => {
       process.stderr.write(`memnox: could not run ${command.binary}: ${String(err)}\n`);

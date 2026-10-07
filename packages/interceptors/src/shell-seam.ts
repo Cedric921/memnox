@@ -247,6 +247,7 @@ export class ShellSeam {
       reason: ruling.verdict.reason,
       command: line,
       class: ruling.class,
+      ...(ruling.verdict.rule === undefined ? {} : { rule: ruling.verdict.rule }),
     };
     const result = await hold.hold(request);
     // One yes covered the whole line, so everything it asked about is learned.
