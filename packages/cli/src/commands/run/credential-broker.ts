@@ -4,6 +4,7 @@ import { dirname } from 'node:path';
 import {
   brokerPathFor,
   credentialsFor,
+  isNamedPipe,
   parseBrokerRequest,
   type BrokerReply,
   type HeldCredentials,
@@ -29,18 +30,20 @@ export async function startBroker(
   held: HeldCredentials,
 ): Promise<CredentialBroker> {
   const path = brokerPathFor(home, sessionId);
-  await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+  // A Windows pipe has no file: nothing to make, clear, chmod or remove after.
+  const file = !isNamedPipe(path);
+  if (file) await mkdir(dirname(path), { recursive: true, mode: 0o700 });
   // A socket left by a crashed run under the same id would refuse the listen.
-  await rm(path, { force: true });
+  if (file) await rm(path, { force: true });
   const server = createServer((socket) => answer(socket, held));
   await listen(server, path);
-  await chmod(path, 0o600);
+  if (file) await chmod(path, 0o600);
   return {
     path,
     held: Object.keys(held).length,
     close: async () => {
       await new Promise<void>((done) => server.close(() => done()));
-      await rm(path, { force: true });
+      if (file) await rm(path, { force: true });
     },
   };
 }

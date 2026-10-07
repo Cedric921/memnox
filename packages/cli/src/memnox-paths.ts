@@ -70,3 +70,37 @@ const CONVERSATION_FILE = 'conversation.json';
 export function conversationPath(home: string): string {
   return join(home, MEMNOX_HOME, VOICE_DIR, CONVERSATION_FILE);
 }
+
+const VOICE_BRAIN_FILE = 'brain.json';
+const VOICE_AGENTS_FILE = 'agents.json';
+
+/** Which agent the voice thinks with, chosen in the Mac app or found by checking which answers. */
+export function voiceBrainPath(home: string): string {
+  return join(home, MEMNOX_HOME, VOICE_DIR, VOICE_BRAIN_FILE);
+}
+
+/** What each agent said when last asked to be the voice, for the Mac app's settings. */
+export function voiceAgentsPath(home: string): string {
+  return join(home, MEMNOX_HOME, VOICE_DIR, VOICE_AGENTS_FILE);
+}
+
+const KOKORO_VOICE_FILE = 'kokoro-voice.json';
+const REMOTE_DIR = 'remote';
+const NOISE_KEY_FILE = 'noise-key.json';
+
+/** The Kokoro voice picked on the Mac, handed to a paired phone so both sound alike. */
+export function kokoroVoicePath(home: string): string {
+  return join(home, MEMNOX_HOME, VOICE_DIR, KOKORO_VOICE_FILE);
+}
+
+/** This machine's Noise static key, which a phone learns at pairing and checks on every connection. */
+export function noiseKeyPath(home: string): string {
+  return join(home, MEMNOX_HOME, REMOTE_DIR, NOISE_KEY_FILE);
+}
+
+const UPDATES_FILE = 'updates.jsonl';
+
+/** One line per upgrade `memnox update` ran, so an unverified install stays on the record. */
+export function updatesLogPath(home: string): string {
+  return join(home, MEMNOX_HOME, UPDATES_FILE);
+}

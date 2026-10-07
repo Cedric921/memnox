@@ -1,5 +1,6 @@
 import { join } from 'node:path';
 import { MEMNOX_HOME } from '../config/config';
+import { pipeNameFor, usesNamedPipes } from '../daemon/endpoint';
 import { looksLikeCredential } from '../discovery/credentials';
 import { verbTableFor } from '../verbs/tables';
 
@@ -101,8 +102,13 @@ export function credentialsFor(
   return handed;
 }
 
-/** One socket per session, beside the other per-session state. */
-export function brokerPathFor(home: string, sessionId: string): string {
+/** One socket per session beside the other per-session state, or one pipe per session on Windows. */
+export function brokerPathFor(
+  home: string,
+  sessionId: string,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  if (usesNamedPipes(platform)) return pipeNameFor(home, `memnox-broker-${sessionId}`);
   return join(home, MEMNOX_HOME, 'brokers', `${sessionId}.sock`);
 }
 
