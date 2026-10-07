@@ -17,6 +17,7 @@ import {
   type DaemonResponse,
 } from '@memnox/core';
 import { MemnoxDaemon } from '../src/daemon-server';
+import { CLI_VERSION } from '../src/defaults';
 
 const NOW = '2026-09-05T10:00:00.000Z';
 
@@ -65,11 +66,12 @@ async function running(
 }
 
 describe('the daemon', () => {
-  it('answers a ping', async () => {
+  it('answers a ping with its version, so the Mac app can tell one too old for it', async () => {
     const { daemon, path } = await running();
     expect(await ask(path, { id: 1, method: DAEMON_METHOD.PING })).toMatchObject({
       id: 1,
       ok: true,
+      version: CLI_VERSION,
     });
     await daemon.close();
   });

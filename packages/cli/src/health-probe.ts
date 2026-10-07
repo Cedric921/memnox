@@ -23,6 +23,8 @@ import {
   loadPolicySet,
   type Policy,
   socketPathFor,
+  isNamedPipe,
+  pathValueOf,
   LeaseRegistry,
   PendingApprovals,
   readBudgets,
@@ -39,11 +41,13 @@ import {
   isExecutableFile,
   realPath,
   resolveReal,
+  shimNamesIn,
 } from '@memnox/interceptors';
 
 import { describeError } from './cli-errors';
 import { serviceState } from './daemon/service';
 import { withEvents } from './event-store';
+import { onPath } from './on-path';
 import { POLICY_FILES } from './policy-path';
 import { policyRegistryPath } from './policy-registry';
 import { CLAUDE_SETTINGS } from './protect/claude-hook';
@@ -103,7 +107,7 @@ export async function readHealth(
   const config = await loadOrCreateConfig(home);
   // What the seams load, which is a different list from what `policy test` reads.
   const registeredFiles = await readPolicyRegistry(policyRegistryPath(home));
-  const socket = await exists(socketPathFor(home));
+  const socket = await daemonAddressPresent(home);
   return {
     ...(await readHolds(home, now.toISOString())),
     configFound: await exists(configPathFor(home)),
@@ -143,6 +147,12 @@ async function readOrNull(path: string): Promise<string | null> {
     // Absent or unreadable both mean no hook can be read from it.
     return null;
   }
+}
+
+/** A socket file to find, or on Windows a pipe, which has no file and is present only while answered. */
+async function daemonAddressPresent(home: string): Promise<boolean> {
+  const address = socketPathFor(home);
+  return isNamedPipe(address) ? isDaemonAnswering(home) : exists(address);
 }
 
 async function isDaemonAnswering(home: string): Promise<boolean> {
@@ -303,8 +313,9 @@ async function readInterceptors(
   home: string,
   env: NodeJS.ProcessEnv,
 ): Promise<InterceptorFacts> {
-  const installed = await installedInterceptors(home);
-  const path = (env['PATH'] ?? '').split(delimiter);
+  // One per binary, though Windows keeps a `.cmd` beside each script.
+  const installed = shimNamesIn(await installedInterceptors(home));
+  const path = pathValueOf(env).split(delimiter);
   return {
     interceptorsInstalled: installed,
     // Only what this machine has, since `protect --interceptors` wraps nothing else.
@@ -312,7 +323,7 @@ async function readInterceptors(
     // First wins on PATH, so anything before us means the real binary is found first.
     interceptorDirFirstOnPath:
       installed.length > 0 && path.indexOf(interceptorDirFor(home)) === 0,
-    interceptBinaryFound: isInterceptBinaryOn(realPath(env['PATH'] ?? '', home)),
+    interceptBinaryFound: isInterceptBinaryOn(realPath(pathValueOf(env), home)),
   };
 }
 
@@ -330,10 +341,7 @@ async function installedInterceptors(home: string): Promise<string[]> {
  * through `resolveReal`, which refuses this name so a wrapper never resolves to itself.
  */
 function isInterceptBinaryOn(path: string): boolean {
-  return path
-    .split(delimiter)
-    .filter((entry) => entry !== '')
-    .some((entry) => existsSync(join(entry, INTERCEPT_BINARY)));
+  return onPath(INTERCEPT_BINARY, path, existsSync);
 }
 
 /**
@@ -341,7 +349,7 @@ function isInterceptBinaryOn(path: string): boolean {
  * with our own directory removed, or a shim resolving to itself reports them all present.
  */
 function presentBinaries(home: string, env: NodeJS.ProcessEnv): string[] {
-  const path = realPath(env['PATH'] ?? '', home);
+  const path = realPath(pathValueOf(env), home);
   return interceptedBinaries().filter(
     (binary) => resolveReal(binary, path, isExecutableFile) !== null,
   );
