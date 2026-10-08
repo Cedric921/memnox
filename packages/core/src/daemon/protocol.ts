@@ -1,16 +1,22 @@
 /**
- * A line-delimited JSON protocol over a Unix socket, kept small because an interceptor
- * asks on every command an agent types, so asking has to cost a connect and one line.
+ * A line-delimited JSON protocol over a Unix socket, or a named pipe on Windows, kept small
+ * because an interceptor asks on every command, so asking has to cost a connect and a line.
  */
-import { join } from 'node:path';
-import { MEMNOX_HOME } from '../config/config';
 import type { DecisionEffect } from '../constants/decision.constants';
-
-export const SOCKET_FILE = 'memnox.sock';
-
-export function socketPathFor(home: string): string {
-  return join(home, MEMNOX_HOME, SOCKET_FILE);
-}
+import type { RunTally } from '../session/notices';
+import type { TurnTests } from '../session/turn-tests';
+import type { DeliveryProof, Sight } from './delivery';
+import type { DisplayKind } from './display';
+import type {
+  ExtensionEventFields,
+  ExtensionRequestFields,
+  ExtensionResponseFields,
+} from './extension-fields';
+import { HOME_METHOD } from './home';
+import { INTERCEPT_METHOD } from './intercept';
+import { REMOTE_METHOD } from './remote';
+import { SPEECH_METHOD } from './speech';
+import type { AskIntent, MailDraft, RuleDraft } from './voice-cards';
 
 export const DAEMON_METHOD = {
   /** Rule on one action. The hot path, and the only one with a latency budget. */
@@ -27,7 +33,7 @@ export const DAEMON_METHOD = {
   SUBSCRIBE: 'subscribe',
   /** What is waiting on a person right now: held calls and proposals. */
   WAITING: 'waiting',
-  /** A person's answer to a held call or a proposal; anything but a refusal carries a signature. */
+  /** A person's answer to a held call or a proposal; a yes carries a signature unless the call stays within its session. */
   CONFIRM: 'confirm',
   /** The public half of the key a confirmation is signed with, trusted on first use. */
   REGISTER_KEY: 'register-key',
@@ -51,18 +57,36 @@ export const DAEMON_METHOD = {
   DELIVERED: 'delivered',
   /** The Mac app's own timings for the question just answered: hearing, waiting for the end, speaking. */
   TRACE: 'trace',
+  /** Which of the person's agents can be the voice, and why the others cannot. */
+  VOICE_AGENTS: 'voice-agents',
+  /** The person picking which agent the voice thinks with, from the Mac app's settings. */
+  CHOOSE_VOICE_AGENT: 'choose-voice-agent',
+  /** Words the person fixed in what the Mac typed for them, kept so they are heard right next time. */
+  LEARN_WORDS: 'learn-words',
+  /** The Mac app answering a LOOK display with what was on screen: a capture and the window's outline. */
+  SEEN: 'seen',
+  /** One folder under the person's home, names and sizes only, so a phone browses the Mac without the brain or the screen. */
+  FILES_LIST: 'files-list',
+  ...REMOTE_METHOD,
+  ...SPEECH_METHOD,
+  ...HOME_METHOD,
+  ...INTERCEPT_METHOD,
 } as const;
 
 export type DaemonMethod = (typeof DAEMON_METHOD)[keyof typeof DAEMON_METHOD];
 
-export interface DaemonRequest {
+export interface DaemonRequest extends ExtensionRequestFields {
   id: number;
   method: DaemonMethod;
+  /**
+   * The session the request is about. On ASK: the session the person has open on the phone,
+   * which the brain treats as the one they follow up on; it names a session and grants nothing.
+   */
   sessionId?: string;
   agent?: string;
   action?: string;
   target?: string;
-  /** A digest. Arguments never travel, not even over a local socket. */
+  /** A digest. Arguments travel only on INTERCEPT, ruled on in memory and never kept. */
   argsDigest?: string;
   reason?: string;
   /** On RECORD: how the command ended. The breaker's error and progress signals. */
@@ -85,11 +109,19 @@ export interface DaemonRequest {
   said?: string;
   /** On ASK: they were waited on for the rest and said nothing more, so `said` is the whole of it. */
   finished?: boolean;
+  /** On ASK: how the person asked, chosen by the keys they held rather than by any word they said. */
+  intent?: AskIntent;
   /**
    * On ASK: what they have said so far, sent at a pause before the Mac is sure they finished,
    * so the answer can start early. Nothing of it is said until an ask with the same words.
    */
   speculative?: boolean;
+  /** On LEARN_WORDS: each word as it was typed and as the person corrected it. */
+  learned?: { heard: string; meant: string }[];
+  /** On ASK: the app in front of the person as they spoke, by name, so a misheard word is read against it. */
+  lookingAt?: string;
+  /** On ASK: the title of that app's window in front, which names the project an editor has open. */
+  lookingAtWindow?: string;
   /** On any voice request: the name the person asked to be called. */
   owner?: string;
   /** On BRIEF: held, paused or back. */
@@ -98,6 +130,31 @@ export interface DaemonRequest {
   since?: string;
   /** On TRACE: the Mac's own steps for the question just answered. */
   spans?: MacSpan[];
+  /** On VOICE_AGENTS: ask every installed agent again rather than answer from the last check. */
+  recheck?: boolean;
+  /** On CHOOSE_VOICE_AGENT: the agent's kind, such as cursor. */
+  voiceAgent?: string;
+  /** On DELIVERED: what the Mac read back after acting, which a verified outcome must carry. */
+  proof?: DeliveryProof;
+  /** On SEEN: what was on screen when the brain asked to look. */
+  sight?: Sight;
+}
+
+/** One agent as the voice's settings show it: there or not, whether it answered, and whether it is the one. */
+export interface VoiceAgentStatus {
+  kind: string;
+  label: string;
+  installed: boolean;
+  /** Kept to reading; one that is not is used only when nothing else answered. */
+  sealed: boolean;
+  /** Absent until it has been asked, true once it called a Memnox tool and said what it was asked to. */
+  works?: boolean;
+  /** Why it did not, in words a person can act on. */
+  because?: string;
+  checkedAt?: string;
+  chosen: boolean;
+  /** What to install, or set up, when it is missing or cannot answer. */
+  install: string;
 }
 
 /** A step the Mac timed, hung on the trace of the question it belongs to. */
@@ -141,48 +198,7 @@ export interface DaemonAskChunk {
   tool?: string;
 }
 
-export const DISPLAY = {
-  /** Bring the session's own window forward. */
-  OPEN: 'open',
-  /** Put a summary card on screen while the voice reads it. */
-  CARD: 'card',
-  /** Type the person's confirmed instruction into the terminal tab the agent waits in. */
-  TYPE: 'type',
-  /** Open the session in its editor with the instruction in its input, for the person to send. */
-  PREFILL: 'prefill',
-  /** Turn through the sessions to this one and bring its own terminal tab or editor forward. */
-  FOCUS: 'focus',
-  /** Open a new terminal tab in a repository and type the line that starts an agent there. */
-  LAUNCH: 'launch',
-  /** A card that pages through a session's changed files while the voice walks through them. */
-  WALK: 'walk',
-  /** The whole screen: every agent on this Mac, found by a live scan, with what each reaches. */
-  AGENTS: 'agents',
-  /** A trace as a waterfall card: what ran, inside what, for how long, and what failed. */
-  TRACE: 'trace',
-  /** Every session lately as one card each, together, so they can be read at a glance. */
-  SESSIONS: 'sessions',
-  /** Close the live window on a session and its own terminal tab, which ends the agent there. */
-  CLOSE: 'close',
-  /** Take every Memnox card and window off the screen, leaving every agent and its tab alone. */
-  DISMISS: 'dismiss',
-} as const;
-
-export type DisplayKind = (typeof DISPLAY)[keyof typeof DISPLAY];
-
-/** How an instruction the Mac was asked to type ended, as DELIVERED reports it in `answer`. */
-export const DELIVERY = {
-  /** Typed into the agent's prompt and sent. */
-  TYPED: 'typed',
-  /** It could not be typed safely, so the words were left on the clipboard. */
-  CLIPBOARD: 'clipboard',
-  /** The Mac is not allowed to press keys until the person turns Memnox on under Accessibility, so the words were left on the clipboard. */
-  NOT_ALLOWED: 'not-allowed',
-  /** Nothing was typed anywhere. */
-  FAILED: 'failed',
-} as const;
-
-export type Delivery = (typeof DELIVERY)[keyof typeof DELIVERY];
+export { DISPLAY, type DisplayKind } from './display';
 
 /** Who said a line of a session's conversation. */
 export const SPEAKER = {
@@ -292,7 +308,7 @@ export const DAEMON_EVENT = {
 export type DaemonEventKind = (typeof DAEMON_EVENT)[keyof typeof DAEMON_EVENT];
 
 /** One thing a person may want to hear about, in words that can be spoken as they are. */
-export interface DaemonEvent {
+export interface DaemonEvent extends ExtensionEventFields {
   kind: DaemonEventKind;
   /** The id a CONFIRM names: a pending id, a proposal id, or the session that paused. */
   subject: string;
@@ -308,6 +324,8 @@ export interface DaemonEvent {
   why?: string;
   /** The task the session was given, in the person's words. */
   task?: string;
+  /** On HELD and NOTICE, the person's latest follow up in that session when it is not the task itself. */
+  lastAsk?: string;
   /** The folder the session works in, by name. */
   place?: string;
   /** On HELD and NOTICE, the session it is about, so the voice reads that one and never guesses. */
@@ -323,12 +341,27 @@ export interface DaemonEvent {
   excerpt?: CardExcerpt;
   /** On NOTICE, what happened: finished, committed or pushed. */
   notice?: string;
+  /** On a finished NOTICE, how its tests stood when it handed back, so only checked work is celebrated. */
+  tests?: TurnTests;
+  /** On a finished NOTICE, what the turn came to: actions, questions put to the person, refusals. */
+  run?: RunTally;
   /** On a WALK card, one page per file, in the order the voice says them. */
   pages?: WalkPage[];
   /** On AGENTS, every agent the scan found. */
   agents?: AgentNode[];
   /** On TRACE, the waterfall to draw. */
   trace?: TraceCard;
+  /** On DRAFT, the message to put in front of the person before it is sent. */
+  draft?: MailDraft;
+  /** On APP, the app's links opened in order after `host.appPath`, and what it reads as it opens. */
+  app?: { links: string[]; env?: Record<string, string> };
+  /** On a PROPOSAL of a rule, the rule and where it could go, so the person picks a place before Touch ID. */
+  rule?: RuleDraft;
+  /**
+   * On HELD, and on a PROPOSAL that answers one, the call stays inside its session's repository,
+   * so a yes goes without Touch ID. Absent asks for it, which is every call that reaches further.
+   */
+  withinSession?: true;
 }
 
 /** A trace drawn as a waterfall: each step's place on the clock, how deep it sits, how it ended. */
@@ -392,7 +425,7 @@ export interface DisplayHost {
   conversation?: string;
 }
 
-export interface DaemonResponse {
+export interface DaemonResponse extends ExtensionResponseFields {
   id: number;
   ok: boolean;
   effect?: DecisionEffect;
@@ -416,8 +449,11 @@ export interface DaemonResponse {
   sessions?: SessionCard[];
   /** On ASK, one per line; the turn ends with a chunk whose kind is in ASK_ENDS. */
   chunk?: DaemonAskChunk;
-  /** On CONFIRM and REGISTER_KEY: what happened, in a word or two. */
+  /** On VOICE_AGENTS and CHOOSE_VOICE_AGENT, every agent the voice knows, preferred first. */
+  voiceAgents?: VoiceAgentStatus[];
+  /** On CONFIRM and REGISTER_KEY, what happened in a word or two; on PING, which memnox answered. */
   outcome?: string;
+  version?: string;
   error?: string;
 }
 

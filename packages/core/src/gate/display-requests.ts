@@ -5,10 +5,10 @@ import type {
   CardExcerpt,
   TraceCard,
   CardFile,
-  Delivery,
   DisplayKind,
   WalkPage,
 } from '../daemon/protocol';
+import type { Delivery, DeliveryProof, Sight } from '../daemon/delivery';
 import { DISPLAY } from '../daemon/protocol';
 import { shortDigest } from '../domain/digest';
 import { JsonRecordDir } from '../store/json-records';
@@ -40,6 +40,8 @@ export const WALK_PAGES = 5;
 export const SCAN_AGENTS = 12;
 /** As many steps as a card shows before it is a log rather than a picture. */
 export const TRACE_ROWS = 16;
+/** An app is opened on a folder and handed a task, which no app needs more links than this for. */
+const APP_LINKS = 3;
 
 export interface DisplayRequest {
   id: string;
@@ -57,10 +59,16 @@ export interface DisplayRequest {
   pages?: WalkPage[];
   agents?: AgentNode[];
   trace?: TraceCard;
+  /** On APP, the app opened first, its links opened in order after, and what it reads as it opens. */
+  appPath?: string;
+  links?: string[];
+  env?: Record<string, string>;
   requestedAt: string;
   expiresAt: string;
   /** Set once the Mac says how typing it ended; a delivered request is never shown again. */
   delivered?: DisplayDelivery;
+  /** On LOOK, what the Mac saw, which also marks it answered. */
+  seen?: Sight;
 }
 
 /** What the Mac said became of an instruction it was asked to type. */
@@ -69,6 +77,8 @@ export interface DisplayDelivery {
   at: string;
   /** In the Mac's words, when it could say why it could not. */
   reason?: string;
+  /** What the Mac read back after acting, which only a verified delivery must carry. */
+  proof?: DeliveryProof;
 }
 
 export interface DisplayInput {
@@ -84,6 +94,9 @@ export interface DisplayInput {
   pages?: WalkPage[];
   agents?: AgentNode[];
   trace?: TraceCard;
+  appPath?: string;
+  links?: string[];
+  env?: Record<string, string>;
   at: string;
 }
 
@@ -124,6 +137,9 @@ export class DisplayRequests {
       ...(input.trace === undefined
         ? {}
         : { trace: { ...input.trace, rows: input.trace.rows.slice(0, TRACE_ROWS) } }),
+      ...(input.appPath === undefined ? {} : { appPath: input.appPath }),
+      ...(input.links === undefined ? {} : { links: input.links.slice(0, APP_LINKS) }),
+      ...(input.env === undefined ? {} : { env: input.env }),
       requestedAt: input.at,
       expiresAt: new Date(Date.parse(input.at) + DISPLAY_TTL_MS).toISOString(),
     };
@@ -138,7 +154,12 @@ export class DisplayRequests {
       if (each.expiresAt <= moment) await this.records.remove(each.id);
     }
     return found
-      .filter((each) => each.expiresAt > moment && each.delivered === undefined)
+      .filter(
+        (each) =>
+          each.expiresAt > moment &&
+          each.delivered === undefined &&
+          each.seen === undefined,
+      )
       .sort((a, b) => a.requestedAt.localeCompare(b.requestedAt));
   }
 
@@ -148,6 +169,23 @@ export class DisplayRequests {
     if (request === null) return false;
     await this.records.write(id, { ...request, delivered: delivery });
     return true;
+  }
+
+  /** One request by its id, or null once it is gone. */
+  async read(id: string): Promise<DisplayRequest | null> {
+    return this.records.read(id);
+  }
+
+  /** What the Mac saw for a LOOK, false when the request is gone. */
+  async see(id: string, sight: Sight): Promise<boolean> {
+    const request = await this.records.read(id);
+    if (request === null) return false;
+    await this.records.write(id, { ...request, seen: sight });
+    return true;
+  }
+
+  async sightOf(id: string): Promise<Sight | null> {
+    return (await this.records.read(id))?.seen ?? null;
   }
 
   async deliveryOf(id: string): Promise<DisplayDelivery | null> {
