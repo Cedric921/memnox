@@ -9,6 +9,8 @@ import type { SessionHost } from '@memnox/core';
 /** The host with its terminal as it is now, or null when its process has ended. */
 export function liveHost(host: SessionHost): SessionHost | null {
   if (!processAlive(host.pid)) return null;
+  // A panel session's process may hold a terminal it inherited, which is never where it is typed into.
+  if (host.panel === true) return host;
   const tty = ttyOf(host.pid);
   if (tty === null) {
     const { tty: _gone, ...rest } = host;

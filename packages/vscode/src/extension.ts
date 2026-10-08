@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
-import { readFile, rename, writeFile } from 'node:fs/promises';
+import { watch } from 'node:fs';
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -7,7 +8,12 @@ import * as vscode from 'vscode';
 import { deviceFromLink, terminalOn } from './terminal-match';
 import {
   agentInFront,
+  claimedElsewhere,
+  deviceOfRequest,
   keyPausesMs,
+  launchable,
+  launchLinkOf,
+  requestOfFile,
   typableText,
   typeLinkOf,
   waitingRequest,
@@ -17,7 +23,8 @@ import {
  * Opened by the Mac. `/terminal?tty=ttys013` shows the integrated terminal on that device.
  * `/type?request=dsp_...&tty=ttys013` types an instruction the person already said yes to into
  * the agent there, reading the words from the request rather than the link, since any page can
- * open a link and a link that carried words would be a way into the agent.
+ * open a link and a link that carried words would be a way into the agent. `/launch?request=dsp_...`
+ * starts an agent the person said yes to in a new terminal here, on the same terms.
  */
 
 const PS_TIMEOUT_MS = 2_000;
@@ -28,8 +35,17 @@ const DISPLAYS = join(homedir(), '.memnox', 'displays');
 /** A beat before Return, since an agent reads text and Return arriving together as a paste. */
 const BEFORE_RETURN_MS = 250;
 
+/** Marks a request no terminal here holds, which is for the Mac to type elsewhere rather than an answer. */
+const NO_TERMINAL = 'noTerminal';
+
 /** Requests being typed now, so a link opened twice types the words once. */
 const typing = new Set<string>();
+
+/** Marks a request this window took, so a window the link reached instead never answers it as missing. */
+const CLAIMED_BY = 'claimedBy';
+
+/** Long enough for the window holding the terminal to see the request and claim it. */
+const CLAIM_GRACE_MS = 1_500;
 
 export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
@@ -38,9 +54,40 @@ export function activate(context: vscode.ExtensionContext): void {
         if (uri.path === '/terminal') await showTerminal(uri.query);
         if (uri.path === '/type') await typeInstruction(uri.query);
         if (uri.path === '/close') await closeTerminal(uri.query);
+        if (uri.path === '/launch') await launchAgent(uri.query);
       },
     }),
   );
+  watchRequests(context);
+}
+
+/**
+ * Every window watches for instructions to type, since the Mac's link reaches only one window and
+ * the session's terminal may be in another: the window holding the terminal types it there, so a
+ * follow up lands in the session itself and never in a new chat.
+ */
+function watchRequests(context: vscode.ExtensionContext): void {
+  void mkdir(DISPLAYS, { recursive: true, mode: 0o700 })
+    .then(() => {
+      const watcher = watch(DISPLAYS, (_event, name) => {
+        const request = requestOfFile(typeof name === 'string' ? name : null);
+        if (request !== null) void typeIfHeldHere(request);
+      });
+      context.subscriptions.push({ dispose: () => watcher.close() });
+    })
+    .catch(() => undefined);
+}
+
+/** Types a request whose terminal this window holds, claiming it first so no other window answers it. */
+async function typeIfHeldHere(request: string): Promise<void> {
+  if (typing.has(request)) return;
+  const path = join(DISPLAYS, `${request}.json`);
+  const record = await readJson(path);
+  const tty = deviceOfRequest(record);
+  if (tty === null || claimedElsewhere(record, process.pid)) return;
+  if ('why' in typableText(record, tty, new Date().toISOString())) return;
+  if ((await terminalAt(tty)) === undefined) return;
+  await typeInstruction(new URLSearchParams({ request, tty }).toString());
 }
 
 export function deactivate(): void {}
@@ -66,11 +113,26 @@ async function typeInstruction(query: string): Promise<void> {
       }
       return;
     }
+    if (claimedElsewhere(record, process.pid)) return;
     const terminal = await terminalAt(link.tty);
     if (terminal === undefined) {
-      await deliver(path, record, 'failed', 'no integrated terminal holds its device');
+      // Another window may hold it and claim it in a moment; only when none did is it said to be nowhere here.
+      await sleep(CLAIM_GRACE_MS);
+      const later = await readJson(path);
+      if (
+        claimedElsewhere(later, process.pid) ||
+        'why' in typableText(later, link.tty, new Date().toISOString())
+      )
+        return;
+      await rewrite(path, { ...(later as Record<string, unknown>), [NO_TERMINAL]: true });
       return;
     }
+    await rewrite(path, {
+      ...(record as Record<string, unknown>),
+      [CLAIMED_BY]: process.pid,
+    });
+    // Two windows never hold one terminal, but a claim read back is the one that stands.
+    if (claimedElsewhere(await readJson(path), process.pid)) return;
     if (!agentInFront(await foreground(link.tty))) {
       await deliver(path, record, 'failed', 'no agent is in front in its terminal');
       return;
@@ -113,6 +175,42 @@ async function closeTerminal(query: string): Promise<void> {
   }
 }
 
+/**
+ * Starts an agent the person said yes to in a new terminal here, on its repository, so it runs
+ * inside the editor they asked for. The line comes from the request, never from the link.
+ */
+async function launchAgent(query: string): Promise<void> {
+  const request = launchLinkOf(query);
+  if (request === null || typing.has(request)) return;
+  typing.add(request);
+  try {
+    const path = join(DISPLAYS, `${request}.json`);
+    const record = await readJson(path);
+    const launch = launchable(record, new Date().toISOString());
+    if ('why' in launch) {
+      if (launch.why !== 'it was already answered' && record !== null) {
+        await deliver(path, record, 'failed', launch.why);
+      }
+      return;
+    }
+    const terminal = vscode.window.createTerminal({
+      name: launch.title,
+      cwd: launch.cwd,
+    });
+    terminal.show(false);
+    // A new shell reads no keys until it has started, and the first few would be lost.
+    await terminal.processId;
+    await sleep(SHELL_STARTUP_MS);
+    const typed = await typeInto(terminal, launch.line);
+    await deliver(path, record, typed === null ? 'typed' : 'failed', typed ?? undefined);
+  } finally {
+    typing.delete(request);
+  }
+}
+
+/** Long enough for a login shell to draw its prompt before the line goes in. */
+const SHELL_STARTUP_MS = 800;
+
 /** A key at a time, so the person watches it go in, then Return; the reason when it stopped. */
 async function typeInto(terminal: vscode.Terminal, text: string): Promise<string | null> {
   const keys = [...text];
@@ -154,7 +252,11 @@ async function deliver(
     ...(reason === undefined ? {} : { reason }),
   };
   // Checked to be an object by typableText or the null test before any caller gets here.
-  const next = { ...(record as Record<string, unknown>), delivered };
+  await rewrite(path, { ...(record as Record<string, unknown>), delivered });
+}
+
+/** The request written whole, so the runtime and the Mac never read half a file. */
+async function rewrite(path: string, next: Record<string, unknown>): Promise<void> {
   const staging = `${path}.${process.pid}.tmp`;
   try {
     await writeFile(staging, `${JSON.stringify(next, null, 2)}\n`, { mode: 0o600 });

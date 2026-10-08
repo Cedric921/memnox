@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { copyFile, mkdir, rm, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { MEMNOX_HOME } from '@memnox/core';
@@ -16,18 +16,31 @@ import { CLI_VERSION } from '../defaults';
 /** What the Mac opens a link to, and what an uninstall names. */
 export const TERMINALS_EXTENSION = 'memnox.memnox-terminals';
 
-/** Each editor by the CLI inside its own bundle, since none of them is on PATH by default. */
-const EDITORS: readonly { name: string; cli: string }[] = [
+/** Each editor by the CLI inside its own bundle, since none of them is on PATH by default, and where it keeps extensions. */
+const EDITORS: readonly Editor[] = [
   {
     name: 'VS Code',
     cli: '/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code',
+    extensions: '.vscode/extensions',
   },
-  { name: 'Cursor', cli: '/Applications/Cursor.app/Contents/Resources/app/bin/cursor' },
+  {
+    name: 'Cursor',
+    cli: '/Applications/Cursor.app/Contents/Resources/app/bin/cursor',
+    extensions: '.cursor/extensions',
+  },
   {
     name: 'Windsurf',
     cli: '/Applications/Windsurf.app/Contents/Resources/app/bin/windsurf',
+    extensions: '.windsurf/extensions',
   },
 ];
+
+interface Editor {
+  name: string;
+  cli: string;
+  /** Under the home folder, holding one folder per installed extension and version. */
+  extensions: string;
+}
 
 const EDITOR_TIMEOUT_MS = 60_000;
 
@@ -69,6 +82,48 @@ export async function runVscodeTerminals(
   render(context, outcomes, reverting);
 }
 
+/**
+ * Puts the extension into every editor here whose installed copy is not the one this memnox ships,
+ * run as the daemon starts, which it does after every update. An older copy answers for the Mac
+ * and the voice then says typing failed when it went in, so nobody should have to run protect again.
+ */
+export async function refreshVscodeTerminals(
+  home: string,
+  log: (message: string) => void,
+  seams: TerminalsSeams = NODE_SEAMS,
+): Promise<void> {
+  const script = seams.script();
+  if (script === null) return;
+  const shipped = await readFile(script, 'utf8').catch(() => null);
+  if (shipped === null) return;
+  const here = EDITORS.filter((each) => seams.exists(each.cli));
+  const held = await Promise.all(
+    here.map((each) => holdsShipped(join(home, each.extensions), shipped)),
+  );
+  const behind = here.filter((_each, index) => held[index] !== true);
+  if (behind.length === 0) return;
+  for (const outcome of await installInto(behind, home, seams)) {
+    log(
+      outcome.done
+        ? `The Memnox extension was put into ${outcome.editor}, so the voice can type into its terminals; a window already open takes it once its extensions restart.`
+        : `The Memnox extension could not be put into ${outcome.editor}: ${outcome.why ?? ''}`,
+    );
+  }
+}
+
+/** Whether any installed copy in this extensions folder is exactly the script this memnox ships. */
+async function holdsShipped(folder: string, shipped: string): Promise<boolean> {
+  const names = await readdir(folder).catch(() => [] as string[]);
+  const copies = await Promise.all(
+    names
+      .filter((name) => name.startsWith(`${TERMINALS_EXTENSION}-`))
+      .map((name) =>
+        readFile(join(folder, name, 'dist', 'extension.js'), 'utf8').catch(() => null),
+      ),
+  );
+  return copies.includes(shipped);
+}
+
 /** Every editor's row, then what changed for the voice, or that nothing did. */
 function render(
   { flow, style }: CliContext,
@@ -99,7 +154,7 @@ function render(
 }
 
 async function installInto(
-  editors: readonly { name: string; cli: string }[],
+  editors: readonly Editor[],
   home: string,
   seams: TerminalsSeams,
 ): Promise<EditorOutcome[]> {
@@ -118,7 +173,7 @@ async function installInto(
 }
 
 async function uninstallFrom(
-  editor: { name: string; cli: string },
+  editor: Editor,
   seams: TerminalsSeams,
 ): Promise<EditorOutcome> {
   const ran = await seams.run(editor.cli, ['--uninstall-extension', TERMINALS_EXTENSION]);

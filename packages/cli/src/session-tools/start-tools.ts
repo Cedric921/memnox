@@ -3,7 +3,8 @@ import { accessSync, constants, existsSync, readdirSync, type Dirent } from 'nod
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join } from 'node:path';
 import {
-  DELIVERY,
+  wentIn,
+  DESKTOP_APPS,
   DISPLAY,
   DISPLAY_TEXT_LIMIT,
   DisplayRequests,
@@ -14,10 +15,14 @@ import {
   STARTABLE_AGENT,
   startCommand,
   type DisplayDelivery,
+  type SessionStart,
   type StartableAgent,
   WorkBriefs,
 } from '@memnox/core';
+import { noApp, openAppStart, resolveInstalledApp } from './app-tools';
 import { mainCheckoutOf } from './main-checkout';
+import { keepSurface } from './start-surface';
+import { editorName, PLACE, placeFor, surfaceOf } from './start-place';
 import { noteFocus } from './focus';
 import { textArg, type SessionToolDeps, type ToolArgs } from './read-tools';
 import { withBrief } from './work-tools';
@@ -37,10 +42,15 @@ export async function proposeStartTool(
 ): Promise<unknown> {
   const agent = textArg(args, 'agent') ?? 'claude-code';
   if (!isStartableAgent(agent)) return { proposed: false, said: ONLY_KNOWN_AGENTS };
-  const resolve = deps.resolveCommand ?? resolveInstalled;
+  const place = await placeFor(deps, args, agent);
+  if (place.kind === PLACE.NO_EDITOR) return { proposed: false, said: NO_EDITOR };
+  const inApp = place.kind === PLACE.APP;
+  const resolve = resolverFor(deps, inApp);
   const command = resolve(agent);
-  if (command === null) return { proposed: false, ...notInstalled(agent, resolve) };
-  const task = textArg(args, 'task');
+  if (command === null)
+    return { proposed: false, ...(inApp ? noApp : notInstalled)(agent, resolve) };
+  // An app may be opened with nothing to ask it yet; a terminal agent always starts on something.
+  const task = textArg(args, 'task') ?? (inApp ? '' : undefined);
   if (task === undefined) return { proposed: false, said: NEEDS_TASK };
   const known = await knownRepositories(deps);
   const { text, brief, found } = await withBrief(deps, args, task, MOST_TASK_CHARS);
@@ -54,16 +64,46 @@ export async function proposeStartTool(
     task: text,
     ...(textArg(args, 'hold_credentials') === 'true' ? { holdCredentials: true } : {}),
     ...(brief === undefined ? {} : { brief }),
+    ...(inApp ? { app: command } : {}),
+    ...(place.kind === PLACE.EDITOR ? { editor: place.path } : {}),
     ...(said === undefined ? {} : { said }),
     at: deps.now().toISOString(),
   });
+  return {
+    ...readBackOf(deps, start, chosen, task),
+    ...(found === undefined ? {} : { found }),
+  };
+}
+
+/** The agent's command, or with app "true" its desktop app, each found where it is installed. */
+function resolverFor(
+  deps: SessionToolDeps,
+  inApp: boolean,
+): (agent: StartableAgent) => string | null {
+  return inApp
+    ? (deps.resolveApp ?? resolveInstalledApp)
+    : (deps.resolveCommand ?? resolveInstalled);
+}
+
+/** What the brain reads back, with the app named when it opens in one rather than a terminal. */
+function readBackOf(
+  deps: SessionToolDeps,
+  start: SessionStart,
+  chosen: ChosenRepository,
+  task: string,
+): Record<string, unknown> {
   return {
     proposed: true,
     start: start.id,
     repository: basename(chosen.path),
     ...(chosen.from === undefined ? {} : { repositoryFrom: chosen.from }),
     readBack: task,
-    ...(found === undefined ? {} : { found }),
+    ...(start.app === undefined
+      ? {}
+      : { in: `the ${DESKTOP_APPS[start.agent].name} app` }),
+    ...(start.editor === undefined
+      ? {}
+      : { in: `a new terminal in ${editorName(deps, start)}` }),
     ...(start.holdCredentials === true ? { holdsCredentials: true } : {}),
     said: READ_BACK,
   };
@@ -126,6 +166,8 @@ export async function startSessionTool(
   const start =
     id === undefined ? null : await new SessionStarts(deps.home).take(id, moment);
   if (start === null) return { started: false, said: GONE };
+  await keepSurface(deps.home, start.agent, surfaceOf(deps, start));
+  if (start.app !== undefined) return openAppStart(deps, start, moment);
   const line = startCommand(start);
   // Cut short, the quotes would not close, so a line too long for the screen is never typed at all.
   if (line.length > DISPLAY_TEXT_LIMIT) return { started: false, said: TOO_LONG };
@@ -136,19 +178,28 @@ export async function startSessionTool(
     title: start.agent,
     text: line,
     cwd: start.repository,
+    // The Mac opens this editor on the repository and its Memnox extension starts the agent there.
+    ...(start.editor === undefined ? {} : { appPath: start.editor }),
     at: moment,
   });
   const delivery = deps.delivered === undefined ? null : await deps.delivered(request.id);
-  if (delivery === null || delivery.outcome === DELIVERY.TYPED) {
+  if (delivery === null || wentIn(delivery.outcome)) {
     await noteFocus(deps, start, 'started');
   }
-  return { repository: basename(start.repository), ...startedAs(delivery) };
+  return {
+    repository: basename(start.repository),
+    ...(start.editor === undefined ? {} : { in: editorName(deps, start) }),
+    ...startedAs(delivery, start.editor === undefined ? STARTED : STARTED_IN_EDITOR),
+  };
 }
 
 /** What the brain may say, from what the Mac reported, so a tab that never opened is never called working. */
-function startedAs(delivery: DisplayDelivery | null): Record<string, unknown> {
+function startedAs(
+  delivery: DisplayDelivery | null,
+  started: string,
+): Record<string, unknown> {
   if (delivery === null) return { started: true, said: UNCONFIRMED };
-  if (delivery.outcome === DELIVERY.TYPED) return { started: true, said: STARTED };
+  if (wentIn(delivery.outcome)) return { started: true, said: started };
   return {
     started: false,
     ...(delivery.reason === undefined ? {} : { why: delivery.reason }),
@@ -212,7 +263,7 @@ const NEEDS_TASK = 'Pass task: what the new session should do, in their words.';
 const NO_SUCH_REPOSITORY =
   'No repository on this Mac goes by that name. Offer the closest from known, by name.';
 const READ_BACK =
-  'Nothing has started. Read it back once, as one whole sentence that ends in a courteous question, such as "Shall I start Codex in memnox macos to review the changes?" or "I can start Claude Code in memnox cloud on the failing auth test. Would you like me to go ahead?", varying the words. Say nothing before it and nothing after the question. Call start_session with this id only after they say yes.';
+  'Nothing has started. Read it back once, as one whole sentence that ends in a courteous question, saying the app when in names one, such as "Shall I open the Codex app in memnox runtime to review your changes?", "Shall I start Codex in memnox macos to review the changes?" or "I can start Claude Code in memnox cloud on the failing auth test. Would you like me to go ahead?", varying the words. Say nothing before it and nothing after the question. Call start_session with this id only after they say yes. When they asked for exactly this plainly, the agent, the repository and what to do, or only to open an app such as "open Hermes", or they already said yes to it or corrected it to this, skip the read back: their asking is their yes, so call start_session with this id now. Never ask the same thing twice.';
 const GONE =
   'That start is gone or more than five minutes old. Read it back again with propose_start.';
 const UNCONFIRMED =
@@ -221,12 +272,16 @@ const NOT_STARTED =
   'The Mac could not open the tab and start it. Say sorry in a few words and say why in plain words; nothing started.';
 const STARTED =
   'A new terminal tab opened in that repository and the agent is starting on the task. Say so in a few words, and offer to tell them when it finishes.';
+const STARTED_IN_EDITOR =
+  'A new terminal opened inside the editor named in, on that repository, and the agent is starting on the task there. Say so in a few words, naming the editor, like "Claude Code is starting in VS Code on memnox runtime.", and offer to tell them when it finishes.';
+const NO_EDITOR =
+  'The editor they named is not installed on this Mac, so nothing was proposed. Say so plainly and offer a new terminal tab instead, as a question; never start it anywhere else unasked.';
 
 /**
  * Every repository a session has run in, the repositories beside them, and every one in the
  * folders people keep code in, so a project nobody has opened with an agent yet is still found.
  */
-async function knownRepositories(deps: SessionToolDeps): Promise<string[]> {
+export async function knownRepositories(deps: SessionToolDeps): Promise<string[]> {
   const roots = new Set<string>(repositoriesUnder(deps.home));
   for (const host of await new SessionHosts(deps.home).all()) {
     if (host.cwd !== undefined && isAbsolute(host.cwd))

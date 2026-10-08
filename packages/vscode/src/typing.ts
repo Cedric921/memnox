@@ -12,6 +12,10 @@ const REQUEST_ID = /^dsp_[a-z0-9]+_[a-f0-9]+$/;
 /** What runs a coding agent, the same list the runtime checks before it asks for typing. */
 const AGENT_PROGRAMS = /^(claude|node|codex|gemini|cursor-agent|aider|opencode)$/i;
 
+/** A native install runs a binary named for its version, so the folder it sits in names the agent. */
+const AGENT_FOLDERS =
+  /\/(claude|codex|gemini|cursor-agent|aider|opencode)\/(versions\/)?[^/]+$/i;
+
 /** Every link Memnox sends an editor names a request and a terminal the same way. */
 interface TypeLink {
   request: string;
@@ -64,12 +68,51 @@ export function typableText(
   return { text: text.split(/\r?\n/).join(' ') };
 }
 
+/** The request a launch link names, or null when it is not one Memnox would send. */
+export function launchLinkOf(query: string): string | null {
+  const request = new URLSearchParams(query).get('request');
+  return request !== null && REQUEST_ID.test(request) ? request : null;
+}
+
+/** What starts the agent: the line runs `memnox run` in its repository, so the session is governed from its first step. */
+const LAUNCH_LINE = /^cd '[^']*(?:'\\''[^']*)*' && memnox run /;
+
+/**
+ * The line to type and the folder to open the terminal in, or why not: only a launch still
+ * waiting, whose line is the one Memnox builds, so a request written by anything else starts nothing.
+ */
+export function launchable(
+  record: unknown,
+  moment: string,
+): { line: string; cwd: string; title: string } | { why: string } {
+  if (record === null || typeof record !== 'object')
+    return { why: 'its request is gone' };
+  const request = record as Record<string, unknown>;
+  if (request['display'] !== 'launch') return { why: 'it is not a request to launch' };
+  if (request['delivered'] !== undefined) return { why: 'it was already answered' };
+  const expires = request['expiresAt'];
+  if (typeof expires !== 'string' || expires <= moment)
+    return { why: 'it waited too long' };
+  const line = request['text'];
+  const cwd = request['cwd'];
+  if (typeof line !== 'string' || !LAUNCH_LINE.test(line) || /[\r\n]/.test(line)) {
+    return { why: 'it is not a line that starts an agent' };
+  }
+  if (typeof cwd !== 'string' || cwd === '') return { why: 'it names no repository' };
+  const title = typeof request['title'] === 'string' ? request['title'] : 'agent';
+  return { line, cwd, title };
+}
+
 /** Whether `ps -o stat=,comm=` shows a coding agent in front, so words never land in a bare shell. */
 export function agentInFront(listing: string): boolean {
   return listing.split('\n').some((line) => {
     const [stat, ...command] = line.trim().split(/\s+/);
-    const program = command.join(' ').split('/').pop() ?? '';
-    return stat?.includes('+') === true && AGENT_PROGRAMS.test(program);
+    const path = command.join(' ');
+    const program = path.split('/').pop() ?? '';
+    return (
+      stat?.includes('+') === true &&
+      (AGENT_PROGRAMS.test(program) || AGENT_FOLDERS.test(path))
+    );
   });
 }
 
@@ -83,4 +126,29 @@ export function keyPausesMs(text: string, jitter: () => number = Math.random): n
     const breath = ',.?!;:'.includes(character) ? 60 : 0;
     return Math.round(base * (0.7 + 0.6 * jitter()) + breath);
   });
+}
+
+/** The request a file in Memnox's displays folder holds, or null for anything else written there. */
+export function requestOfFile(name: string | null): string | null {
+  if (name === null || !name.endsWith('.json')) return null;
+  const request = name.slice(0, -'.json'.length);
+  return REQUEST_ID.test(request) ? request : null;
+}
+
+/**
+ * Whether another editor window already took this request: a link reaches only one window, and
+ * the one holding the terminal may be any of them, so the first to find it claims it before typing.
+ */
+export function claimedElsewhere(record: unknown, pid: number): boolean {
+  if (record === null || typeof record !== 'object') return false;
+  const claimed = (record as Record<string, unknown>)['claimedBy'];
+  return typeof claimed === 'number' && claimed !== pid;
+}
+
+/** The device a type request names, for a window deciding whether the terminal is its own. */
+export function deviceOfRequest(record: unknown): string | null {
+  if (record === null || typeof record !== 'object') return null;
+  const request = record as Record<string, unknown>;
+  const tty = request['tty'];
+  return request['display'] === 'type' && typeof tty === 'string' ? tty : null;
 }

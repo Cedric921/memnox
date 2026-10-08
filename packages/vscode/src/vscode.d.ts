@@ -21,8 +21,13 @@ declare module 'vscode' {
   export interface ExtensionContext {
     readonly subscriptions: Disposable[];
   }
+  export interface TerminalOptions {
+    name?: string;
+    cwd?: string;
+  }
   export namespace window {
     const terminals: readonly Terminal[];
+    function createTerminal(options: TerminalOptions): Terminal;
     function registerUriHandler(handler: UriHandler): Disposable;
   }
 }
