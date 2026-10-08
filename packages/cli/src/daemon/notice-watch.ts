@@ -11,6 +11,9 @@ import {
   LEDGER_SESSION_LIMIT,
   minutesToMs,
   NOTICE_KIND,
+  noticeSubject,
+  describeRun,
+  runTally,
   noticesFrom,
   PendingApprovals,
   SessionHosts,
@@ -25,7 +28,11 @@ import {
   type DaemonEvent,
   type NoticeWatch,
   type SessionNotice,
+  type RunTally,
+  type MemnoxEvent,
   type SessionWatch,
+  type TurnTests,
+  turnTests,
   type WatchFacts,
   type WatchFired,
 } from '@memnox/core';
@@ -242,38 +249,57 @@ export class NoticeWatcher {
   }
 
   private async eventFor(notice: SessionNotice): Promise<DaemonEvent> {
-    const [task, host, names, wrote] = await Promise.all([
+    const rows = await withEvents(this.home, (store) =>
+      store.query({ sessionId: notice.sessionId, limit: LEDGER_SESSION_LIMIT }),
+    );
+    const touches = touchesOf(rows);
+    const [task, host, names, tests] = await Promise.all([
       new SessionTasks(this.home).read(notice.sessionId),
       new SessionHosts(this.home).read(notice.sessionId),
       readNames(this.home),
-      this.wroteIn(notice.sessionId),
+      notice.kind === NOTICE_KIND.FINISHED
+        ? this.testsIn(
+            notice,
+            touches.map((touch) => touch.at),
+          )
+        : Promise.resolve(null),
     ]);
+    const wrote = repositoriesWritten(touches)[0];
     // Where it last wrote beats where it was opened, since a task often names another repository.
     const place = wrote ?? host?.cwd;
     const id = notice.agent.startsWith(AGENT_ID_PREFIX)
       ? notice.agent
       : `${AGENT_ID_PREFIX}${notice.agent}`;
     const agentName = displayName(names, { id, kind: notice.agent });
+    const run = finishedRun(notice, rows);
     return {
       kind: DAEMON_EVENT.NOTICE,
-      subject: `ntc_${notice.kind}_${notice.sessionId}_${Date.parse(notice.at).toString(36)}`,
+      subject: noticeSubject(notice.kind, notice.sessionId, notice.at),
       agent: notice.agent,
-      summary: sentenceFor(agentName, notice),
+      summary: withRun(sentenceFor(agentName, notice), run),
+      ...(run === null ? {} : { run }),
       at: notice.at,
       notice: notice.kind,
       agentName,
       sessionId: notice.sessionId,
       ...(task === null ? {} : { task: task.statement }),
       ...(place === undefined ? {} : { place: basename(place) }),
+      ...(tests === null ? {} : { tests }),
     };
   }
 
-  /** The repository the session wrote in last, from its own ledger rows. */
-  private async wroteIn(sessionId: string): Promise<string | undefined> {
-    const rows = await withEvents(this.home, (store) =>
-      store.query({ sessionId, limit: LEDGER_SESSION_LIMIT }),
-    );
-    return repositoriesWritten(touchesOf(rows))[0];
+  /** How the finished turn left its tests, from the agent's own transcript and the writes the ledger saw. */
+  private async testsIn(
+    notice: SessionNotice,
+    writesAt: readonly string[],
+  ): Promise<TurnTests | null> {
+    const [turn, transcript] = await Promise.all([
+      new SessionTurns(this.home).read(notice.sessionId),
+      sessionTranscript(this.home, notice.sessionId),
+    ]);
+    if (turn?.promptAt === undefined || transcript === null) return null;
+    const span = { promptAt: turn.promptAt, endedAt: notice.at };
+    return turnTests(span, readTestRuns(transcript), writesAt);
   }
 }
 
@@ -288,7 +314,8 @@ function commandEnding(result: CommandResult): string {
 
 /** Login by its purpose, and an onboarding by the agents it names, so the brain says which. */
 function commandWords(result: CommandResult): string {
-  if (result.argv[0] === 'login') return 'Connecting this Mac to the Memnox workspace';
+  if (result.argv[0] === 'login')
+    return 'Connecting this machine to the Memnox workspace';
   if (result.argv[0] === 'agents' && result.argv[1] === 'onboard') {
     const agents = result.argv.slice(2).filter((each) => !each.startsWith('-'));
     return `Onboarding ${agents.length === 0 ? 'an agent' : agents.join(', ')}`;
@@ -302,12 +329,28 @@ function stillRunning(still: readonly CommandResult[]): string {
   return `Still running, not done yet: ${still.map(commandWords).join('; ')}.`;
 }
 
+/** The notice's sentence, and for a finished turn what it came to, so "asked you nothing" is said with it. */
+function withRun(sentence: string, run: RunTally | null): string {
+  const told = run === null ? '' : describeRun(run);
+  return told === '' ? sentence : `${sentence} ${told}`;
+}
+
+/** The turn a finished notice closes, counted over the minutes it ran, and nothing for any other notice. */
+function finishedRun(
+  notice: SessionNotice,
+  rows: readonly MemnoxEvent[],
+): RunTally | null {
+  if (notice.kind !== NOTICE_KIND.FINISHED || notice.minutes === undefined) return null;
+  const from = new Date(Date.parse(notice.at) - notice.minutes * 60_000).toISOString();
+  return runTally(rows, from, notice.at);
+}
+
 /** The facts as one plain sentence, said as they are when the brain cannot word them. */
 function sentenceFor(agent: string, notice: SessionNotice): string {
   if (notice.kind === NOTICE_KIND.COMMITTED) return `${agent} just made a commit.`;
   if (notice.kind === NOTICE_KIND.WOULD_HAVE) {
     const did = notice.wouldHave === DECISION_EFFECT.DENY ? 'refused' : 'asked you about';
-    return `${agent} just ran ${notice.action ?? 'something'}. Your rule ${notice.rule ?? ''} would have ${did} it, but Memnox is only watching on this Mac, so it went through.`;
+    return `${agent} just ran ${notice.action ?? 'something'}. Your rule ${notice.rule ?? ''} would have ${did} it, but Memnox is only watching on this machine, so it went through.`;
   }
   if (notice.kind === NOTICE_KIND.PUSHED) {
     return `${agent} just pushed${notice.target === undefined ? '' : ` to ${notice.target}`}.`;
@@ -342,7 +385,7 @@ function collisionEvent(
     agentName: who[0] ?? 'An agent',
     notice: NOTICE_KIND.COLLISION,
     ...(first === undefined ? {} : { sessionId: first.agentId }),
-    summary: `${who.join(' and ')} are working on the same files at once on this Mac: ${listed}${more}. ${writers.join(' and ')} ${writers.length > 1 ? 'are' : 'is'} writing.`,
+    summary: `${who.join(' and ')} are working on the same files at once on this machine: ${listed}${more}. ${writers.join(' and ')} ${writers.length > 1 ? 'are' : 'is'} writing.`,
     at: moment,
   };
 }
