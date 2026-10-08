@@ -205,7 +205,7 @@ describe('a hooked agent writing outside its repository', () => {
 });
 
 describe('a hooked agent still on probation', () => {
-  it('is asked about even inside its repository, and told how it ends', async () => {
+  it('writes inside its repository without a question, since the milestone kept first puts it back', async () => {
     const dir = await home();
     await new ProbationRegister(dir).start(
       { kind: PROBATION_KIND.AGENT, name: 'claude-code', label: 'Claude Code' },
@@ -216,6 +216,21 @@ describe('a hooked agent still on probation', () => {
       true,
       context(dir),
       () => REPO,
+    );
+    expect(reply).toBeNull();
+  });
+
+  it('is asked about where no repository could be put back, and told how it ends', async () => {
+    const dir = await home();
+    await new ProbationRegister(dir).start(
+      { kind: PROBATION_KIND.AGENT, name: 'claude-code', label: 'Claude Code' },
+      NOW,
+    );
+    const reply = await containedEdit(
+      edits('src/app.ts'),
+      true,
+      context(dir),
+      () => null,
     );
     expect(reply).toContain('Claude Code is on probation until');
     expect(reply).toContain('memnox agents trust claude-code');

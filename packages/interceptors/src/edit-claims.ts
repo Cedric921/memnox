@@ -49,6 +49,8 @@ export interface EditHookContext {
   pid: number;
   cwd: string;
   now: () => Date;
+  /** What the agent says started it, such as `claude-vscode` for an editor's panel; absent where it says nothing. */
+  entrypoint?: string;
 }
 
 /**

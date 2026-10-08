@@ -59,7 +59,8 @@ export async function containedEdit(
       { action: ACTION.FILESYSTEM_WRITE, target: file },
       containment,
     );
-    if (asked === null) continue;
+    // A probation write inside the repository runs, since the milestone kept before it puts it back.
+    if (asked === null || asked.checkpointed === true) continue;
     // The policy half raised this same question, so a yes given there for the session holds here too.
     if (await grantedInSession(context, edit.sessionId, file)) continue;
     return replyFor(found.host, asked, asking);

@@ -87,4 +87,43 @@ describe('the first words of a reply', () => {
     expect(out).toHaveLength(3);
     vi.useRealTimers();
   });
+
+  it('waits out a hold the brain wrote out, however slowly the tool follows, as in the voice log', () => {
+    vi.useFakeTimers();
+    const out: string[] = [];
+    const hold = new OpeningHold((text) => out.push(text), 250);
+    hold.push('I am listening');
+    vi.advanceTimersByTime(1_000);
+    hold.push(' for the rest.');
+    expect(out).toEqual([]);
+    expect(hold.settle(true)).toBe(false);
+    expect(out).toEqual([]);
+    vi.useRealTimers();
+  });
+
+  it('says only what follows a waiting line that turned into an answer', () => {
+    const out: string[] = [];
+    const hold = new OpeningHold((text) => out.push(text), 250);
+    hold.push('Standing by. ');
+    hold.push('Two sessions are working.');
+    hold.settle(false);
+    expect(out.join('')).toBe('Two sessions are working.');
+  });
+
+  it('lets an answer that only starts like one through', () => {
+    const out: string[] = [];
+    const hold = new OpeningHold((text) => out.push(text), 250);
+    hold.push('I am afraid the push was refused.');
+    expect(hold.settle(false)).toBe(false);
+    expect(out.join('')).toBe('I am afraid the push was refused.');
+  });
+
+  it('turns a reply that only says it is listening into a hold, as in the voice log', async () => {
+    const said = await asked([
+      { kind: BRAIN_CHUNK.TEXT, text: 'I am listening for the rest.' },
+      { kind: BRAIN_CHUNK.DONE },
+    ]);
+    expect(said.filter((each) => each.chunk?.kind === 'text')).toEqual([]);
+    expect(said.some((each) => each.chunk?.tool === 'keep_listening')).toBe(true);
+  });
 });

@@ -1,6 +1,8 @@
 import {
   CloudLeases,
   CloudNotes,
+  DELIVERY,
+  deliveryRow,
   desktopNotice,
   LeaseRegistry,
   markActivity,
@@ -112,6 +114,7 @@ async function notesAt(
     return [];
   }
   const spoken = await spokenFor(home, [pause.sessionId, holder], agent);
+  await recordPickedUp(spoken, pause.sessionId, context);
   if (pause.moment === SESSION_MOMENT.TURN_END) {
     return [
       ...spoken,
@@ -142,6 +145,39 @@ async function spokenFor(
   for (const id of new Set(ids))
     found.push(...(await inbox.collect(agent, id).catch(() => [])));
   return found;
+}
+
+/** What the hook says it handed over, so the person's words are only called delivered once the session took them. */
+const PICKED_UP = "the session's own hook handing it over at its next step";
+
+async function recordPickedUp(
+  spoken: readonly SessionNote[],
+  sessionId: string,
+  context: EditHookContext,
+): Promise<void> {
+  if (spoken.length === 0) return;
+  const at = context.now().toISOString();
+  try {
+    const ledger = SqliteEventStore.forHome(context.home);
+    try {
+      for (const note of spoken) {
+        await ledger.append(
+          deliveryRow({
+            sessionId,
+            agent: context.agent,
+            text: note.message,
+            outcome: DELIVERY.VERIFIED,
+            proof: { checked: PICKED_UP },
+            at,
+          }),
+        );
+      }
+    } finally {
+      ledger.close();
+    }
+  } catch {
+    // A lost row is a lost row; the note was already handed over.
+  }
 }
 
 /**

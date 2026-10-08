@@ -9,6 +9,7 @@ import {
   LeaseRegistry,
   protectionStopped,
   SESSION_VAR,
+  SessionHosts,
 } from '@memnox/core';
 
 import {
@@ -179,6 +180,9 @@ function emit(reply: ToolReply | null): void {
   if (reply.exitCode !== undefined) process.exitCode = reply.exitCode;
 }
 
+/** Claude Code names what started it here, which is how a panel session is told from a terminal one. */
+const ENTRYPOINT_VAR = 'CLAUDE_CODE_ENTRYPOINT';
+
 /**
  * Which agent this hook speaks for: the environment
  * `memnox run` sets, then its own `--agent` flag.
@@ -191,6 +195,7 @@ function contextFrom(args: readonly string[], env: NodeJS.ProcessEnv): EditHookC
     pid: process.pid,
     cwd: process.cwd(),
     now: () => new Date(),
+    ...(env[ENTRYPOINT_VAR] === undefined ? {} : { entrypoint: env[ENTRYPOINT_VAR] }),
   };
 }
 
@@ -207,6 +212,11 @@ function agentFlag(args: readonly string[]): string | null {
  * let go at once so nobody waits out a window.
  */
 async function releaseSession(ended: string, context: EditHookContext): Promise<void> {
+  // Closed by the person, so the voice, the cards and the waiting list stop tracking it at once.
+  await new SessionHosts(context.home).end(
+    context.runSession ?? ended,
+    context.now().toISOString(),
+  );
   await new LeaseRegistry(context.home).releaseSession(
     ended,
     context.now().toISOString(),

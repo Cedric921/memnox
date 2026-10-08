@@ -20,14 +20,17 @@ import {
   type EventSink,
   FileGrants,
   grantSubjectFor,
-  APPROVAL_ROUTE,
+  ANSWER_PLACE,
   holdInChat,
   HOLD_ANSWER,
+  pairedCanAnswer,
   openQuestionFor,
   PendingApprovals,
+  readApprovalRoute,
   SessionTasks,
   voiceListening,
   waitForAnswer,
+  type AnswerPlace,
   type ApprovalRoute,
   type ChatQuestion,
   type PendingApproval,
@@ -38,6 +41,8 @@ import {
 
 import { HookAuthorizer } from './hook-authorizer';
 import { claimedElsewhere } from './mcp-claims';
+import { containmentFor } from './containment-loader';
+import { withinSession } from './within-session';
 import { readHookConfig } from './hook-config';
 import { loadHookGate } from './hook-gate-loader';
 import { toolCallOf, type ToolCall } from './tool-calls';
@@ -85,6 +90,8 @@ export interface ToolHookSeams {
   /** Whether the Mac voice is listening, so a held question waits for a spoken answer. */
   voiceThere?: () => Promise<boolean>;
   voiceWaitMs?: number;
+  /** Whether a paired phone may answer, so a held question opens no picker it could not close. */
+  pairedThere?: () => Promise<boolean>;
 }
 
 /**
@@ -174,17 +181,19 @@ export async function answerToolCall(
     await keep(sink, call, ruling, context);
   }
   const asked = putsQuestion(call, ruling, context.personThere);
-  const held =
+  const raised =
     ruling.effect === DECISION_EFFECT.ASK && !asked
-      ? await heldFor(ruling, sessionId, route, context)
+      ? await heldFor(ruling, { call, sessionId }, route, context)
       : null;
+  const places = raised === null ? [] : await answerPlaces(context, seams);
   const spoken =
-    held === null
-      ? null
-      : await spokenAnswer(held, ruling, { sessionId, context, seams });
+    raised !== null && places.includes(ANSWER_PLACE.MAC)
+      ? await spokenAnswer(raised, ruling, { sessionId, context, seams })
+      : null;
   if (spoken !== null) {
     return { call, ruling: spoken, reply: toolReply(call, spoken, false), asked: false };
   }
+  const held = raised === null ? null : await alsoOn(raised, places, context.home);
   return {
     call,
     ruling,
@@ -193,10 +202,25 @@ export async function answerToolCall(
   };
 }
 
+/** Where beside the session this question can be answered: the listening Mac app, a paired phone. */
+async function answerPlaces(
+  context: ToolHookContext,
+  seams: ToolHookSeams,
+): Promise<AnswerPlace[]> {
+  const voice =
+    seams.voiceThere ?? ((): Promise<boolean> => voiceListening(context.home));
+  const paired =
+    seams.pairedThere ?? ((): Promise<boolean> => pairedCanAnswer(context.home));
+  const [mac, phone] = await Promise.all([
+    voice().catch(() => false),
+    paired().catch(() => false),
+  ]);
+  return [...(mac ? [ANSWER_PLACE.MAC] : []), ...(phone ? [ANSWER_PLACE.PAIRED] : [])];
+}
+
 /**
- * The answer said out loud while the call waited, or null where nobody is listening or nobody
- * answered in time. A picker is something only a click can close, so without this a spoken yes
- * landed and the agent sat on its picker until the person clicked anyway.
+ * The answer said on the Mac while the call waited, or null where nobody answered in time.
+ * A spoken yes lets the call straight through, so nobody waits for the turn to end.
  */
 async function spokenAnswer(
   held: PendingApproval,
@@ -204,9 +228,6 @@ async function spokenAnswer(
   where: { sessionId: string; context: ToolHookContext; seams: ToolHookSeams },
 ): Promise<ToolRuling | null> {
   const { sessionId, context, seams } = where;
-  const there =
-    seams.voiceThere ?? ((): Promise<boolean> => voiceListening(context.home));
-  if (!(await there().catch(() => false))) return null;
   const answer = await waitForAnswer({
     approvals: new PendingApprovals(context.home),
     id: held.id,
@@ -218,25 +239,54 @@ async function spokenAnswer(
   return after.effect === DECISION_EFFECT.ASK ? null : after;
 }
 
-/** Where questions go, from `config.toml`; in the session where nothing says otherwise. */
-export async function readApprovalRoute(home: string): Promise<ApprovalRoute> {
+/**
+ * The question marked with where else it can be answered, so the agent opens no picker: only a
+ * click closes one, and an answer on the Mac or a phone would leave it on screen asking.
+ */
+async function alsoOn(
+  held: PendingApproval,
+  places: readonly AnswerPlace[],
+  home: string,
+): Promise<PendingApproval> {
+  if (places.length === 0) return held;
+  const approvals = new PendingApprovals(home);
+  // Read again, so an answer landing during the wait is not written over.
+  const latest = (await approvals.read(held.id).catch(() => null)) ?? held;
+  const marked: PendingApproval = { ...latest, alsoOn: [...places] };
+  await approvals.keep(marked).catch(() => undefined);
+  return marked;
+}
+
+/** Best effort and false on any failure, since a call nobody could place asks for the fingerprint. */
+async function staysInSession(
+  call: ToolCall,
+  context: ToolHookContext,
+): Promise<boolean> {
   try {
-    return parseConfig(await readFile(configPathFor(home), 'utf8')).approvals;
+    const containment = await containmentFor({
+      home: context.home,
+      env: context.env,
+      cwd: call.cwd ?? process.cwd(),
+      now: context.now(),
+      agent: context.agent,
+    });
+    return withinSession(call, containment, context.env);
   } catch {
-    return APPROVAL_ROUTE.SESSION;
+    return false;
   }
 }
 
 /** The question written down for a person, or null where it could not be, which refuses as before. */
 async function heldFor(
   ruling: ToolRuling,
-  sessionId: string,
+  { call, sessionId }: { call: ToolCall; sessionId: string },
   route: ApprovalRoute,
   context: ToolHookContext,
 ): Promise<PendingApproval | null> {
   const question = {
     ...questionOf(ruling, sessionId, context.agent),
     ...(await taskOf(context.home, sessionId)),
+    withinSession: await staysInSession(call, context),
   };
   return holdInChat(
     new PendingApprovals(context.home),
@@ -318,6 +368,7 @@ function questionOf(ruling: ToolRuling, sessionId: string, agent: string): ChatQ
     ...(ruling.target === undefined ? {} : { target: ruling.target }),
     class: ruling.class,
     reason: ruling.reason,
+    ...(ruling.rule === undefined ? {} : { rule: ruling.rule }),
   };
 }
 
