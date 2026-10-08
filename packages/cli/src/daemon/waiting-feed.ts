@@ -8,17 +8,33 @@ import {
   plainAsk,
   PendingApprovals,
   Proposals,
+  PROPOSAL_KIND,
   SessionHosts,
   SessionTasks,
   NOTICE_KIND,
+  noticeSubject,
+  UNNAMED_AGENT,
+  awayTurn,
+  describeAwayTurn,
+  describePause,
+  LEDGER_SESSION_LIMIT,
+  SessionPauses,
+  SessionPosts,
+  SessionTurns,
+  type SessionPost,
   type AgentQuestion,
   type DaemonEvent,
+  type Proposal,
+  type DisplayHost,
   type DisplayRequest,
   type PendingApproval,
   type SessionHost,
 } from '@memnox/core';
+import { ruleDraftOf } from '../protect/rule-scope';
 import { liveHost } from '../session-tools/live-host';
+import { processAlive } from '../session-tools/sessions-tool';
 import { displayName, readNames, type AgentNames } from '../agents/names';
+import { withEvents } from '../event-store';
 
 /**
  * What is waiting on a person, read from the files other processes write, since a held
@@ -28,6 +44,8 @@ export class WaitingFeed {
   private readonly pending: PendingApprovals;
   private readonly proposals: Proposals;
   private readonly displays: DisplayRequests;
+  /** A finished turn's summary by subject, since the feed is read every few seconds and the turn is over. */
+  private readonly summaries = new Map<string, DaemonEvent>();
 
   constructor(private readonly home: string) {
     this.pending = new PendingApprovals(home);
@@ -63,10 +81,9 @@ export class WaitingFeed {
       ...(request.pages === undefined ? {} : { pages: request.pages }),
       ...(request.agents === undefined ? {} : { agents: request.agents }),
       ...(request.trace === undefined ? {} : { trace: request.trace }),
+      ...appOf(request),
       ...(host === null
-        ? request.cwd === undefined
-          ? {}
-          : { host: { cwd: request.cwd } }
+        ? requestedHost(request)
         : {
             host: {
               ...(host.app === undefined ? {} : { app: host.app }),
@@ -83,27 +100,120 @@ export class WaitingFeed {
     };
   }
 
+  /**
+   * One held call while it is still unanswered and in time, read by its id rather than from the
+   * list, so a call the app was already told about is briefed even where its session's host is
+   * no longer found, and the app hears a stale question only when nobody can answer it.
+   */
+  async held(subject: string, moment: string): Promise<DaemonEvent | null> {
+    const pending = await this.pending.read(subject);
+    if (pending === null || pending.answer !== undefined || pending.expiresAt <= moment) {
+      return null;
+    }
+    return this.heldEvent(pending, await readNames(this.home));
+  }
+
   /** Everything still answerable, held calls first because an agent is blocked on each. */
   async current(moment: string): Promise<DaemonEvent[]> {
     const names = await readNames(this.home);
-    const waiting = (await this.pending.list(moment)).filter(
-      (each) => each.answer === undefined,
+    const hosts = new SessionHosts(this.home);
+    const open = async (sessionId: string): Promise<boolean> =>
+      !(await closed(hosts, sessionId));
+    const waiting = await keepIf(
+      (await this.pending.list(moment)).filter((each) => each.answer === undefined),
+      (each) => open(each.request.sessionId),
     );
     const held = await Promise.all(waiting.map((each) => this.heldEvent(each, names)));
-    const asking = await Promise.all(
-      (await new AgentQuestions(this.home).open(moment)).map((each) =>
-        this.questionEvent(each, names),
-      ),
+    const questions = await keepIf(
+      await new AgentQuestions(this.home).open(moment),
+      (each) => open(each.sessionId),
     );
-    const proposed = (await this.proposals.open(moment)).map((each): DaemonEvent => ({
-      kind: DAEMON_EVENT.PROPOSAL,
-      subject: each.id,
-      agent: each.proposedBy,
-      summary: each.rationale,
-      at: each.proposedAt,
-      expiresAt: each.expiresAt,
-    }));
-    return [...held, ...asking, ...proposed];
+    const asking = await Promise.all(
+      questions.map((each) => this.questionEvent(each, names)),
+    );
+    const inside = new Set(
+      waiting
+        .filter((each) => each.request.withinSession === true)
+        .map((each) => each.id),
+    );
+    const proposed = (await this.proposals.open(moment)).map((each) =>
+      proposalEvent(each, inside),
+    );
+    const posted = await this.posted(moment, names, open);
+    return [...held, ...asking, ...posted, ...proposed];
+  }
+
+  /**
+   * What a person away should hear that is not a question: a session the breaker stopped, one
+   * struggling, and a long turn that finished and is waiting on them. Each has a stable subject,
+   * so a phone is woken once for it and not on every look.
+   */
+  private async posted(
+    moment: string,
+    names: AgentNames,
+    open: (sessionId: string) => Promise<boolean>,
+  ): Promise<DaemonEvent[]> {
+    const pauses = await keepIf(
+      (await new SessionPauses(this.home).all()).filter(
+        (each) => each.resumedAt === undefined,
+      ),
+      (each) => open(each.sessionId),
+    );
+    const struggling = await keepIf(
+      await new SessionPosts(this.home).open(moment),
+      (each) => open(each.sessionId),
+    );
+    return [
+      ...pauses.map((pause) => ({
+        kind: DAEMON_EVENT.PAUSED,
+        subject: pause.sessionId,
+        agent: UNNAMED_AGENT,
+        summary: describePause(pause),
+        at: pause.pausedAt,
+        sessionId: pause.sessionId,
+      })),
+      ...struggling.map((post) => postEvent(post, nameOf(names, post.agent))),
+      ...(await this.finished(moment, names)),
+    ];
+  }
+
+  /** Long turns that handed back while nobody answered, told with what they came to. */
+  private async finished(moment: string, names: AgentNames): Promise<DaemonEvent[]> {
+    const events: DaemonEvent[] = [];
+    for (const turn of await new SessionTurns(this.home).all()) {
+      const span = awayTurn(turn, moment);
+      if (span === null) continue;
+      const subject = noticeSubject(NOTICE_KIND.FINISHED, turn.sessionId, span.endedAt);
+      const known = this.summaries.get(subject);
+      if (known !== undefined) {
+        events.push(known);
+        continue;
+      }
+      const agentName = nameOf(names, turn.agent);
+      const rows = await withEvents(this.home, (store) =>
+        store.query({ sessionId: turn.sessionId, limit: LEDGER_SESSION_LIMIT }),
+      ).catch(() => []);
+      const away = describeAwayTurn(agentName, span, rows, moment);
+      const event: DaemonEvent = {
+        kind: DAEMON_EVENT.NOTICE,
+        notice: NOTICE_KIND.FINISHED,
+        subject,
+        agent: turn.agent,
+        agentName,
+        summary: away.summary,
+        run: away.run,
+        at: span.endedAt,
+        sessionId: turn.sessionId,
+      };
+      this.summaries.set(subject, event);
+      events.push(event);
+    }
+    // Only what is still news is kept, so the cache is never older than the turns it describes.
+    const current = new Set(events.map((event) => event.subject));
+    for (const subject of [...this.summaries.keys()]) {
+      if (!current.has(subject)) this.summaries.delete(subject);
+    }
+    return events;
   }
 
   /** An agent's own question, said as news so the voice reads it out and listens for the answer. */
@@ -127,6 +237,7 @@ export class WaitingFeed {
       expiresAt: question.expiresAt,
       sessionId: question.sessionId,
       ...(task === null ? {} : { task: task.statement }),
+      ...(task?.latestAsk === undefined ? {} : { lastAsk: task.latestAsk }),
       ...(host?.cwd === undefined ? {} : { place: basename(host.cwd) }),
     };
   }
@@ -155,7 +266,9 @@ export class WaitingFeed {
       why: plain.why,
       sessionId: request.sessionId,
       ...(task === null ? {} : { task: task.statement }),
+      ...(task?.latestAsk === undefined ? {} : { lastAsk: task.latestAsk }),
       ...(host?.cwd === undefined ? {} : { place: basename(host.cwd) }),
+      ...(request.withinSession === true ? { withinSession: true } : {}),
     };
   }
 }
@@ -173,8 +286,100 @@ export function conversationOf(host: Pick<SessionHost, 'sessionId' | 'agentSessi
     : {};
 }
 
+/** A struggling session, said as news: nothing is asked, but its reach just narrowed. */
+function postEvent(post: SessionPost, agentName: string): DaemonEvent {
+  return {
+    kind: DAEMON_EVENT.NOTICE,
+    notice: NOTICE_KIND.STRUGGLING,
+    subject: post.id,
+    agent: post.agent,
+    agentName,
+    summary: post.summary,
+    at: post.at,
+    expiresAt: post.expiresAt,
+    sessionId: post.sessionId,
+  };
+}
+
 /** The name the person gave the agent, or its product name made readable. */
 function nameOf(names: AgentNames, agent: string): string {
   const id = agent.startsWith(AGENT_ID_PREFIX) ? agent : `${AGENT_ID_PREFIX}${agent}`;
   return displayName(names, { id, kind: agent });
+}
+
+/** A session the person closed, or whose process is gone, has nobody left to answer for. */
+async function closed(hosts: SessionHosts, sessionId: string): Promise<boolean> {
+  const host = await hosts.read(sessionId);
+  if (host === null) return false;
+  return host.endedAt !== undefined || !processAlive(host.pid);
+}
+
+async function keepIf<T>(
+  items: readonly T[],
+  keep: (item: T) => Promise<boolean>,
+): Promise<T[]> {
+  const kept = await Promise.all(items.map(keep));
+  return items.filter((_, index) => kept[index]);
+}
+
+/** Where to show it when no session runs there yet: the folder, and the app an APP start opens. */
+function requestedHost(request: DisplayRequest): { host?: DisplayHost } {
+  if (request.cwd === undefined && request.appPath === undefined) return {};
+  return {
+    host: {
+      ...(request.cwd === undefined ? {} : { cwd: request.cwd }),
+      ...(request.appPath === undefined ? {} : { appPath: request.appPath }),
+    },
+  };
+}
+
+/** On an APP start, the app's links and what it reads as it opens. */
+function appOf(request: DisplayRequest): Pick<DaemonEvent, 'app'> {
+  if (request.links === undefined) return {};
+  return {
+    app: {
+      links: request.links,
+      ...(request.env === undefined ? {} : { env: request.env }),
+    },
+  };
+}
+
+/** Said once something stops waiting, so a question answered elsewhere stops being asked out loud. */
+export function settled(subject: string, at: string): DaemonEvent {
+  return {
+    kind: DAEMON_EVENT.SETTLED,
+    subject,
+    agent: UNNAMED_AGENT,
+    summary: 'no longer waiting on you',
+    at,
+  };
+}
+
+/** One open proposal as the event every surface shows; `inside` holds the held calls within a session. */
+function proposalEvent(each: Proposal, inside: ReadonlySet<string>): DaemonEvent {
+  // A rule carries itself and where it could hold, so the Mac asks where before Touch ID.
+  const rule = ruleDraftOf(each);
+  // A yes to a held call that stays in its repository needs no fingerprint, by voice as by hand.
+  const within =
+    each.change.kind === PROPOSAL_KIND.ANSWER && inside.has(each.change.pendingId);
+  return {
+    kind: DAEMON_EVENT.PROPOSAL,
+    subject: each.id,
+    agent: each.proposedBy,
+    summary: each.rationale,
+    at: each.proposedAt,
+    expiresAt: each.expiresAt,
+    ...(rule === undefined ? {} : { rule }),
+    ...(within ? { withinSession: true } : {}),
+    ...teamAnswerOf(each),
+  };
+}
+
+/** A team's question answered by voice, named on the proposal so the device that asked carries it out. */
+function teamAnswerOf(proposal: Proposal): Pick<DaemonEvent, 'teamAnswer'> {
+  const change = proposal.change;
+  if (change.kind !== PROPOSAL_KIND.TEAM) return {};
+  return {
+    teamAnswer: { callId: change.callId, answer: change.answer, label: change.label },
+  };
 }
