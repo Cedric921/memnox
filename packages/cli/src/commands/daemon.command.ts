@@ -14,15 +14,19 @@ import {
 import { EGRESS_LOOPBACK } from '@memnox/interceptors';
 import { underServiceManager, watchOwnCode } from '../daemon/code-watch';
 import { EditWatcher } from '../edit-watcher';
-import { ownBrain } from '../operator/own-brain';
+import { ownBrain, voiceAgentsFor } from '../operator/own-brain';
+import type { Brain } from '../operator/brain';
+import type { VoiceAgents } from '../operator/voice-agents';
 import type { CliContext } from '../cli-context';
 import { MemnoxDaemon } from '../daemon-server';
 import { withEvents } from '../event-store';
 import { policySetInForce } from '../policy-path';
 import { BoundaryKeeper } from '../keeper/keep-boundary';
 import { DaemonEgress } from '../daemon/egress';
+import { HeartbeatBeats } from '../sync/beat';
 import { syncLoop } from '../sync/heartbeat';
 import { installService, serviceState, uninstallService } from '../daemon/service';
+import { refreshVscodeTerminals } from '../protect/vscode-terminals';
 
 /** Optional by design: with no daemon each seam evaluates in its own process and stays governed. */
 export function registerDaemonCommand(
@@ -75,7 +79,9 @@ function renderDaemonStatus(context: CliContext, home: string): void {
     {
       label: 'state',
       value: state.installed
-        ? style.ok(`${state.manager} starts it and keeps it running`)
+        ? style.ok(
+            `${state.manager} starts it${state.onlyAtLogon === true ? ' at logon' : ' and keeps it running'}`,
+          )
         : style.warn('nothing starts it'),
     },
     { label: 'unit', value: state.path },
@@ -90,7 +96,7 @@ function renderDaemonStatus(context: CliContext, home: string): void {
 
 async function renderInstalled(context: CliContext, home: string): Promise<void> {
   const { flow } = context;
-  const { state, warning } = await installService(home);
+  const { state, warning, linger } = await installService(home);
   if (!state.supported) {
     flow.close('No per-user service manager on this platform, so nothing was written.');
     return;
@@ -107,6 +113,11 @@ async function renderInstalled(context: CliContext, home: string): Promise<void>
           : context.style.warn(`not started now (${warning}); it starts at next login`),
     },
   ]);
+  if (linger !== undefined) {
+    flow.close(`${state.manager} starts it at login, and stops it when you log out.`);
+    flow.hint(`${linger}   keeps it running after you log out`);
+    return;
+  }
   flow.close(`${state.manager} will start it at login.`);
   flow.hint('memnox daemon --uninstall   undoes this');
 }
@@ -145,6 +156,8 @@ interface LoopState {
   account: Account | null;
   /** The rules in force, handed to the egress proxy so it rules the way the socket does. */
   gate?: LocalGate;
+  /** Heard by the phones' relay link and acted on by the sync loop. */
+  beats: HeartbeatBeats;
 }
 
 /** The loop the service runs: evaluate over a socket, sync on a heartbeat, answer held calls. */
@@ -153,22 +166,26 @@ async function runLoop(
   home: () => string,
   options: DaemonOptions,
 ): Promise<void> {
-  const claimed = await claimOrWait(context, home(), options);
+  // One log for everything this process says for as long as it lives, waiting included.
+  const log = (message: string): void => context.out.note(message);
+  const claimed = await claimOrWait(context, home(), options, log);
   if (claimed === null) return;
   const { state, path } = claimed;
   renderListening(context, path, state, options.sync);
   let running = true;
-  // One log for everything this process says for as long as it lives.
-  const log = (message: string): void => context.out.note(message);
   // Only where the machine is enrolled, because an edit claim is a workspace's to hold.
   const watcher = state.account === null ? null : new EditWatcher(home());
   // Local, and so whether or not the machine is enrolled: this is what setup asked it to hold.
   const keeper = new BoundaryKeeper(home(), { log });
   keeper.start();
+  // In the background, since an editor CLI can take seconds and the socket is already answering.
+  void refreshVscodeTerminals(home(), log).catch((err: unknown) =>
+    log(`The Memnox extension was not checked in the editors: ${String(err)}`),
+  );
   const egress = await startEgress(home(), state, log);
   if (state.account !== null) {
     // Rides here because this is already the one process that outlives a command.
-    void syncLoop(home(), () => running, { log });
+    void syncLoop(home(), () => running, { log, beats: state.beats });
     watcher?.start();
   }
   // Held open deliberately: the command is the daemon, not a launcher for one.
@@ -197,6 +214,7 @@ async function claimOrWait(
   context: CliContext,
   home: string,
   options: DaemonOptions,
+  log: (message: string) => void,
 ): Promise<{ state: LoopState; path: string } | null> {
   let waiting = false;
   for (;;) {
@@ -210,9 +228,7 @@ async function claimOrWait(
       return null;
     }
     if (!waiting) {
-      context.out.note(
-        'Another memnox daemon holds the socket; this one waits for it to stop.',
-      );
+      log('Another memnox daemon holds the socket; this one waits for it to stop.');
       waiting = true;
     }
     await new Promise((resolve) => setTimeout(resolve, SOCKET_RETRY_MS));
@@ -250,6 +266,23 @@ async function startEgress(
   return egress;
 }
 
+type DaemonDeps = ConstructorParameters<typeof MemnoxDaemon>[0];
+
+/** Read once here, so killing this process never clears a daily budget. */
+async function spendingOf(
+  home: string,
+  budgets: Awaited<ReturnType<typeof readBudgets>>,
+): Promise<Partial<Pick<DaemonDeps, 'budgets' | 'spentAlready' | 'fleetSpend'>>> {
+  if (budgets.length === 0) return {};
+  return {
+    budgets,
+    spentAlready: await withEvents(home, (store) =>
+      store.query({ limit: LEDGER_SCAN_LIMIT }),
+    ),
+    fleetSpend: await readFleetSpend(home),
+  };
+}
+
 async function buildLoop(
   context: CliContext,
   home: string,
@@ -260,23 +293,15 @@ async function buildLoop(
   const files = set.loaded.map((each) => each.file);
   const gate =
     files.length === 0 ? undefined : new LocalGate(set.policies, { agentName: 'agent' });
-  // Read once here, so killing this process never clears a daily budget.
   const budgets = await readBudgets(home);
-  const spending =
-    budgets.length === 0
-      ? {}
-      : {
-          budgets,
-          spentAlready: await withEvents(home, (store) =>
-            store.query({ limit: LEDGER_SCAN_LIMIT }),
-          ),
-          fleetSpend: await readFleetSpend(home),
-        };
+  const spending = await spendingOf(home, budgets);
+  const beats = new HeartbeatBeats();
   const daemon = new MemnoxDaemon({
     ...(gate === undefined ? {} : { gate }),
     ...spending,
+    remote: { beats },
     pauses: new SessionPauses(home),
-    brain: () => ownBrain(home),
+    ...voiceOf(home),
     // Commentary rather than rail steps, because it writes for as long as the process lives.
     log: (message) => context.out.note(message),
   });
@@ -288,6 +313,7 @@ async function buildLoop(
     budgets: budgets.length,
     account,
     ...(gate === undefined ? {} : { gate }),
+    beats,
   };
 }
 
@@ -323,4 +349,10 @@ function renderListening(
   if (state.account === null && syncWanted) {
     flow.hint('"memnox login" connects this machine.');
   }
+}
+
+/** One roster for the voice and its settings, so a check is never run twice at once. */
+function voiceOf(home: string): { brain: () => Brain; voiceAgents: VoiceAgents } {
+  const voiceAgents = voiceAgentsFor(home);
+  return { brain: () => ownBrain(home, voiceAgents), voiceAgents };
 }

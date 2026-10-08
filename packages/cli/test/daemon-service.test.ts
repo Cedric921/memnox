@@ -25,7 +25,7 @@ describe('having the machine start the daemon', () => {
   it('writes the service file its platform understands, and takes it back', async () => {
     const dir = await home();
     // Never the real launchctl or systemctl: this file names the test runner.
-    const { state } = await installService(dir, { load: () => null });
+    const { state } = await installService(dir, { load: () => null, linger: () => null });
     if (!state.supported) return;
 
     expect(state.installed).toBe(true);
@@ -40,6 +40,18 @@ describe('having the machine start the daemon', () => {
       false,
     );
     expect(serviceState(dir).installed).toBe(false);
+  });
+
+  it('on Linux, names the one command that keeps it running after logout when it could not run it', async () => {
+    const dir = await home();
+    const result = await installService(dir, {
+      load: () => null,
+      linger: () => 'sudo loginctl enable-linger deploy',
+    });
+    await uninstallService(dir, { unload: () => null });
+
+    if (platform() !== 'linux') return expect(result.linger).toBeUndefined();
+    expect(result.linger).toBe('sudo loginctl enable-linger deploy');
   });
 
   it('removing one that was never installed is not an error', async () => {
