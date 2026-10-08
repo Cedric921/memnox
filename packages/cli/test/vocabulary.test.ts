@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { writeJsonFile } from '@memnox/core';
-import { readReach, readVocabulary } from '../src/operator/vocabulary';
+import { commandWords, readReach, readVocabulary } from '../src/operator/vocabulary';
 import { voicePrompt } from '../src/operator/voice-prompts';
 
 async function machine(): Promise<string> {
@@ -66,5 +66,28 @@ describe('the names this machine uses', () => {
     expect(prompt).toContain('speech recognition, which mishears names');
     expect(prompt).toContain('Names on this machine: Claude Code, Railway.');
     expect(prompt).toContain('never ask them to spell');
+  });
+});
+
+describe('the memnox commands taught to the recognizer', () => {
+  it('names each command as said aloud, with and without memnox before it', () => {
+    const words = commandWords(
+      [
+        'scan [unrecognized]: What can act on this machine',
+        'task set <statement>: Declare it',
+        'forget-key: Clear the confirmation key',
+        '  --yes: not a command',
+      ].join('\n'),
+    );
+    expect(words).toEqual(
+      expect.arrayContaining([
+        'scan',
+        'memnox scan',
+        'task set',
+        'forget key',
+        'memnox forget key',
+      ]),
+    );
+    expect(words.some((each) => each.includes('--'))).toBe(false);
   });
 });

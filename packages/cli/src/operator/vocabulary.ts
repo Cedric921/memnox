@@ -10,6 +10,8 @@ import {
   type EnvironmentSnapshot,
 } from '@memnox/core';
 import { readNames } from '../agents/names';
+import { folderUses, spokenName } from './folders';
+import { readHeardWords } from './heard-words';
 
 /**
  * The names this machine actually uses: its agents, the CLIs Memnox watches, its MCP servers
@@ -32,6 +34,9 @@ const SPOKEN_CLI: Readonly<Record<string, string>> = {
   pip3: 'pip',
   git: 'git',
 };
+
+/** The folders taught to the recognizer, enough for where somebody works without crowding the agents' names. */
+const MOST_FOLDER_WORDS = 20;
 
 /** Shells and utilities an interceptor wraps that nobody names out loud. */
 const UNSPOKEN: readonly string[] = ['curl', 'dd', 'rm', 'ssh', 'claude'];
@@ -105,9 +110,17 @@ export async function readVocabulary(
   home: string,
   places: readonly string[] = [],
 ): Promise<string[]> {
-  const reach = await readReach(home);
+  const [reach, heard, folders] = await Promise.all([
+    readReach(home),
+    readHeardWords(home).catch(() => []),
+    folderUses(home).catch(() => []),
+  ]);
   const words = [
     'Memnox',
+    // What this person was misheard saying, so the recognizer expects the word they meant.
+    ...heard.map((each) => each.meant),
+    // The folders they work in most, so "open my memnox macos folder" is heard as said.
+    ...folders.slice(0, MOST_FOLDER_WORDS).map((each) => spokenName(each.path)),
     ...reach.agents,
     ...reach.clis,
     ...reach.signedIn.map((each) => each.cli),
@@ -124,4 +137,17 @@ async function watchedClis(home: string): Promise<string[]> {
 
 function kindOf(snapshot: EnvironmentSnapshot | null, id: string): string {
   return snapshot?.agents.find((agent) => agent.id === id)?.kind ?? id;
+}
+
+/**
+ * Every memnox command as said aloud, from this install's own help, so the recognizer hears
+ * "memnox rewind" or "budget suggest" and a command added in an update is heard without one.
+ */
+export function commandWords(catalogue: string): string[] {
+  const words = catalogue
+    .split('\n')
+    .map((line) => line.split(/[:<[]/)[0]?.trim() ?? '')
+    .filter((name) => /^[a-z][a-z -]*$/.test(name))
+    .flatMap((name) => [name.replace(/-/g, ' '), `memnox ${name.replace(/-/g, ' ')}`]);
+  return [...new Set(words)];
 }
