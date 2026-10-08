@@ -31,6 +31,10 @@ import { registerNextCommand } from './commands/next.command';
 import { registerUnattendedCommand } from './commands/unattended.command';
 import { registerAskCommand } from './commands/ask.command';
 import { registerVoiceCommand } from './commands/voice.command';
+import { registerPairCommand } from './commands/pair.command';
+import { registerTeamCommand } from './commands/team.command';
+import { registerInboxCommand } from './commands/inbox.command';
+import { registerDevicesCommand } from './commands/devices.command';
 import { registerReportCommand } from './commands/report.command';
 import { registerSkillsCommand } from './commands/skills.command';
 import { registerEnvCommand } from './commands/env.command';
@@ -40,6 +44,7 @@ import { registerRunCommand } from './commands/run.command';
 import { registerMcpCommand } from './commands/mcp.command';
 import { registerRepoCommand } from './commands/repo.command';
 import { registerTaskCommand } from './commands/task.command';
+import { registerMissionCommand } from './commands/mission.command';
 import { registerModeCommand } from './commands/mode.command';
 import { registerAllowCommand } from './commands/allow.command';
 import { unwrapEveryServer } from './mcp/wrap-servers';
@@ -109,6 +114,7 @@ function registerTerminalCommands(program: Command, context: CliContext): void {
   registerModeCommand(program, context);
   registerAllowCommand(program, context);
   registerTaskCommand(program, context);
+  registerMissionCommand(program, context);
   registerRepoCommand(program, context);
   registerSetupCommand(program, context);
   registerStatusCommand(program, context);
@@ -122,6 +128,10 @@ function registerVoiceCommands(program: Command, context: CliContext): void {
   registerUnattendedCommand(program, context);
   registerAskCommand(program, context);
   registerVoiceCommand(program, context);
+  registerPairCommand(program, context);
+  registerTeamCommand(program, context);
+  registerInboxCommand(program, context);
+  registerDevicesCommand(program, context);
 }
 
 function registerCommands(program: Command, context: CliContext): void {
