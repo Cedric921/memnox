@@ -114,6 +114,25 @@ describe('addressing the person', () => {
     expect(opening.text('Very well, sir.') + opening.end()).toBe('Very well.');
   });
 
+  it('starts the sentence with a capital when the name that opened it was taken out', () => {
+    const filter = new SpokenFilter([', Moïse', 'Moïse, ']);
+    const pieces = [
+      'Moïse',
+      ', the',
+      ' commit session is waiting. Moïse, ',
+      'it is',
+      ' done.',
+    ];
+    const said = pieces.map((piece) => filter.text(piece)).join('') + filter.end();
+    expect(said).toBe('The commit session is waiting. It is done.');
+  });
+
+  it('leaves the case alone when the name it took out was mid sentence', () => {
+    const filter = new SpokenFilter([', Moïse', 'Moïse, ']);
+    const said = filter.text('Very well, Moïse, the tab stays open.') + filter.end();
+    expect(said).toBe('Very well, the tab stays open.');
+  });
+
   it('lets the title through every five minutes and the name only every half hour', () => {
     const limit = new AddressLimit('/nowhere');
     const forms = addressForms('sir', 'Moïse');

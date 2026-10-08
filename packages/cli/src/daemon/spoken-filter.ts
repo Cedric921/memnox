@@ -23,6 +23,10 @@ export class SpokenFilter {
   /** Text after a tool call that so far only repeats something already said. */
   private held = '';
   private holding = false;
+  /** The last few characters said, so a cut address knows whether it opened a sentence. */
+  private last = '';
+  /** Set when "Moïse, " opened a sentence and was cut, so the word now opening it takes the capital. */
+  private capital = false;
 
   /** What to say of this piece now, which is empty while it is held. */
   text(piece: string): string {
@@ -41,7 +45,11 @@ export class SpokenFilter {
 
   /** The turn is over: what was held for a reminder is said, and a held repeat never is. */
   end(): string {
-    const rest = this.inReminder ? '' : this.tail;
+    const rest = this.inReminder
+      ? ''
+      : this.capital
+        ? this.withCapital(this.tail)
+        : this.tail;
     this.tail = '';
     if (rest === '' || this.holding) return '';
     this.segment += rest;
@@ -52,11 +60,12 @@ export class SpokenFilter {
     let buffer = this.tail + piece;
     let out = '';
     for (;;) {
+      if (this.capital && !this.inReminder) buffer = this.withCapital(buffer);
       if (this.inReminder) {
         const close = buffer.indexOf(REMINDER_CLOSE);
         if (close < 0) {
           this.tail = buffer.slice(-(REMINDER_CLOSE.length - 1));
-          return out;
+          return this.noted(out);
         }
         buffer = buffer.slice(close + REMINDER_CLOSE.length);
         this.inReminder = false;
@@ -67,6 +76,8 @@ export class SpokenFilter {
       if (phrase !== null && (open < 0 || phrase.at < open)) {
         out += buffer.slice(0, phrase.at);
         buffer = buffer.slice(phrase.at + phrase.text.length);
+        if (phrase.text.endsWith(', ') && opensSentence(this.last + out))
+          this.capital = true;
         continue;
       }
       if (open >= 0) {
@@ -80,8 +91,22 @@ export class SpokenFilter {
         ...this.unsaid.map((each) => partialTail(buffer, each)),
       );
       this.tail = buffer.slice(buffer.length - kept);
-      return out + buffer.slice(0, buffer.length - kept);
+      return this.noted(out + buffer.slice(0, buffer.length - kept));
     }
+  }
+
+  private noted(text: string): string {
+    this.last = (this.last + text).slice(-LAST_KEPT);
+    return text;
+  }
+
+  /** The first letter capitalised once one arrives, so a sentence never starts in lower case. */
+  private withCapital(buffer: string): string {
+    const first = /^(\s*)(\S)/u.exec(buffer);
+    if (first === null) return buffer;
+    this.capital = false;
+    const [whole, space = '', letter = ''] = first;
+    return space + letter.toUpperCase() + buffer.slice(whole.length);
   }
 
   private firstUnsaid(buffer: string): { at: number; text: string } | null {
@@ -107,6 +132,15 @@ export class SpokenFilter {
     this.segment += out;
     return out;
   }
+}
+
+/** Enough of what was said to see the end of the sentence before a cut address. */
+const LAST_KEPT = 4;
+
+/** Whether text that comes next would open a sentence: nothing said yet, or a sentence just ended. */
+function opensSentence(before: string): boolean {
+  const said = before.trimEnd();
+  return said === '' || /[.!?:]$/.test(said);
 }
 
 /** How long a tail of the text could be the start of the marker, so it waits for the next piece. */
