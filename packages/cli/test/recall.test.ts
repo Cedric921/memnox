@@ -102,7 +102,9 @@ describe('an offer and the answer to it', () => {
       warm: async () => undefined,
     });
     const text: BrainChunk = { kind: BRAIN_CHUNK.TEXT, text: 'Done.' };
-    const run = (chunks: BrainChunk[]): Promise<{ answered: string; ended: boolean }> =>
+    const run = (
+      chunks: BrainChunk[],
+    ): Promise<{ answered: string; ended: boolean; held: boolean }> =>
       streamTurn(
         new BrainTurns(() => brainSaying(chunks), 60_000),
         'yes',
@@ -111,6 +113,7 @@ describe('an offer and the answer to it', () => {
     expect(await run([text, { kind: BRAIN_CHUNK.DONE }])).toEqual({
       answered: 'Done.',
       ended: true,
+      held: false,
     });
     expect(
       (

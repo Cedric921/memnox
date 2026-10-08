@@ -2,6 +2,7 @@ import { unattendedCheck } from '@memnox/core';
 import { traceToolCall } from '../trace/tool-span';
 import { readUnattended } from '../commands/unattended.command';
 import { WaitingFeed } from '../daemon/waiting-feed';
+import { readCloudAgents } from '../sync/cloud-agents';
 import { DEFAULT_AGENT } from '../next/boundary-report';
 import { changesTool, readingFor } from './changes-tool';
 import { readReach } from '../operator/vocabulary';
@@ -19,10 +20,12 @@ import { answerQuestionTool } from './question-tool';
 import { proposeRewindTool } from './rewind-proposal';
 import { pauseSessionTool, proposeResumeTool } from './session-actions';
 import { proposeStartTool, startSessionTool } from './start-tools';
+import { typeInAppTool } from './app-tools';
 import { walkThroughTool } from './walk-tool';
 import { watchForTool } from './watch-tool';
 import { sessionTool } from './session-tool';
 import { showTool } from './show-tool';
+import { LOOK_TOOL, lookTool } from './look-tool';
 import { sessionsTool } from './sessions-tool';
 import {
   decisionsTool,
@@ -36,6 +39,8 @@ import {
 import type { RewindSeams } from './rewind-tool';
 import type { ToolCatalogue } from './session-server';
 import { ACTING_TOOLS } from './acting-tools';
+import { FOLDER_TOOLS, foldersTool, openFolderTool } from './folder-tools';
+import { forgetWordTool, HEARD_WORD_TOOLS, rememberWordTool } from './heard-words-tools';
 import { AGENT_ARG, proposeTool, SAID_ARG } from './operator-args';
 import { readTool, SESSION_ARG, type ToolDefinition } from './session-tools';
 
@@ -65,6 +70,10 @@ export const OPERATOR_TOOLS: readonly ToolDefinition[] = [
   readTool(
     'reach',
     'What the agents on this machine can use: the agents themselves, each MCP server and which agents start it, and the CLIs Memnox watches, which any agent with a shell can run, and which of those are signed in, so an agent running them acts as the person, and for each agent whether it approves its own actions or asks first and where its program was installed from and who signed it. Answer "is Claude Code connected to Railway" and "which agents act without asking" from here.',
+  ),
+  readTool(
+    'cloud_agents',
+    'The agents the team runs in the cloud, on no machine here, through the guard library, the MCP gateway or the MCP door: for each, its last decisions with what was allowed, asked and refused, what it is waiting on a person for, and any session the circuit breaker paused. Answer "what is the support agent doing" from here when that agent is not one of this machine\'s sessions. A paused cloud session is resumed from the phone or the console, never from here.',
   ),
   readTool(
     'waiting',
@@ -169,7 +178,7 @@ export const OPERATOR_TOOLS: readonly ToolDefinition[] = [
   ),
   readTool(
     'end_conversation',
-    'The person is done talking for now: they said thanks, that is all, no thanks, or it is fine to an offer. Call it alongside your short last reply, and the orb closes once you have said it instead of listening on.',
+    'The person is done talking for now: they said thanks, that is all, no thanks, or it is fine to an offer. Call it alongside your short last reply, and the orb closes once you have said it instead of listening on. Never after answering a question or reporting something, since they often ask a follow up, and never while a held call is waiting on them.',
   ),
   readTool(
     'repository',
@@ -208,7 +217,7 @@ export const OPERATOR_TOOLS: readonly ToolDefinition[] = [
   {
     name: 'show',
     description:
-      'Show the person a session. display "open" brings the session itself forward: its own terminal tab, or its editor window and the terminal or conversation it runs in, so they can carry on there. display "watch" opens a live window in the middle of the screen showing what it is doing now and its conversation. display "card" puts a card in the top left corner of their screen with a title and a markdown summary of what happened, for them to read while you say the gist. display "all" puts every session up at once, one card each, and needs no session. display "close" closes its live window and its own terminal tab, in iTerm, Terminal or an editor, which ends the agent there; it refuses while a turn is in progress. display "dismiss" takes every Memnox card, live window and board off the screen at once, needs no session and ends nothing. Use open when they ask to open it, go to it, switch to it or take them to it; watch only when they ask to watch it live or see it as it happens; card when they ask for a summary, what a session did, or say yes, here or in front of me after you offered a summary; all when they ask to see all their sessions, every session or them all at once, which is never show_agents; close when they ask to close a session, its tab or its terminal, which is never pause_session; dismiss when they ask to close, clear or hide the popups, the cards, the windows or the screen, which never closes a session. Only close ends anything, and only a session that has handed back.',
+      'Show the person a session. display "open" brings the session itself forward: its own terminal tab, or its editor window and the terminal or conversation it runs in, so they can carry on there. display "watch" opens a live window in the middle of the screen showing what it is doing now and its conversation. display "card" puts a card in the top left corner of their screen with a title and a markdown summary of what happened, for them to read while you say the gist. display "all" puts every session up at once, one card each, and needs no session. display "close" closes its live window and its own terminal tab, in iTerm, Terminal or an editor, which ends the agent there; it refuses while a turn is in progress. display "dismiss" takes every Memnox card, live window and board off the screen at once, needs no session and ends nothing. Use open when they ask to open it, go to it, switch to it or take them to it; watch only when they ask to watch it live or see it as it happens; card when they ask for a summary, what a session did, or say yes, here or in front of me after you offered a summary; all when they ask to see all their sessions, every session or them all at once, which is never show_agents; close when they ask to close a session, its tab or its terminal, which is never pause_session; dismiss when they ask to close, clear or hide the popups, the cards, the windows or the screen, which never closes a session. Only close ends anything, and only a session that has handed back. Claude desktop, the Codex app and Hermes are apps, never a session to show: type into one with type_in_app.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -283,6 +292,9 @@ export const OPERATOR_TOOLS: readonly ToolDefinition[] = [
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   },
   ...ACTING_TOOLS,
+  ...HEARD_WORD_TOOLS,
+  ...FOLDER_TOOLS,
+  LOOK_TOOL,
   {
     name: 'answer_question',
     description:
@@ -324,18 +336,28 @@ export const OPERATOR_TOOLS: readonly ToolDefinition[] = [
   ),
   proposeTool(
     'propose_rule',
-    'Write down a rule the person asked for: allow, ask or deny an action. Nothing is in force until they confirm with Touch ID on the Mac.',
+    'Write down a rule the person asked for: allow, ask or deny an action, optionally only on some branches or paths. The Mac shows it with where it could hold, the whole Mac or one of their repositories, and nothing is in force until they pick and confirm with Touch ID.',
     {
       action: {
         type: 'string',
         description:
-          'a command such as "railway deploy", or a verb such as "npm.publish"',
+          'a command such as "railway deploy", or a verb such as "npm.publish" or "filesystem.read"',
       },
       effect: { type: 'string', description: 'allow, ask or deny' },
       reason: { type: 'string', description: 'why, as the person put it' },
+      branches: {
+        type: 'string',
+        description: 'only on these branches, comma separated, such as "main, release/*"',
+      },
+      paths: {
+        type: 'string',
+        description:
+          'only for these files or folders, comma separated globs, such as "*.env, secrets/*"',
+      },
       project: {
         type: 'string',
-        description: 'the project directory, when more than one has a rule file',
+        description:
+          'the repository they named, by folder name or full path; leave it out when they named none, and the whole Mac is suggested',
       },
       said: SAID_ARG,
     },
@@ -363,6 +385,7 @@ const OPERATOR_CALLS: Record<string, OperatorCall> = {
   session: (deps, _seams, args) => sessionTool(asAgent(deps, args), args),
   reach: (deps) => readReach(deps.home),
   waiting: (deps) => new WaitingFeed(deps.home).current(deps.now().toISOString()),
+  cloud_agents: (deps) => readCloudAgents(deps.home),
   unattended: async (deps, _seams, args) =>
     unattendedCheck(
       await readUnattended(deps.home, deps.cwd, textArg(args, 'agent') ?? DEFAULT_AGENT),
@@ -397,12 +420,18 @@ const OPERATOR_CALLS: Record<string, OperatorCall> = {
   walk_through: (deps, seams, args) => walkThroughTool(asAgent(deps, args), seams, args),
   propose_start: (deps, _seams, args) => proposeStartTool(deps, args),
   start_session: (deps, _seams, args) => startSessionTool(deps, args),
+  type_in_app: (deps, _seams, args) => typeInAppTool(deps, args),
   propose_rewind: (deps, seams, args) =>
     proposeRewindTool(asAgent(deps, args), seams, args),
   send_instruction: (deps, _seams, args) => sendInstructionTool(deps, args),
   propose_answer: (deps, _seams, args) => proposeAnswerTool(deps, args),
   answer_question: (deps, _seams, args) => answerQuestionTool(deps, args),
   propose_rule: (deps, _seams, args) => proposeRuleTool(deps, args),
+  remember_word: (deps, _seams, args) => rememberWordTool(deps, args),
+  forget_word: (deps, _seams, args) => forgetWordTool(deps, args),
+  folders: (deps, _seams, args) => foldersTool(deps, args),
+  open_folder: (deps, _seams, args) => openFolderTool(deps, args),
+  look: (deps, _seams, args) => lookTool(deps, args),
 };
 
 export async function callOperatorTool(

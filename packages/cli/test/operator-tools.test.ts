@@ -35,8 +35,10 @@ import {
 } from '../src/session-tools/operator-tools';
 import { WaitingFeed } from '../src/daemon/waiting-feed';
 import { registerPolicyFile } from '../src/policy-registry';
+import { machinePolicyPath } from '../src/protect/machine-rules';
 import { OPERATOR_AGENT } from '../src/session-tools/propose-tools';
 import type { SessionToolDeps } from '../src/session-tools/read-tools';
+import { sendInstructionTool } from '../src/session-tools/instruct-tools';
 import type { RewindSeams } from '../src/session-tools/rewind-tool';
 import { serveSession } from '../src/session-tools/session-server';
 
@@ -136,11 +138,11 @@ async function stamp(path: string, moment: string): Promise<void> {
 }
 
 describe('what the operator is offered', () => {
-  it("reads, and writes nothing but a proposal, a pause, a watch, the person's answer to their agent's question, or a request to show or start what the person said yes to", () => {
+  it("reads, and writes nothing but a proposal, a pause, a watch, the person's answer to their agent's question, their words typed into an agent's app, a word they were misheard saying, a folder to open, or a request to show or start what the person said yes to", () => {
     for (const tool of OPERATOR_TOOLS) {
       if (tool.annotations.readOnlyHint) continue;
       expect(tool.name).toMatch(
-        /^(propose_|show$|pause_session$|send_instruction$|answer_question$|watch_for$|walk_through$|start_session$|show_agents$|memnox_command$|traces$)/,
+        /^(propose_|show$|pause_session$|send_instruction$|type_in_app$|answer_question$|watch_for$|walk_through$|start_session$|show_agents$|memnox_command$|traces$|remember_word$|forget_word$|open_folder$)/,
       );
     }
   });
@@ -313,14 +315,14 @@ describe('a rule the person asked for', () => {
     ).toMatchObject({ refused: expect.stringContaining('memnox-runtime') });
   });
 
-  it('asks for the project rather than guessing when none has a rule file', async () => {
+  it('suggests the whole Mac when no project was named, for the person to narrow on the card', async () => {
     const deps = await depsAt();
-    expect(
-      await callOperatorTool(deps, SEAMS, 'propose_rule', {
-        action: 'npm.publish',
-        effect: 'deny',
-      }),
-    ).toHaveProperty('refused');
+    const answer = (await callOperatorTool(deps, SEAMS, 'propose_rule', {
+      action: 'npm.publish',
+      effect: 'deny',
+    })) as { rule: { file: string }; places: string[] };
+    expect(answer.rule.file).toBe(machinePolicyPath(deps.home));
+    expect(answer.places[0]).toBe('This Mac');
   });
 });
 
@@ -393,6 +395,39 @@ describe('more than one session at once', () => {
     expect((claude[0] as { state?: string }).state).toBe('quiet');
     const everyone = (await callOperatorTool(deps, SEAMS, 'sessions', {})) as unknown[];
     expect(everyone).toHaveLength(3);
+  });
+
+  it("lists one conversation once when its edits record under the agent's own id, as on the island", async () => {
+    const deps = await depsAt();
+    await new SessionHosts(deps.home).note({
+      sessionId: 'ses_hosted',
+      agent: 'claude-code',
+      pid: process.pid,
+      app: 'Visual Studio Code',
+      agentSession: 'conversation-uuid',
+      seenAt: '2026-09-30T10:00:00.000Z',
+      cwd: deps.home,
+    });
+    await recorded(deps.home, [
+      event('ses_hosted', 'claude-code', {
+        surface: 'network',
+        operation: 'http.connect',
+        target: 'api.anthropic.com',
+        at: '2026-09-30T11:00:00.000Z',
+      }),
+      event('conversation-uuid', 'claude-code', {
+        target: join(deps.home, 'cart.ts'),
+        at: '2026-09-30T11:30:00.000Z',
+      }),
+    ]);
+    const rows = (await callOperatorTool(deps, SEAMS, 'sessions', {})) as {
+      session: string;
+      actions: number;
+      lastActive: string;
+    }[];
+    expect(rows.map((each) => each.session)).toEqual(['ses_hosted']);
+    expect(rows[0]?.actions).toBe(2);
+    expect(rows[0]?.lastActive).toBe('2026-09-30T11:30:00.000Z');
   });
 
   it('says the catch-all session is this Mac and not an agent', async () => {
@@ -671,6 +706,47 @@ describe('telling an agent what the person said', () => {
     return answer.instruction;
   }
 
+  it('says plainly that OpenClaw cannot be handed work yet, rather than queueing it for nothing', async () => {
+    const deps = await depsAt();
+    const answer = (await callOperatorTool(deps, SEAMS, 'propose_instruction', {
+      session: 'ses_claw',
+      agent: 'openclaw',
+      message: 'rotate the nginx logs',
+    })) as { instruction: string };
+
+    const sent = await callOperatorTool(deps, SEAMS, 'send_instruction', {
+      instruction: answer.instruction,
+    });
+
+    expect(sent).toMatchObject({ sent: false, how: 'failed' });
+    expect(
+      await new SpokenInstructions(deps.home, () => NOW).collect('openclaw', 'ses_claw'),
+    ).toEqual([]);
+  });
+
+  it('starts Hermes on its own session from its command line, since no Mac types on a server', async () => {
+    const deps = await depsAt();
+    const answer = (await callOperatorTool(deps, SEAMS, 'propose_instruction', {
+      session: 'hermes:s_42',
+      agent: 'hermes',
+      message: 'rotate the nginx logs',
+    })) as { instruction: string };
+    const resumed: [string, string][] = [];
+
+    const sent = await sendInstructionTool(
+      deps,
+      { instruction: answer.instruction },
+      () => false,
+      (sessionId, words) => {
+        resumed.push([sessionId, words]);
+        return true;
+      },
+    );
+
+    expect(sent).toMatchObject({ sent: true, how: 'resumed', session: 'hermes:s_42' });
+    expect(resumed).toEqual([['hermes:s_42', 'rotate the nginx logs']]);
+  });
+
   it('sends nothing until it is said yes to, and then hands it to a working session at its next pause', async () => {
     const deps = await depsAt();
     await new SessionTurns(deps.home).prompted(
@@ -803,17 +879,86 @@ describe('telling an agent what the person said', () => {
     expect(await new DisplayRequests(deps.home).open(NOW.toISOString())).toEqual([]);
   });
 
-  it('says it started only once the Mac said it typed it', async () => {
+  it('answers a retry at once when the Mac said the same send would fail again', async () => {
     const base = await waitingInEditor();
+    let typed = 0;
+    const failing = (reason: string): SessionToolDeps => ({
+      ...base,
+      delivered: async (requestId) => {
+        typed += 1;
+        await new DisplayRequests(base.home).deliver(requestId, {
+          outcome: 'failed',
+          at: NOW.toISOString(),
+          reason,
+        });
+        return new DisplayRequests(base.home).deliveryOf(requestId);
+      },
+    });
+    const lost = failing(
+      "none of iTerm's tabs holds it, and sending again would fail the same way",
+    );
+    await callOperatorTool(lost, SEAMS, 'send_instruction', {
+      instruction: await proposed(lost),
+    });
+    const again = (await callOperatorTool(lost, SEAMS, 'send_instruction', {
+      instruction: await proposed(lost),
+    })) as { sent: boolean; said: string };
+    expect(typed).toBe(1);
+    expect(again.sent).toBe(false);
+    expect(again.said).toContain('not tried again');
+    expect(again.said).toContain('never offer to retry');
+  });
+
+  it('tries again when the person can fix what stopped it', async () => {
+    const base = await waitingInEditor();
+    let typed = 0;
+    const deps: SessionToolDeps = {
+      ...base,
+      delivered: async (requestId) => {
+        typed += 1;
+        await new DisplayRequests(base.home).deliver(requestId, {
+          outcome: 'failed',
+          at: NOW.toISOString(),
+          reason: 'the Memnox extension is not in Visual Studio Code yet',
+        });
+        return new DisplayRequests(base.home).deliveryOf(requestId);
+      },
+    };
+    await callOperatorTool(deps, SEAMS, 'send_instruction', {
+      instruction: await proposed(deps),
+    });
+    await callOperatorTool(deps, SEAMS, 'send_instruction', {
+      instruction: await proposed(deps),
+    });
+    expect(typed).toBe(2);
+  });
+
+  it('says it started only once the Mac read it back and saw it land', async () => {
+    const base = await waitingInEditor();
+    const proof = { checked: 'the message box emptied', seen: 'push the branch' };
+    const verified: SessionToolDeps = {
+      ...base,
+      delivered: async () => ({ outcome: 'verified', at: NOW.toISOString(), proof }),
+    };
+    expect(
+      await callOperatorTool(verified, SEAMS, 'send_instruction', {
+        instruction: await proposed(verified),
+      }),
+    ).toMatchObject({
+      sent: true,
+      proof,
+      said: expect.stringContaining('starting on it now'),
+    });
     const typed: SessionToolDeps = {
       ...base,
       delivered: async () => ({ outcome: 'typed', at: NOW.toISOString() }),
     };
-    expect(
-      await callOperatorTool(typed, SEAMS, 'send_instruction', {
-        instruction: await proposed(typed),
-      }),
-    ).toMatchObject({ sent: true, said: expect.stringContaining('starting on it now') });
+    const unchecked = (await callOperatorTool(typed, SEAMS, 'send_instruction', {
+      instruction: await proposed(typed),
+    })) as { sent: boolean; said: string };
+    expect(unchecked.sent).toBe(true);
+    expect(unchecked.said).toContain('could not confirm it yet');
+    expect(unchecked.said).not.toContain('starting on it now');
     const silent: SessionToolDeps = { ...base, delivered: async () => null };
     expect(
       await callOperatorTool(silent, SEAMS, 'send_instruction', {
@@ -822,6 +967,53 @@ describe('telling an agent what the person said', () => {
     ).toMatchObject({
       sent: true,
       said: expect.stringContaining('never say it was typed'),
+    });
+  });
+
+  it('keeps it for the next prompt when the Mac would not take the window', async () => {
+    const base = await waitingInEditor();
+    const deps: SessionToolDeps = {
+      ...base,
+      delivered: async () => ({ outcome: 'waiting', at: NOW.toISOString() }),
+    };
+    const answer = (await callOperatorTool(deps, SEAMS, 'send_instruction', {
+      instruction: await proposed(deps),
+    })) as { sent: boolean; how: string; said: string };
+    expect(answer).toMatchObject({ sent: true, how: 'later' });
+    expect(answer.said).toContain('next prompts that session');
+    expect(answer.said).toContain('Never say it will pick it up at its next step');
+    const queued = await new SpokenInstructions(deps.home, () => NOW).collect(
+      'claude-code',
+      'ses_work',
+    );
+    expect(queued).toHaveLength(1);
+  });
+
+  it('looks at the screen only through what the Mac saw', async () => {
+    const base = await depsAt();
+    const sight = {
+      app: 'Safari',
+      window: 'Pull request',
+      image: '/tmp/s.png',
+      outline: 'button Merge',
+    };
+    const seeing: SessionToolDeps = { ...base, seen: async () => sight };
+    expect(await callOperatorTool(seeing, SEAMS, 'look', {})).toMatchObject({
+      seen: true,
+      ...sight,
+    });
+    const blind: SessionToolDeps = { ...base, seen: async () => null };
+    expect(await callOperatorTool(blind, SEAMS, 'look', {})).toMatchObject({
+      seen: false,
+      said: expect.stringContaining('never describe the screen from a guess'),
+    });
+    const outlineOnly: SessionToolDeps = {
+      ...base,
+      seen: async () => ({ app: 'Safari', outline: 'button Merge' }),
+    };
+    expect(await callOperatorTool(outlineOnly, SEAMS, 'look', {})).toMatchObject({
+      seen: true,
+      said: expect.stringContaining('Screen Recording'),
     });
   });
 
@@ -1256,6 +1448,25 @@ describe('a session that has handed back', () => {
       turn?: string;
     }[];
     expect(rows[0]).toMatchObject({ state: 'open', turn: 'handed back to you' });
+  });
+});
+
+describe("Memnox's own voice brain", () => {
+  it('is never listed as a session, since it answers the person and is not their agent', async () => {
+    const deps = await depsAt();
+    await recorded(deps.home, [
+      event('ses_work', 'claude-code', { at: '2026-09-30T11:59:00.000Z' }),
+      event('ses_brain', 'memnox-operator', { at: '2026-09-30T11:59:30.000Z' }),
+    ]);
+    await new SessionTurns(deps.home).prompted(
+      'ses_asked',
+      'memnox-operator',
+      '2026-09-30T11:59:40.000Z',
+    );
+    const rows = (await callOperatorTool(deps, SEAMS, 'sessions', {})) as {
+      session: string;
+    }[];
+    expect(rows.map((each) => each.session)).toEqual(['ses_work']);
   });
 });
 

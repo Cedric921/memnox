@@ -102,11 +102,22 @@ export const ACTING_TOOLS: readonly ToolDefinition[] = [
   },
   proposeTool(
     'propose_start',
-    'Start a new agent session the person asked for, like "start Claude in memnox cloud on the failing test". Nothing starts: it returns an id and the words to read back. Pass task in their words, and repository as they named it.',
+    'Start a new agent session the person asked for, like "start Claude in memnox cloud on the failing test", "open Claude Code in VS Code and ask it to check the changes" or "open Codex desktop and ask it to review my changes". Nothing starts: it returns an id and the words to read back. Pass task in their words, and repository as they named it.',
     {
       agent: {
         type: 'string',
-        description: 'claude-code or codex; claude-code when left out',
+        description:
+          'claude-code, codex, cursor or hermes, as they named it; claude-code when left out. The Codex app, ChatGPT app and Codex desktop are codex, Claude desktop and the Claude app are claude-code',
+      },
+      app: {
+        type: 'string',
+        description:
+          '"true" to open a new chat in the agent\'s own desktop app on the repository and type the task into it, when they say app, desktop, or the app by name such as Claude desktop, Codex app, ChatGPT, or Cursor when Cursor itself is the agent; "false" for a new terminal tab; left out, it goes where they last had this agent, the app, an editor or a terminal. An agent named in an editor, like Claude Code in VS Code, is editor, never app. With app "true", task may be left out to only open the app',
+      },
+      editor: {
+        type: 'string',
+        description:
+          'the editor to start it inside, as they named it, such as "VS Code", "Visual Studio Code", "code", "Cursor" or "Windsurf", when they ask for the agent in, within or inside an editor, like "open Claude Code in VS Code": a new terminal opens inside that editor on the repository and the agent starts there, where later instructions can be typed into it. "true" takes the editor they have installed. Never pass app with it',
       },
       repository: {
         type: 'string',
@@ -133,7 +144,7 @@ export const ACTING_TOOLS: readonly ToolDefinition[] = [
   {
     name: 'start_session',
     description:
-      'Start a session from propose_start, only after the person said yes to it read back. A new terminal tab opens in that repository and the agent starts on the task under memnox run.',
+      'Start a session from propose_start, only after the person said yes to it read back. A new terminal tab opens in that repository and the agent starts on the task under memnox run; for an editor, a new terminal opens inside that editor instead; for a desktop app, the app opens on that repository with the task in it.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -141,6 +152,28 @@ export const ACTING_TOOLS: readonly ToolDefinition[] = [
       },
     },
     // It starts an agent the person asked for; everything that agent then does is ruled as ever.
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+  },
+  {
+    name: 'type_in_app',
+    description:
+      'Type a message into the chat the person has open in an agent\'s desktop app, Claude desktop, the Codex app, Cursor or Hermes, and send it, the way they would type it, so they watch it go in. Use it for "type in Claude desktop and ask it to discuss Memnox", "ask the Codex app to run the tests" or "in this chat, tell it to continue". For a new chat in the app on a repository, use propose_start with app "true" instead.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        agent: {
+          type: 'string',
+          description:
+            'claude-code for Claude desktop, codex for the Codex or ChatGPT app, cursor or hermes; claude-code when left out',
+        },
+        message: {
+          type: 'string',
+          description:
+            'what to type, exactly as they asked the agent, fixing only misheard words, as for propose_instruction',
+        },
+      },
+    },
+    // It types what the person asked into an app they use; what that agent then does is ruled as ever.
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   },
   proposeTool(

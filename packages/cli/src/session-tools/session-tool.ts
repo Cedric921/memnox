@@ -2,6 +2,7 @@ import { SPEAKER, type ConversationLine } from '@memnox/core';
 import { SessionViews } from '../daemon/session-view';
 import { withEvents } from '../event-store';
 import { textArg, type SessionToolDeps, type ToolArgs } from './read-tools';
+import { noteFocus } from './focus';
 import { scopeOf } from './session-scope';
 
 /**
@@ -26,6 +27,8 @@ export async function sessionTool(
     views.lastAnswer(scope.sessionId),
   ]);
   if (view === null) return { ...scope, found: false };
+  // The one just talked about is the one "it" and "the same session" mean next, not only one acted on.
+  await noteFocus(deps, scope, 'asked about');
   const now = view.thinking ? nowIn(view.conversation ?? [], deps.now()) : null;
   return {
     ...scope,

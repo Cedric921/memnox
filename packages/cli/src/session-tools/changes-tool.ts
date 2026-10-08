@@ -15,6 +15,7 @@ import { withEvents } from '../event-store';
 import { MOST_ROWS } from './bounded';
 import { textArg, type SessionToolDeps, type ToolArgs } from './read-tools';
 import type { RewindSeams } from './rewind-tool';
+import { idsOf } from './session-aliases';
 import { scopeOf, type SessionScope } from './session-scope';
 import {
   FILE_KIND,
@@ -210,10 +211,13 @@ async function sessionAndTouches(
 ): Promise<Found> {
   const { scope, rows } = await withEvents(deps.home, async (store) => {
     const scope = await scopeOf(store, deps, session);
-    const rows =
-      scope.sessionId === null
-        ? []
-        : await store.query({ sessionId: scope.sessionId, limit: LEDGER_SESSION_LIMIT });
+    const ids = scope.sessionId === null ? [] : await idsOf(deps.home, scope.sessionId);
+    // The edits often record under the agent's own id and the rest under the hosted one.
+    const rows = (
+      await Promise.all(
+        ids.map((sessionId) => store.query({ sessionId, limit: LEDGER_SESSION_LIMIT })),
+      )
+    ).flat();
     return { scope, rows };
   });
   const id = scope.sessionId;

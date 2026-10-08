@@ -1,8 +1,9 @@
 import {
   CARD_FILES,
-  DELIVERY,
+  wentIn,
   DISPLAY,
   DisplayRequests,
+  isStartableAgent,
   LEDGER_SESSION_LIMIT,
   SessionHosts,
   SessionTasks,
@@ -20,6 +21,7 @@ import { noteFocus } from './focus';
 import { textArg, type SessionToolDeps, type ToolArgs } from './read-tools';
 import type { RewindSeams } from './rewind-tool';
 import { liveHost } from './live-host';
+import { resolveInstalledApp } from './app-tools';
 import { scopeOf, type SessionScope } from './session-scope';
 
 /**
@@ -89,6 +91,8 @@ async function putUp(
     return { shown: false, said: 'A card needs text: the summary you are about to say.' };
   }
   const { host, openAt } = await whereItRuns(deps, sessionId);
+  // A session in an agent's own desktop app has no tab or folder, so the app itself is what comes forward.
+  const appPath = host === null ? desktopAppOf(deps, sessionId) : null;
   const code = display === DISPLAY.CARD ? await codeFor(deps, seams, sessionId) : {};
   const request = await new DisplayRequests(deps.home).request({
     ...code,
@@ -98,6 +102,7 @@ async function putUp(
     title: textArg(args, 'title') ?? DEFAULT_TITLE,
     ...(text === undefined ? {} : { text }),
     ...(openAt === undefined ? {} : { cwd: openAt }),
+    ...(appPath === null ? {} : { appPath }),
     at: deps.now().toISOString(),
   });
   const [showing, failed] = await Promise.all([
@@ -121,7 +126,7 @@ async function notBroughtForward(
   requestId: string,
 ): Promise<Record<string, unknown> | null> {
   const delivery = (await deps.delivered?.(requestId, FOCUS_WAIT_MS)) ?? null;
-  if (delivery === null || delivery.outcome === DELIVERY.TYPED) return null;
+  if (delivery === null || wentIn(delivery.outcome)) return null;
   return {
     shown: false,
     ...(delivery.reason === undefined ? {} : { why: delivery.reason }),
@@ -162,7 +167,7 @@ async function closeSession(
 /** What the brain may say, from what the Mac reported, so a tab still open is never called closed. */
 function closedAs(delivery: DisplayDelivery | null): Record<string, unknown> {
   if (delivery === null) return { closed: true, said: CLOSE_UNCONFIRMED };
-  if (delivery.outcome === DELIVERY.TYPED) return { closed: true, said: CLOSED };
+  if (wentIn(delivery.outcome)) return { closed: true, said: CLOSED };
   return {
     closed: false,
     ...(delivery.reason === undefined ? {} : { why: delivery.reason }),
@@ -257,6 +262,18 @@ async function aboutSession(
         : 'handed back to them',
   };
 }
+
+/** Where the desktop app behind an `app_` session is installed, or null for any other session. */
+function desktopAppOf(deps: SessionToolDeps, sessionId: string): string | null {
+  const agent = sessionId.startsWith(APP_SESSION)
+    ? sessionId.slice(APP_SESSION.length)
+    : '';
+  if (!isStartableAgent(agent)) return null;
+  return (deps.resolveApp ?? resolveInstalledApp)(agent);
+}
+
+/** How a session typed into an agent's desktop app is named, as type_in_app names it. */
+const APP_SESSION = 'app_';
 
 /** Where the session runs, and the checkout to open for it. */
 async function whereItRuns(

@@ -10,7 +10,8 @@ import { ConfirmKeys } from '@memnox/core';
 
 import type { CliContext } from '../cli-context';
 import { confirmOnTerminal, type Confirm } from '../confirm';
-import { keepAddress, readAddress } from '../operator/owner';
+import { forgetHeardWord, readHeardWords } from '../operator/heard-words';
+import { keepAddress, keepOwner, readAddress, readOwner } from '../operator/owner';
 
 interface VoiceDeps {
   home: () => string;
@@ -33,6 +34,15 @@ export function registerVoiceCommand(
     .option('--yes', 'clear it without asking')
     .action(async (options: { yes?: boolean }) => runForget(context, deps, options));
   voice
+    .command('words')
+    .description(
+      'The words the voice learned it mishears you saying, and what you meant by each',
+    )
+    .option('--forget <heard>', 'forget one, by how it was heard')
+    .action(async (options: { forget?: string }) =>
+      runWords(context, deps, options.forget),
+    );
+  voice
     .command('address')
     .description('How the voice addresses you, such as "sir", "ma\'am" or your name')
     .argument('[words...]', 'the words to use; nothing shows the current one')
@@ -40,6 +50,58 @@ export function registerVoiceCommand(
     .action(async (words: string[], options: { clear?: boolean }) =>
       runAddress(context, deps, words, options.clear === true),
     );
+  voice
+    .command('name')
+    .description(
+      'Your name, which the voice keeps for a greeting and says far less often than the address',
+    )
+    .argument('[words...]', 'your name; nothing shows the current one')
+    .action(async (words: string[]) => runName(context, deps, words));
+}
+
+/** Kept in this person's own home, so each person on a shared Mac sees only their own. */
+async function runWords(
+  context: CliContext,
+  deps: VoiceDeps,
+  forget: string | undefined,
+): Promise<void> {
+  const { flow } = context;
+  flow.open('memnox voice words');
+  if (forget !== undefined) {
+    const gone = await forgetHeardWord(deps.home(), forget);
+    flow.close(gone ? `Forgot "${forget}".` : `Nothing was learned for "${forget}".`);
+    return;
+  }
+  const words = await readHeardWords(deps.home());
+  if (words.length === 0) {
+    flow.close(
+      'Nothing learned yet. Correct the voice when it mishears you, and it remembers.',
+    );
+    return;
+  }
+  flow.rows(
+    'Heard as, meant',
+    words.map((each) => ({ label: each.heard, value: each.meant })),
+  );
+  flow.close(
+    `${words.length} learned. Forget one with memnox voice words --forget "<heard>".`,
+  );
+}
+
+async function runName(
+  context: CliContext,
+  deps: VoiceDeps,
+  words: readonly string[],
+): Promise<void> {
+  const { flow } = context;
+  flow.open('memnox voice name');
+  if (words.length > 0) await keepOwner(deps.home(), words.join(' '));
+  const kept = await readOwner(deps.home());
+  flow.close(
+    kept === undefined
+      ? 'The voice does not know your name.'
+      : `The voice knows you as ${kept} from its next conversation.`,
+  );
 }
 
 /** Chosen by the person, never guessed from a name, since a wrong "sir" or "ma'am" misgenders them. */

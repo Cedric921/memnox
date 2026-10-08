@@ -17,7 +17,9 @@ import {
   targetsRuledOn,
   type ActionRequest,
   type DisplayDelivery,
+  type Sight,
   type LocalVerdict,
+  type EditorApp,
   type StartableAgent,
   type MemnoxEvent,
   type Milestone,
@@ -52,8 +54,14 @@ export interface SessionToolDeps {
   workspaceName?: () => Promise<string | null>;
   /** How the Mac says an instruction it typed landed, or null when it never said; absent where nobody types. */
   delivered?: (requestId: string, waitMs?: number) => Promise<DisplayDelivery | null>;
+  /** What the Mac saw for a LOOK, or null when it said nothing in time; absent means waiting on the file. */
+  seen?: (requestId: string) => Promise<Sight | null>;
   /** Where an agent's command is, from the person's own shell or where it is installed, or null. */
   resolveCommand?: (agent: StartableAgent) => string | null;
+  /** Where an agent's desktop app is installed, or null when it has none on this Mac. */
+  resolveApp?: (agent: StartableAgent) => string | null;
+  /** Where an editor is installed, so a test names one without it being on the machine. */
+  resolveEditor?: (editor: EditorApp) => string | null;
   /** How a memnox command is run for the voice; absent means memnox itself, beside this module. */
   runMemnox?: (argv: readonly string[], timeoutMs: number) => Promise<CommandRun>;
   /** What a login by voice names this machine when they named nothing; the hostname outside tests. */

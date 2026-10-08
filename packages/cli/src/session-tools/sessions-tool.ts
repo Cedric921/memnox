@@ -18,8 +18,10 @@ import {
   type PendingApproval,
   type SessionHost,
 } from '@memnox/core';
+import { readTurnOver, sessionTranscript } from '../daemon/transcript';
 import { withEvents } from '../event-store';
 import { repositoriesOf } from './changes-tool';
+import { hostedIds } from './session-aliases';
 import { textArg, type SessionToolDeps, type ToolArgs } from './read-tools';
 
 /**
@@ -36,6 +38,12 @@ const WORKING_WITHIN_MS = 3 * 60 * 1_000;
 /** A turn unanswered this long is an agent that crashed or was closed, not one still thinking. */
 const STALE_TURN_MS = 2 * 60 * 60 * 1_000;
 
+/** The agent names Memnox's own voice brain records under, which answers the person and is never their work. */
+const OPERATOR_AGENTS: ReadonlySet<string> = new Set([
+  'memnox-operator',
+  'agt_memnox-operator',
+]);
+
 const TURN = {
   /** Asked and still thinking or working through it. */
   IN_PROGRESS: 'in progress',
@@ -46,7 +54,7 @@ const TURN = {
 /** Quiet this long with no live process known is a session somebody walked away from. */
 const IDLE_WITHIN_MS = 15 * 60 * 1_000;
 
-const SESSION_STATE = {
+export const SESSION_STATE = {
   /** Something recorded in the last few minutes. */
   WORKING: 'working',
   /** Its process is alive and nothing happened lately: open, waiting on the person. */
@@ -61,6 +69,8 @@ const SESSION_STATE = {
 type SessionState = (typeof SESSION_STATE)[keyof typeof SESSION_STATE];
 
 interface StateFacts {
+  /** Its SessionEnd hook said the person closed it. */
+  closed: boolean;
   paused: boolean;
   quietMs: number;
   /** Thinking through a turn, or a helper of its working, though the ledger is quiet. */
@@ -72,6 +82,7 @@ interface StateFacts {
 
 /** Where a session stands right now, from the pause, how long it has been quiet, and its process. */
 function stateOf(facts: StateFacts): SessionState {
+  if (facts.closed) return SESSION_STATE.ENDED;
   if (facts.paused) return SESSION_STATE.PAUSED;
   const alive = facts.pid === undefined ? null : processAlive(facts.pid);
   if (alive === false) return SESSION_STATE.ENDED;
@@ -84,7 +95,7 @@ function stateOf(facts: StateFacts): SessionState {
 }
 
 /** Signal zero asks whether the process exists without touching it. */
-function processAlive(pid: number): boolean {
+export function processAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
     return true;
@@ -116,18 +127,14 @@ export async function sessionsTool(
   const waiting = await new PendingApprovals(deps.home).list(moment.toISOString());
   const turns = await turnsWithThinking(deps.home, grouped, agent, moment);
   await addJustOpened(deps.home, grouped, agent, since.toISOString());
+  const hosted = await hostedIds(deps.home);
+  foldAliases(grouped, hosted);
   const rows = [];
   for (const [sessionId, rowsOf] of grouped) {
-    const turn = turns.get(sessionId);
-    rows.push(
-      await describe(deps, {
-        sessionId,
-        events: rowsOf,
-        waiting,
-        moment,
-        ...(turn === undefined ? {} : { turn }),
-      }),
-    );
+    const turn = newestTurn(turns, hosted, sessionId);
+    if (isOperator(rowsOf, turn)) continue;
+    const one = { sessionId, events: rowsOf, waiting, moment };
+    rows.push(await describe(deps, turn === undefined ? one : { ...one, turn }));
   }
   // Work happening now first, so "which one is working" reads off the top.
   return rows.sort(
@@ -136,6 +143,38 @@ export async function sessionsTool(
         Number(a.state === SESSION_STATE.WORKING) ||
       b.lastActive.localeCompare(a.lastActive),
   );
+}
+
+/** The agent's own conversation id and the session hosting it are one row, under the hosted id. */
+function foldAliases(
+  grouped: Map<string, MemnoxEvent[]>,
+  hosted: ReadonlyMap<string, string>,
+): void {
+  for (const [alias, owner] of hosted) {
+    const rows = grouped.get(alias);
+    if (rows === undefined) continue;
+    grouped.delete(alias);
+    grouped.set(
+      owner,
+      [...(grouped.get(owner) ?? []), ...rows].sort((a, b) => a.at.localeCompare(b.at)),
+    );
+  }
+}
+
+/** The turn asked most recently under any id the session records under. */
+function newestTurn(
+  turns: ReadonlyMap<string, SessionTurn>,
+  hosted: ReadonlyMap<string, string>,
+  sessionId: string,
+): SessionTurn | undefined {
+  const ids = [
+    sessionId,
+    ...[...hosted].filter(([, id]) => id === sessionId).map(([alias]) => alias),
+  ];
+  return ids
+    .map((id) => turns.get(id))
+    .filter((each): each is SessionTurn => each !== undefined)
+    .sort((a, b) => (b.promptAt ?? '').localeCompare(a.promptAt ?? ''))[0];
 }
 
 function bySession(events: readonly MemnoxEvent[]): Map<string, MemnoxEvent[]> {
@@ -172,7 +211,10 @@ async function describe(
   // Being opened is not work, so it dates the session without making it look busy.
   const lastActive = activeAt === '' ? (host?.seenAt ?? '') : activeAt;
   const subagents = summarizeSubagents(helpers, moment);
-  const thinking = turn !== undefined && turnInProgress(turn, moment);
+  const thinking =
+    turn !== undefined &&
+    turnInProgress(turn, moment) &&
+    !(await turnOverByTranscript(deps.home, sessionId, moment));
   const quietMs = activeAt === '' ? Infinity : moment.getTime() - Date.parse(activeAt);
   const busy = thinking || subagents.working.length > 0;
   const pid = host === null ? {} : { pid: host.pid };
@@ -180,11 +222,14 @@ async function describe(
     session: sessionId,
     agent: namedAgent(events) ?? summary?.agent ?? turn?.agent ?? 'unknown',
     ...(task === null ? {} : { task: task.statement }),
+    // The mission stays the task; what the person asked last sits beside it.
+    ...(task?.latestAsk === undefined ? {} : { lastAsk: task.latestAsk }),
     repositories: repositoriesOf(events),
     started: summary?.started ?? events[0]?.at ?? turn?.promptAt ?? '',
     lastActive,
     quietForMinutes: msToMinutes(moment.getTime() - Date.parse(lastActive)),
     state: stateOf({
+      closed: host?.endedAt !== undefined,
       paused: pause !== null,
       quietMs,
       busy,
@@ -267,6 +312,28 @@ function latestOf(moments: readonly (string | undefined)[]): string {
       .sort()
       .pop() ?? ''
   );
+}
+
+/** The brain's own session, by any row or turn it recorded, so a question to the voice is never counted as an agent. */
+function isOperator(
+  events: readonly MemnoxEvent[],
+  turn: SessionTurn | undefined,
+): boolean {
+  if (turn !== undefined && OPERATOR_AGENTS.has(turn.agent)) return true;
+  return events.some((each) => OPERATOR_AGENTS.has(each.agent));
+}
+
+/**
+ * A turn the agent's own transcript shows ended though its hook never said so: a turn the person
+ * stopped, or one an API error ended, fires no Stop hook and would read as thinking for hours.
+ */
+export async function turnOverByTranscript(
+  home: string,
+  sessionId: string,
+  moment: Date,
+): Promise<boolean> {
+  const path = await sessionTranscript(home, sessionId).catch(() => null);
+  return path !== null && readTurnOver(path, moment);
 }
 
 /** Asked and not yet answered, and asked recently enough that a crash is not mistaken for thinking. */
