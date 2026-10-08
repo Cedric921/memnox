@@ -26,6 +26,7 @@ import {
   type EgressProxyOptions,
 } from '@memnox/interceptors';
 import { egressStatePath } from '../memnox-paths';
+import { strandedEgressPorts } from './stranded-egress';
 
 /** What the daemon writes down about its proxy, so a run can find it. */
 interface EgressState {
@@ -82,12 +83,16 @@ interface DaemonEgressOptions {
   log: (message: string) => void;
   /** Injected so a test starts nothing that listens. */
   start?: (options: EgressProxyOptions) => Promise<EgressProxy>;
+  /** The ports agents already running were pointed at; injected so a test reads no process. */
+  stranded?: () => Promise<number[]>;
   now?: () => Date;
 }
 
 /** Started with the daemon and stopped with it, and its port written where a run looks. */
 export class DaemonEgress {
   private proxy: EgressProxy | null = null;
+  /** Ports taken back for agents an older run pointed straight at a daemon now gone. */
+  private adopted: EgressProxy[] = [];
 
   constructor(
     private readonly home: string,
@@ -110,17 +115,44 @@ export class DaemonEgress {
       startedAt: (this.options.now ?? (() => new Date()))().toISOString(),
     };
     await writeJsonFile(egressStatePath(this.home), state);
+    await this.adopt(seam, proxy.port);
     return proxy.port;
   }
 
   async stop(): Promise<void> {
     const proxy = this.proxy;
+    const adopted = this.adopted;
     this.proxy = null;
+    this.adopted = [];
+    await Promise.all(adopted.map((extra) => extra.close()));
     if (proxy === null) return;
     await proxy.close();
     // No pid, so no run leans on a port nobody holds, but the next daemon can take it back.
     const stopped: StoppedEgress = { lastPort: proxy.port };
     await writeJsonFile(egressStatePath(this.home), stopped);
+  }
+
+  /**
+   * Every port a live run's agent still sends to and nobody holds, so a session started
+   * before this daemon keeps working with nobody having to run anything. A port that will
+   * not bind is a run's own relay, or somebody else's, and is left alone.
+   */
+  private async adopt(seam: EgressSeam, primary: number): Promise<void> {
+    const start = this.options.start ?? startEgressProxy;
+    const stranded =
+      this.options.stranded ?? ((): Promise<number[]> => strandedEgressPorts(this.home));
+    const ports = await stranded().catch((): number[] => []);
+    for (const port of ports) {
+      if (port === primary) continue;
+      try {
+        this.adopted.push(await start({ seam, port, log: this.options.log }));
+        this.options.log(
+          `Egress proxy also on ${port}, for a session started before this daemon.`,
+        );
+      } catch {
+        // Held, which is the relay doing this job already, or not ours to take.
+      }
+    }
   }
 
   /**

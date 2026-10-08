@@ -1,8 +1,6 @@
 /**
- * Where a run's agent sends its HTTP: the daemon's egress proxy, through a relay this run
- * holds, when one is running, or a proxy of the session's own for as long as the agent
- * lives. An untrusted session always gets its own, since what it may reach is decided for
- * it and not by what it says.
+ * Where a run's agent sends its HTTP: through a relay to the daemon's egress proxy when one
+ * runs, else a proxy of its own. An untrusted session always gets its own, decided for it.
  */
 import { desktopNotice, LocalGate } from '@memnox/core';
 import {

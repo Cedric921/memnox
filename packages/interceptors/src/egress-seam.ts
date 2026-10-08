@@ -164,7 +164,7 @@ export class EgressSeam {
     if (verdict.effect !== DECISION_EFFECT.ALLOW || contain === undefined) return verdict;
     const containment = await contain(caller);
     const asked = containment === null ? null : containmentAsk(request, containment);
-    return asked === null
+    return asked === null || asked.checkpointed === true
       ? verdict
       : { effect: DECISION_EFFECT.ASK, reason: asked.reason };
   }

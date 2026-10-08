@@ -1,8 +1,6 @@
 /**
- * What a `memnox run` points its agent at when the daemon holds the egress proxy: a relay
- * of the run's own that carries every connection to wherever the daemon is listening now,
- * and to a stand-in when it is listening nowhere. An agent outlives a daemon restart, and
- * a proxy variable naming a port nobody holds refuses every call the agent makes.
+ * A run's own relay to wherever the daemon's egress proxy listens now, or a stand-in when it
+ * listens nowhere, since an agent outlives a daemon restart and a dead port refuses every call.
  */
 import { connect, createServer, type Socket } from 'node:net';
 
