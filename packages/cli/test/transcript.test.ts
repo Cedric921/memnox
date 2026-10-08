@@ -7,6 +7,7 @@ import {
   conversationIn,
   lastAnswerIn,
   sessionTranscript,
+  turnOverIn,
 } from '../src/daemon/transcript';
 
 const line = (value: unknown): string => JSON.stringify(value);
@@ -101,5 +102,52 @@ describe('what a session answered last', () => {
     expect(await sessionTranscript(home, 'ses_1eb61120-4c7')).toBe(
       join(project, '9ddff478-4759-4ec5.jsonl'),
     );
+  });
+});
+
+describe('a turn its transcript shows is over', () => {
+  const asked = line({ type: 'user', message: { content: 'fix the flaky test' } });
+  const working = line({
+    type: 'assistant',
+    message: {
+      stop_reason: 'tool_use',
+      content: [{ type: 'tool_use', name: 'Bash', input: {} }],
+    },
+  });
+  const result = line({
+    type: 'user',
+    message: { content: [{ type: 'tool_result', tool_use_id: 'a', content: 'ok' }] },
+  });
+
+  it('is still going while the agent runs a tool or has just been asked', () => {
+    expect(turnOverIn([asked].join('\n'))).toBe(false);
+    expect(turnOverIn([asked, working, result].join('\n'))).toBe(false);
+  });
+
+  it('is over when the person stopped it, an API error ended it, or the reply ended', () => {
+    const stopped = line({
+      type: 'user',
+      message: { content: [{ type: 'text', text: '[Request interrupted by user]' }] },
+    });
+    const failed = line({
+      type: 'assistant',
+      isApiErrorMessage: true,
+      message: { content: [{ type: 'text', text: 'API Error: Connection refused' }] },
+    });
+    const ended = line({
+      type: 'assistant',
+      message: { stop_reason: 'end_turn', content: [{ type: 'text', text: 'Done.' }] },
+    });
+    expect(turnOverIn([asked, working, stopped].join('\n'))).toBe(true);
+    expect(turnOverIn([asked, failed].join('\n'))).toBe(true);
+    expect(turnOverIn([asked, working, result, ended].join('\n'))).toBe(true);
+  });
+
+  it('opens again when the person asks something new', () => {
+    const ended = line({
+      type: 'assistant',
+      message: { stop_reason: 'end_turn', content: [{ type: 'text', text: 'Done.' }] },
+    });
+    expect(turnOverIn([asked, ended, asked].join('\n'))).toBe(false);
   });
 });

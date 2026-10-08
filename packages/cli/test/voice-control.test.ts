@@ -412,6 +412,193 @@ describe('starting a session out loud', () => {
     );
   });
 
+  it('opens the Codex app on the repository with the task, rather than a terminal', async () => {
+    const base = await depsAt();
+    const repo = await workedOn(base, 'memnox-runtime');
+    const deps: SessionToolDeps = {
+      ...base,
+      resolveCommand: () => null,
+      resolveApp: (agent) => (agent === 'codex' ? '/Applications/ChatGPT.app' : null),
+      delivered: async () => ({ outcome: 'typed', at: NOW.toISOString() }),
+    };
+    const proposed = (await callOperatorTool(deps, SEAMS, 'propose_start', {
+      agent: 'codex',
+      app: 'true',
+      repository: 'memnox runtime',
+      task: 'review my changes',
+    })) as { start: string; in: string };
+    expect(proposed.in).toBe('the Codex app');
+    expect(
+      await callOperatorTool(deps, SEAMS, 'start_session', { start: proposed.start }),
+    ).toMatchObject({ started: true, app: 'Codex', repository: 'memnox-runtime' });
+    const [request] = await new DisplayRequests(deps.home).open(NOW.toISOString());
+    expect(request).toMatchObject({
+      display: 'app',
+      cwd: repo,
+      appPath: '/Applications/ChatGPT.app',
+      links: [`codex://threads/new?path=${encodeURIComponent(repo)}`],
+      // Typed into the new thread and sent, so the person watches it go in.
+      text: 'review my changes',
+    });
+  });
+
+  it('opens Hermes with nothing to ask it yet, rather than asking what it should do', async () => {
+    const base = await depsAt();
+    await workedOn(base, 'memnox-runtime');
+    const deps: SessionToolDeps = {
+      ...base,
+      resolveApp: () => '/x/Hermes.app',
+      delivered: async () => ({ outcome: 'typed', at: NOW.toISOString() }),
+    };
+    const proposed = (await callOperatorTool(deps, SEAMS, 'propose_start', {
+      agent: 'hermes',
+      app: 'true',
+      repository: 'memnox runtime',
+    })) as { start: string; proposed: boolean };
+    expect(proposed.proposed).toBe(true);
+    await callOperatorTool(deps, SEAMS, 'start_session', { start: proposed.start });
+    const [request] = await new DisplayRequests(deps.home).open(NOW.toISOString());
+    expect(request).toMatchObject({
+      display: 'app',
+      appPath: '/x/Hermes.app',
+      links: [],
+    });
+    expect(request?.text).toBeUndefined();
+  });
+
+  it('starts an agent where the person last had it, its app, until they say otherwise', async () => {
+    const base = await depsAt();
+    await workedOn(base, 'memnox-runtime');
+    const deps: SessionToolDeps = {
+      ...base,
+      resolveCommand: () => 'hermes',
+      resolveApp: () => '/x/Hermes.app',
+      delivered: async () => ({ outcome: 'typed', at: NOW.toISOString() }),
+    };
+    const first = (await callOperatorTool(deps, SEAMS, 'propose_start', {
+      agent: 'hermes',
+      app: 'true',
+      repository: 'memnox runtime',
+    })) as { start: string };
+    await callOperatorTool(deps, SEAMS, 'start_session', { start: first.start });
+    expect(
+      await callOperatorTool(deps, SEAMS, 'propose_start', {
+        agent: 'hermes',
+        repository: 'memnox runtime',
+        task: 'check the git history',
+      }),
+    ).toMatchObject({ in: 'the Hermes app' });
+    expect(
+      await callOperatorTool(deps, SEAMS, 'propose_start', {
+        agent: 'hermes',
+        app: 'false',
+        repository: 'memnox runtime',
+        task: 'check the git history',
+      }),
+    ).not.toHaveProperty('in');
+  });
+
+  it('starts Claude Code in a terminal inside VS Code when the person names it, as in the voice log', async () => {
+    const base = await depsAt();
+    await workedOn(base, 'memnox-runtime');
+    const deps: SessionToolDeps = {
+      ...base,
+      resolveCommand: () => 'claude',
+      resolveApp: () => '/Applications/Claude.app',
+      resolveEditor: (editor) =>
+        editor === 'vscode' ? '/Applications/Visual Studio Code.app' : null,
+      delivered: async () => ({ outcome: 'typed', at: NOW.toISOString() }),
+    };
+    // They last had Claude Code in its desktop app, which "in VS Code" said aloud overrides.
+    const inApp = (await callOperatorTool(deps, SEAMS, 'propose_start', {
+      app: 'true',
+      repository: 'memnox runtime',
+    })) as { start: string };
+    await callOperatorTool(deps, SEAMS, 'start_session', { start: inApp.start });
+    const proposed = (await callOperatorTool(deps, SEAMS, 'propose_start', {
+      editor: 'Visual Studio Code',
+      repository: 'memnox runtime',
+      task: 'check the changed files',
+    })) as { start: string; in: string };
+    expect(proposed.in).toBe('a new terminal in VS Code');
+    expect(
+      await callOperatorTool(deps, SEAMS, 'start_session', { start: proposed.start }),
+    ).toMatchObject({ started: true, in: 'VS Code' });
+    const launch = (await new DisplayRequests(deps.home).open(NOW.toISOString())).find(
+      (each) => each.display === 'launch',
+    );
+    expect(launch).toMatchObject({
+      appPath: '/Applications/Visual Studio Code.app',
+      cwd: expect.stringContaining('memnox-runtime'),
+    });
+    expect(launch?.text).toMatch(/memnox run -- claude 'check the changed files'$/);
+    // Where it went is where the next one goes, until they say otherwise.
+    expect(
+      await callOperatorTool(deps, SEAMS, 'propose_start', {
+        repository: 'memnox runtime',
+        task: 'run the tests',
+      }),
+    ).toMatchObject({ in: 'a new terminal in VS Code' });
+  });
+
+  it('says so when the editor named is not installed, rather than starting it elsewhere', async () => {
+    const base = await depsAt();
+    await workedOn(base, 'memnox-runtime');
+    const deps: SessionToolDeps = {
+      ...base,
+      resolveCommand: () => 'claude',
+      resolveEditor: () => null,
+    };
+    const answer = (await callOperatorTool(deps, SEAMS, 'propose_start', {
+      editor: 'Cursor',
+      repository: 'memnox runtime',
+      task: 'check the changed files',
+    })) as { proposed: boolean; said: string };
+    expect(answer.proposed).toBe(false);
+    expect(answer.said).toContain('not installed');
+  });
+
+  it('types into the chat open in Claude desktop, never into a session elsewhere', async () => {
+    const deps: SessionToolDeps = {
+      ...(await depsAt()),
+      resolveApp: (agent) =>
+        agent === 'claude-code' ? '/Applications/Claude.app' : null,
+      delivered: async () => ({ outcome: 'typed', at: NOW.toISOString() }),
+    };
+    expect(
+      await callOperatorTool(deps, SEAMS, 'type_in_app', {
+        agent: 'claude-code',
+        message: 'discuss what Memnox is',
+      }),
+    ).toMatchObject({ app: 'Claude', typed: true });
+    const [request] = await new DisplayRequests(deps.home).open(NOW.toISOString());
+    expect(request).toMatchObject({
+      display: 'app',
+      appPath: '/Applications/Claude.app',
+      links: [],
+      text: 'discuss what Memnox is',
+    });
+  });
+
+  it('says a desktop app is missing and names the agents whose apps are here', async () => {
+    const deps: SessionToolDeps = {
+      ...(await depsAt()),
+      resolveApp: (agent) => (agent === 'cursor' ? '/Applications/Cursor.app' : null),
+    };
+    expect(
+      await callOperatorTool(deps, SEAMS, 'propose_start', {
+        agent: 'hermes',
+        app: 'true',
+        repository: 'anything',
+        task: 'review my changes',
+      }),
+    ).toMatchObject({
+      proposed: false,
+      missing: 'the Hermes app',
+      installed: ['cursor'],
+    });
+  });
+
   it('starts only the agents it knows the command for', async () => {
     const deps = await depsAt();
     expect(
@@ -788,7 +975,7 @@ describe('two agents on one piece of work', () => {
     );
     expect(told).toHaveLength(1);
     expect(told[0]?.summary).toContain(
-      'are working on the same files at once on this Mac',
+      'are working on the same files at once on this machine',
     );
     expect(told[0]?.summary).toContain('cart.ts, checkout.ts');
     expect(told[0]?.sessionId).toBeDefined();

@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import {
   decodeResponse,
   PendingApprovals,
+  SessionHosts,
   type DaemonEvent,
   type DaemonResponse,
   type HoldRequest,
@@ -105,9 +106,10 @@ describe('how the voice speaks', () => {
     expect(prompt).toContain('"comment" is usually commit');
   });
 
-  it('speaks without contractions or fillers, status first, in one level tone', () => {
+  it('speaks rather than recites, with no fillers, status first, in one calm register', () => {
     const prompt = voicePrompt();
-    expect(prompt).toContain('no contractions in what you say');
+    expect(prompt).toContain('spoken, never recited');
+    expect(prompt).toContain('Never enumerate like a report');
     expect(prompt).toContain('Never open with a filler or a hedge');
     expect(prompt).toContain('Lead with the subject or its status');
     expect(prompt).toContain('The same calm, level register for everything');
@@ -219,6 +221,57 @@ describe('a brief from the daemon', () => {
     expect(peer.said[0]).toMatchObject({ ok: false, error: 'nothing to brief about' });
   });
 
+  it('still tells a held call the app was told about once its recorded process has gone', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'memnox-brief-'));
+    const held = await new PendingApprovals(home).raise(HELD, NOW, 120_000);
+    // A pid far past any the system hands out, so the host reads as gone.
+    await new SessionHosts(home).note({
+      sessionId: HELD.sessionId,
+      agent: 'claude-code',
+      pid: 2 ** 22 + 7,
+      seenAt: NOW,
+    });
+    const prompts: string[] = [];
+    const surface = new VoiceSurface({
+      home,
+      now: () => NOW,
+      log: () => undefined,
+      brain: () => echoBrain(prompts),
+    });
+    const peer = new Heard();
+    await surface.respond(peer, {
+      id: 6,
+      method: 'brief',
+      briefing: 'held',
+      subject: held.id,
+    });
+    surface.close();
+
+    expect(prompts[0]).toContain(`Held call ${held.id}.`);
+  });
+
+  it('refuses a brief about a call already answered', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'memnox-brief-'));
+    const approvals = new PendingApprovals(home);
+    const held = await approvals.raise(HELD, NOW, 120_000);
+    await approvals.answer(held.id, 'deny', 'person', NOW);
+    const surface = new VoiceSurface({
+      home,
+      now: () => NOW,
+      log: () => undefined,
+      brain: () => echoBrain([]),
+    });
+    const peer = new Heard();
+    await surface.respond(peer, {
+      id: 7,
+      method: 'brief',
+      briefing: 'held',
+      subject: held.id,
+    });
+    surface.close();
+    expect(peer.said[0]).toMatchObject({ ok: false, error: 'nothing to brief about' });
+  });
+
   it('refuses a brief about a call nobody is waiting on', async () => {
     const home = await mkdtemp(join(tmpdir(), 'memnox-brief-'));
     const surface = new VoiceSurface({
@@ -293,5 +346,43 @@ describe('how the voice addresses the person', () => {
   it('can be set out loud, while the confirmation key stays a terminal step', () => {
     expect(voiceCommand('voice address sir')?.run).toBe('now');
     expect(voiceCommand('voice forget-key')?.run).toBe('never');
+  });
+});
+
+describe('a reply the brain held after saying something', () => {
+  it('ends on the question it asked and never adds that it did not catch them, as in the voice log', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'memnox-ask-'));
+    const asked: Brain = {
+      name: 'claude',
+      async *ask() {
+        yield {
+          kind: BRAIN_CHUNK.TEXT,
+          text: "I need to hear what you'd like Claude Code to check the git history through, which branch or which files?",
+        };
+        yield { kind: BRAIN_CHUNK.TOOL, tool: 'mcp__memnox-operator__keep_listening' };
+        yield { kind: BRAIN_CHUNK.DONE };
+      },
+      close: () => undefined,
+      cancel: () => undefined,
+      warm: async () => undefined,
+    };
+    const surface = new VoiceSurface({
+      home,
+      now: () => NOW,
+      log: () => undefined,
+      brain: () => asked,
+    });
+    const peer = new Heard();
+    await surface.respond(peer, {
+      id: 8,
+      method: 'ask',
+      said: 'can you do a follow up on the last session and ask it to check the gate through',
+      finished: true,
+    });
+    surface.close();
+    const words = peer.said.map((each) => each.chunk?.text ?? '').join('');
+    expect(words).not.toContain("didn't quite catch");
+    expect(words).toContain('which branch or which files?');
+    expect(peer.said.at(-1)?.chunk?.kind).toBe('done');
   });
 });

@@ -1,4 +1,4 @@
-import { closeSync, fstatSync, openSync, readdirSync, readSync } from 'node:fs';
+import { closeSync, fstatSync, openSync, readdirSync, readSync, statSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import {
   isTestCommand,
@@ -146,6 +146,43 @@ export function testRunsIn(raw: string): TestRun[] {
   return runs;
 }
 
+/** What Claude Code writes in the person's place when they stop a turn, with or without a tool running. */
+const INTERRUPTED = '[Request interrupted by user';
+/** Its longest shell call is ten minutes, so a turn whose file sat still longer than this is not running. */
+const STILL_TURN_MS = 15 * 60 * 1_000;
+
+/**
+ * Whether the session's latest turn is over by its own file, though no hook said so: stopped by
+ * the person, failed on an API error, or untouched for longer than any step takes.
+ */
+export function readTurnOver(path: string, now: Date): boolean {
+  try {
+    if (now.getTime() - statSync(path).mtimeMs > STILL_TURN_MS) return true;
+  } catch {
+    // Gone: the hooks are all there is to go on.
+    return false;
+  }
+  return turnOverIn(tailOf(path));
+}
+
+/** The last word in the main conversation: a reply that ended, an error, or the person stopping it. */
+export function turnOverIn(raw: string): boolean {
+  let over = false;
+  for (const text of raw.split('\n')) {
+    const entry = parsed(text);
+    if (entry === null || entry.isSidechain === true || entry.isMeta === true) continue;
+    if (entry.type === 'user') {
+      const content = entry.message?.content;
+      const said = typeof content === 'string' ? content : textBlocks(content).join('\n');
+      over = said.trimStart().startsWith(INTERRUPTED);
+    } else if (entry.type === 'assistant') {
+      over =
+        entry.isApiErrorMessage === true || entry.message?.stop_reason === 'end_turn';
+    }
+  }
+  return over;
+}
+
 interface ToolBlock {
   type?: unknown;
   id?: unknown;
@@ -171,7 +208,8 @@ interface Entry {
   timestamp?: unknown;
   isSidechain?: unknown;
   isMeta?: unknown;
-  message?: { content?: unknown };
+  isApiErrorMessage?: unknown;
+  message?: { content?: unknown; stop_reason?: unknown };
 }
 
 function linesOf(entry: Entry): ConversationLine[] {

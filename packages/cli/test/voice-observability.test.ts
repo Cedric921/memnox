@@ -1,5 +1,5 @@
 import { generateKeyPairSync, sign } from 'node:crypto';
-import { mkdtemp } from 'node:fs/promises';
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -525,5 +525,65 @@ describe('Memnox answering a person, traced', () => {
     const [request] = await new DisplayRequests(deps.home).open(NOW.toISOString());
     expect(request).toMatchObject({ display: 'trace' });
     expect(request?.trace?.rows[0]?.name).toBe('voice.turn');
+  });
+});
+
+describe('a finished turn told with how it left its tests', () => {
+  // Shaped like a Claude Code session id, which is how its transcript is found.
+  const SESSION = '7f3c2a10-4b5e-4c1d-9a2b-0e6f8d1c3b4a';
+
+  async function finishedWith(
+    passed: boolean,
+  ): Promise<Record<string, unknown> | undefined> {
+    const deps = await depsAt();
+    const turns = new SessionTurns(deps.home);
+    await turns.prompted(SESSION, 'claude-code', '2026-10-02T11:40:00.000Z');
+    await turns.ended(SESSION, 'claude-code', '2026-10-02T11:50:00.000Z');
+    const project = join(deps.home, '.claude', 'projects', 'shop');
+    await mkdir(project, { recursive: true });
+    const lines = [
+      {
+        timestamp: '2026-10-02T11:45:00.000Z',
+        message: {
+          content: [
+            {
+              type: 'tool_use',
+              id: 'tu_1',
+              name: 'Bash',
+              input: { command: 'pnpm test' },
+            },
+          ],
+        },
+      },
+      {
+        timestamp: '2026-10-02T11:46:00.000Z',
+        message: {
+          content: [{ type: 'tool_result', tool_use_id: 'tu_1', is_error: !passed }],
+        },
+      },
+    ];
+    await writeFile(
+      join(project, `${SESSION}.jsonl`),
+      lines.map((line) => JSON.stringify(line)).join('\n'),
+    );
+    const told = await new NoticeWatcher(deps.home, '2000-01-01T00:00:00.000Z').look(
+      NOW.toISOString(),
+    );
+    return told.find((event) => event.notice === 'finished') as
+      Record<string, unknown> | undefined;
+  }
+
+  it('says the tests passed when the last run in the turn passed', async () => {
+    expect(await finishedWith(true)).toMatchObject({
+      notice: 'finished',
+      tests: 'passed',
+    });
+  });
+
+  it('says they failed when the last run in the turn failed', async () => {
+    expect(await finishedWith(false)).toMatchObject({
+      notice: 'finished',
+      tests: 'failed',
+    });
   });
 });

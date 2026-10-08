@@ -46,3 +46,12 @@ describe('everything memnox does, by voice', () => {
     expect(voiceCommand('allow git.push --for 1h')?.run).toBe('confirm');
   });
 });
+
+describe('a person correcting themselves as they speak', () => {
+  it('has the brain act only on what they kept, and pass the corrected words to an agent', () => {
+    const prompt = voicePrompt([], undefined, '');
+    expect(prompt).toContain('what they take back is gone');
+    expect(prompt).toContain('push to the release branch');
+    expect(prompt).toContain('leave out what they took back');
+  });
+});

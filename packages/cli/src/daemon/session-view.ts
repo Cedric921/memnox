@@ -25,10 +25,17 @@ import { withEvents } from '../event-store';
 import { changesTool } from '../session-tools/changes-tool';
 import type { SessionToolDeps } from '../session-tools/read-tools';
 import type { RewindSeams } from '../session-tools/rewind-tool';
-import { sessionsTool } from '../session-tools/sessions-tool';
+import { SESSION_STATE, sessionsTool } from '../session-tools/sessions-tool';
 import { excerptOf, type ChangedFile } from '../session-tools/show-tool';
 import { readConversation, readLastAnswer, sessionTranscript } from './transcript';
 import { conversationOf } from './waiting-feed';
+import { idsOf } from '../session-tools/session-aliases';
+import {
+  hermesCards,
+  hermesLastAnswer,
+  hermesView,
+  isHermesSession,
+} from './hermes-view';
 
 /**
  * A session as it is right now, for the live window the Mac app opens on it: the same facts
@@ -78,6 +85,8 @@ export class SessionViews {
   async list(): Promise<SessionCard[]> {
     const rows = ((await sessionsTool(this.deps(), { hours: '72' })) as SessionRow[])
       .filter((each) => each.notAnAgent === undefined)
+      // A session the person closed is not theirs to track any more, on screen or in what the voice knows.
+      .filter((each) => each.state !== SESSION_STATE.ENDED)
       // Work happening now first, since a turn in progress records little while it thinks.
       .sort(
         (a, b) =>
@@ -87,12 +96,22 @@ export class SessionViews {
       .slice(0, MOST_CARDS);
     const names = await readNames(this.home);
     const hosts = new SessionHosts(this.home);
-    return Promise.all(
+    const cards = await Promise.all(
       rows.map(async (row) => cardOf(row, names, await hosts.read(row.session))),
     );
+    // Hermes keys no session in the ledger, so its own are read beside, newest first with the rest.
+    const hermes = hermesCards(this.transcripts, this.now(), nameOf(names, 'hermes'));
+    return [...cards, ...hermes]
+      .sort((a, b) => (b.lastActive ?? '').localeCompare(a.lastActive ?? ''))
+      .slice(0, MOST_CARDS);
   }
 
   async view(sessionId: string): Promise<SessionView | null> {
+    if (isHermesSession(sessionId)) {
+      const names = await readNames(this.home);
+      const agentName = nameOf(names, 'hermes');
+      return hermesView(this.transcripts, sessionId, { now: this.now(), agentName });
+    }
     const deps = this.deps();
     const rows = (await sessionsTool(deps, { hours: '72' })) as SessionRow[];
     const row = rows.find((each) => each.session === sessionId);
@@ -128,6 +147,7 @@ export class SessionViews {
 
   /** What the agent said to end its latest turn, in full, for the voice to answer "what did it find". */
   async lastAnswer(sessionId: string): Promise<string | null> {
+    if (isHermesSession(sessionId)) return hermesLastAnswer(this.transcripts, sessionId);
     const path = await sessionTranscript(this.home, sessionId, this.transcripts);
     return path === null ? null : readLastAnswer(path);
   }
@@ -143,9 +163,17 @@ export class SessionViews {
   }
 
   private async steps(sessionId: string): Promise<SessionViewStep[]> {
-    const events = await withEvents(this.home, (store) =>
-      store.query({ sessionId, limit: LEDGER_SESSION_LIMIT }),
-    );
+    const ids = await idsOf(this.home, sessionId);
+    // Its edits can record under the agent's own id, which alone would leave only the network here.
+    const events = (
+      await withEvents(this.home, (store) =>
+        Promise.all(
+          ids.map((id) => store.query({ sessionId: id, limit: LEDGER_SESSION_LIMIT })),
+        ),
+      )
+    )
+      .flat()
+      .sort((a, b) => a.at.localeCompare(b.at));
     return buildReplay({ sessionId, events })
       .steps.filter((step) => step.kind === REPLAY_STEP.ACTION)
       .slice(-MOST_STEPS)
@@ -157,15 +185,28 @@ export class SessionViews {
     const kept = this.files.get(sessionId);
     const moment = this.now().getTime();
     if (kept !== undefined && moment - kept.at < FILES_FRESH_MS) return kept.code;
-    const answer = (await changesTool(deps, SEAMS, { session: sessionId }).catch(
-      () => ({}),
-    )) as { files?: { shown: ChangedFile[] } };
+    const answer = await changesIn(deps, sessionId);
     const shown = answer.files?.shown ?? [];
-    const files = shown.slice(0, MOST_FILES).map((each) => ({
-      path: each.path,
-      ...(each.added === null ? {} : { added: each.added }),
-      ...(each.removed === null ? {} : { removed: each.removed }),
-    }));
+    const others = await Promise.all(
+      (answer.alsoChanged ?? []).map((each) =>
+        changesIn(deps, sessionId, each.repository),
+      ),
+    );
+    // Every repository it wrote in, named when there is more than one, so work in two is never half shown.
+    const named = others.length > 0;
+    const files = [answer, ...others]
+      .flatMap((each) =>
+        (each.files?.shown ?? []).map((file) => ({
+          ...file,
+          path: named ? `${basename(each.repository ?? '')}/${file.path}` : file.path,
+        })),
+      )
+      .slice(0, MOST_FILES)
+      .map((each) => ({
+        path: each.path,
+        ...(each.added === null ? {} : { added: each.added }),
+        ...(each.removed === null ? {} : { removed: each.removed }),
+      }));
     const excerpt = await excerptOf(deps, SEAMS, sessionId, shown).catch(() => null);
     const code: Code = excerpt === null ? { files } : { files, excerpt };
     this.files.set(sessionId, { at: moment, code });
@@ -187,6 +228,26 @@ export class SessionViews {
       brief: async () => null,
     };
   }
+}
+
+/** What changes says a session changed, in one repository or the one it wrote in last. */
+interface Changes {
+  repository?: string;
+  files?: { shown: ChangedFile[] };
+  alsoChanged?: { repository: string }[];
+}
+
+async function changesIn(
+  deps: SessionToolDeps,
+  sessionId: string,
+  repository?: string,
+): Promise<Changes> {
+  const args =
+    repository === undefined
+      ? { session: sessionId }
+      : { session: sessionId, repository };
+  // Shaped by changesTool itself, and a failure is a session with nothing to show.
+  return (await changesTool(deps, SEAMS, args).catch(() => ({}))) as Changes;
 }
 
 function workingNow(row: SessionRow): boolean {

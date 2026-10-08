@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import type { DaemonAskChunk } from '@memnox/core';
 import { BRAIN_CHUNK, type Brain, type BrainChunk } from '../src/operator/brain';
-import { AddressLimit } from '../src/daemon/address-limit';
+import { AddressLimit, addressForms } from '../src/daemon/address-limit';
 import { BrainTurns } from '../src/daemon/brain-turns';
 import { SpokenFilter } from '../src/daemon/spoken-filter';
-import { streamTurn } from '../src/daemon/stream-turn';
-import { waitingRoute } from '../src/session-tools/instruct-tools';
+import { streamTurn, withoutHolds } from '../src/daemon/stream-turn';
+import { isAgentProgram, waitingRoute } from '../src/session-tools/instruct-tools';
 
 function spoken(pieces: readonly (string | null)[]): string {
   const filter = new SpokenFilter();
@@ -92,6 +92,15 @@ describe('what of the brain is said aloud', () => {
     expect(turn.answered).toBe('Sorry, it is on your clipboard.');
     expect(sent.filter((chunk) => chunk.kind === BRAIN_CHUNK.TEXT)).toHaveLength(1);
   });
+
+  it('keeps a hold on a whole request from the Mac, end and all, and passes the rest', () => {
+    const sent: DaemonAskChunk[] = [];
+    const send = withoutHolds((chunk) => sent.push(chunk));
+    send({ kind: BRAIN_CHUNK.TEXT, text: 'Opening Hermes.' });
+    send({ kind: BRAIN_CHUNK.TOOL, tool: 'mcp__memnox-operator__keep_listening' });
+    send({ kind: BRAIN_CHUNK.DONE });
+    expect(sent).toEqual([{ kind: BRAIN_CHUNK.TEXT, text: 'Opening Hermes.' }]);
+  });
 });
 
 describe('addressing the person', () => {
@@ -105,16 +114,36 @@ describe('addressing the person', () => {
     expect(opening.text('Very well, sir.') + opening.end()).toBe('Very well.');
   });
 
-  it('lets the name through once, then not again for ten minutes', () => {
+  it('lets the title through every five minutes and the name only every half hour', () => {
     const limit = new AddressLimit('/nowhere');
-    const names = ['Moïse'];
-    expect(limit.unsaid(names, '2026-10-02T22:49:00.000Z')).toEqual([]);
-    limit.noteSaid('Opening it now, Moïse.', names, '2026-10-02T22:49:40.000Z');
-    expect(limit.unsaid(names, '2026-10-02T22:50:00.000Z')).toEqual([
+    const forms = addressForms('sir', 'Moïse');
+    expect(limit.unsaid(forms, '2026-10-02T22:49:00.000Z')).toEqual([]);
+    limit.noteSaid('Good evening, Moïse.', forms, '2026-10-02T22:49:00.000Z');
+    limit.noteSaid('Very well, sir.', forms, '2026-10-02T22:49:40.000Z');
+    expect(limit.unsaid(forms, '2026-10-02T22:50:00.000Z')).toEqual([
+      ', sir',
+      'sir, ',
       ', Moïse',
       'Moïse, ',
     ]);
-    expect(limit.unsaid(names, '2026-10-02T23:00:00.000Z')).toEqual([]);
+    expect(limit.unsaid(forms, '2026-10-02T22:55:00.000Z')).toEqual([
+      ', Moïse',
+      'Moïse, ',
+    ]);
+    expect(limit.unsaid(forms, '2026-10-02T23:20:00.000Z')).toEqual([]);
+  });
+
+  it('says neither right after the Mac answered their call', () => {
+    const limit = new AddressLimit('/nowhere');
+    const forms = addressForms('sir', 'Moïse');
+    limit.noteCalled(forms, '2026-10-03T23:23:36.000Z');
+    expect(limit.unsaid(forms, '2026-10-03T23:23:50.000Z')).toHaveLength(4);
+  });
+
+  it('treats a name chosen as the title as a name', () => {
+    expect(addressForms('Moïse', 'Moïse')).toEqual([
+      { words: 'Moïse', gapMs: 30 * 60_000 },
+    ]);
   });
 
   it('says a name that only starts like the phrase as it is', () => {
@@ -175,6 +204,33 @@ describe('a turn the brain ends after speaking', () => {
     expect(sent.map((chunk) => chunk.kind)).toEqual(['text', 'done']);
   });
 
+  it('keeps listening after an answer the brain ended, so a follow up is not cut off', async () => {
+    const chunks: BrainChunk[] = [
+      {
+        kind: BRAIN_CHUNK.TEXT,
+        text: 'There are no decisions in your workspace yet, so every action is decided as it comes up.',
+      },
+      { kind: BRAIN_CHUNK.TOOL, tool: 'mcp__memnox-operator__end_conversation' },
+      { kind: BRAIN_CHUNK.DONE },
+    ];
+    const brain: Brain = {
+      name: 'claude',
+      async *ask() {
+        yield* chunks;
+      },
+      close: () => undefined,
+      cancel: () => undefined,
+      warm: async () => undefined,
+    };
+    const sent: DaemonAskChunk[] = [];
+    await streamTurn(
+      new BrainTurns(() => brain, 60_000),
+      'summarise the decisions',
+      (chunk) => sent.push(chunk),
+    );
+    expect(sent.map((chunk) => chunk.kind)).toEqual(['text', 'done']);
+  });
+
   it('still says a sign off written after ending, when nothing was said before it', async () => {
     const chunks: BrainChunk[] = [
       { kind: BRAIN_CHUNK.TOOL, tool: 'mcp__memnox-operator__end_conversation' },
@@ -219,5 +275,24 @@ describe('how an instruction reaches a session waiting on the person', () => {
     expect(
       waitingRoute({ ...host, app: 'Visual Studio Code', tty: 'ttys013' }, () => false),
     ).toBe('later');
+  });
+
+  it("types into an editor's agent panel even when its process inherited a terminal", () => {
+    expect(
+      waitingRoute(
+        { ...host, app: 'Visual Studio Code', tty: 'ttys013', panel: true },
+        agentInFront,
+      ),
+    ).toBe('prefilled');
+  });
+});
+
+describe('which program in a terminal is the agent', () => {
+  it('knows a native install named for its version, and never a shell', () => {
+    expect(isAgentProgram('/Users/m/.local/share/claude/versions/2.1.3')).toBe(true);
+    expect(isAgentProgram('claude')).toBe(true);
+    expect(isAgentProgram('/opt/homebrew/bin/node')).toBe(true);
+    expect(isAgentProgram('-zsh')).toBe(false);
+    expect(isAgentProgram('/bin/zsh')).toBe(false);
   });
 });

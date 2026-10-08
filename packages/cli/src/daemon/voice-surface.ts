@@ -1,25 +1,16 @@
 import {
   AgentQuestions,
   isAgentQuestionId,
-  ConfirmKeys,
   DAEMON_EVENT,
   DAEMON_METHOD,
   BRIEFING,
-  DELIVERY,
   describePause,
-  DisplayRequests,
-  SPAN_KIND,
-  SPAN_STATUS,
-  isP256Point,
   SessionPauses,
-  SessionHosts,
   UNNAMED_AGENT,
   type DaemonEvent,
   type DaemonRequest,
   clearVoiceListening,
-  markVoiceListening,
   type DaemonResponse,
-  type Delivery,
 } from '@memnox/core';
 import type { Brain } from '../operator/brain';
 import { keepOwner, readAddress, readOwner } from '../operator/owner';
@@ -30,19 +21,45 @@ import {
   noticeBrief,
   pausedBrief,
 } from '../operator/voice-prompts';
-import { readVocabulary } from '../operator/vocabulary';
+import { isWordsMethod, wordsAnswer } from '../operator/recognizer-words';
+import { isHomeMethod } from './home-answer';
+import { answerHome } from './home-status';
 import { AddressLimit } from './address-limit';
+import { deliveredAnswer, seenAnswer } from './voice-deliveries';
+import { SEEN } from './done-lines';
 import { BrainTurns } from './brain-turns';
-import { confirmAnswer } from './confirm';
+import {
+  answerVoiceAgents,
+  isVoiceAgentMethod,
+  type VoiceAgentRoster,
+} from './voice-agent-calls';
+import { confirmAnswer, type RemotePrincipal } from './confirm';
 import { NoticeWatcher } from './notice-watch';
 import { RecentExchanges } from './recall';
 import { streamTurn } from './stream-turn';
 import { VoiceAsk } from './voice-ask';
 import { momentContext } from './ask-context';
+import {
+  heardRemotely,
+  markNeedsMac,
+  OriginRouter,
+  sendWaiting,
+  type RouterDeps,
+} from './origin-routing';
+import { filesListAnswer } from './folder-listing';
+import { markListeningFor } from './voice-listening';
+import { speak, type Render } from './kokoro-speech';
+import { mirrorFor } from './phone-turn';
+import { VoiceHold, voiceOnNotice } from '../remote/voice-hold';
 import { SessionViews } from './session-view';
 import { write, type Peer } from './socket-write';
-import { recordSpan } from '../trace/voice-trace';
 import { WaitingFeed } from './waiting-feed';
+import {
+  locateAnswer,
+  macSpansAnswer,
+  registerKeyAnswer,
+  sessionViewAnswer,
+} from './voice-lookups';
 
 /**
  * The daemon's side facing a person rather than an agent: what is waiting on them, their
@@ -59,9 +76,6 @@ const FEED_INTERVAL_MS = 500;
 /** A finished session is news for minutes, so the ledger is read for it far less often. */
 const NOTICE_INTERVAL_MS = 10_000;
 
-/** A turn's worth of the Mac's steps; more than this is not a turn. */
-const MOST_MAC_SPANS = 12;
-
 const VOICE_METHODS: readonly string[] = [
   DAEMON_METHOD.SUBSCRIBE,
   DAEMON_METHOD.WAITING,
@@ -73,10 +87,16 @@ const VOICE_METHODS: readonly string[] = [
   DAEMON_METHOD.BRIEF,
   DAEMON_METHOD.WARM,
   DAEMON_METHOD.VOCABULARY,
+  DAEMON_METHOD.LEARN_WORDS,
   DAEMON_METHOD.SESSION_VIEW,
   DAEMON_METHOD.SESSIONS_LIST,
   DAEMON_METHOD.DELIVERED,
+  DAEMON_METHOD.SEEN,
   DAEMON_METHOD.TRACE,
+  DAEMON_METHOD.VOICE_AGENTS,
+  DAEMON_METHOD.CHOOSE_VOICE_AGENT,
+  DAEMON_METHOD.FILES_LIST,
+  DAEMON_METHOD.SPEAK,
 ];
 
 interface VoiceDeps {
@@ -87,15 +107,25 @@ interface VoiceDeps {
   noticeIntervalMs?: number;
   brain?: () => Brain;
   brainIdleMs?: number;
+  voiceAgents?: VoiceAgentRoster;
+  /** Where SPEAK renders a line: the Mac app's Kokoro, unless a test stands in for it. */
+  render?: Render;
+  /** The paired phones' side: whether one drives the Mac, and a line to one's live session. */
+  remote?: Pick<RouterDeps, 'driving' | 'tell'>;
 }
 
 export function isVoiceMethod(method: string): boolean {
-  return VOICE_METHODS.includes(method);
+  return VOICE_METHODS.includes(method) || isHomeMethod(method);
 }
 
 export class VoiceSurface {
   /** Each subscriber with what it has already been told, so nobody hears a thing twice or never. */
   private readonly subscribers = new Map<Peer, Set<string>>();
+  /** Subscribers that are paired phones, by device, which never hear the Mac's own shows. */
+  private readonly phones = new Map<Peer, string>();
+  private readonly router: OriginRouter;
+  /** Which phone speaks right now, so the Mac stays silent while it does; the endpoint tells it of drives and phones gone. */
+  readonly hold: VoiceHold;
   private readonly feed: WaitingFeed;
   private feedTimer: ReturnType<typeof setInterval> | null = null;
   private noticeTimer: ReturnType<typeof setInterval> | null = null;
@@ -113,6 +143,18 @@ export class VoiceSurface {
     this.views = new SessionViews(deps.home);
     this.exchanges = new RecentExchanges(deps.home);
     this.address = new AddressLimit(deps.home);
+    // Told to the Mac app alone, since the phone knows it holds the voice and the relay never carries it.
+    this.hold = new VoiceHold(deps.now, (voiceOn) => {
+      const event = voiceOnNotice(voiceOn, deps.now());
+      for (const peer of this.macPeers()) write(peer, { id: 0, ok: true, event });
+    });
+    this.router = new OriginRouter({
+      home: deps.home,
+      now: deps.now,
+      driving: (deviceId) => deps.remote?.driving(deviceId) ?? false,
+      tell: (deviceId, response) => deps.remote?.tell(deviceId, response) ?? false,
+      stamp: (event) => this.hold.stamp(event),
+    });
     this.turns =
       deps.brain === undefined
         ? null
@@ -127,10 +169,16 @@ export class VoiceSurface {
             views: this.views,
             exchanges: this.exchanges,
             address: this.address,
+            log: deps.log,
           });
   }
 
-  async respond(socket: Peer, request: DaemonRequest): Promise<void> {
+  /** A request from the Mac app, or from a paired phone whose principal the remote endpoint proved. */
+  async respond(
+    socket: Peer,
+    request: DaemonRequest,
+    principal?: RemotePrincipal,
+  ): Promise<void> {
     // Kept for the next time the brain starts, so it speaks to them by the name they chose.
     if (request.owner !== undefined)
       await keepOwner(this.deps.home, request.owner).catch(() => undefined);
@@ -139,34 +187,43 @@ export class VoiceSurface {
       // Answered at once and warmed behind it, since the person is still talking.
       write(socket, { id: request.id, ok: true, outcome: 'warming' });
       void this.turns?.warm();
+      // Sent as the Mac answers their call, which already used the title or the name.
+      void this.address
+        .names()
+        .then((forms) => this.address.noteCalled(forms, this.deps.now()))
+        .catch(() => undefined);
       return;
     }
     if (request.method === DAEMON_METHOD.SUBSCRIBE)
-      return this.subscribe(socket, request.id);
-    if (request.method === DAEMON_METHOD.ASK) return this.ask(socket, request);
+      return this.subscribe(socket, request.id, principal);
+    if (request.method === DAEMON_METHOD.ASK) return this.ask(socket, request, principal);
     if (request.method === DAEMON_METHOD.CANCEL) {
-      const stopped = this.turns?.cancel() ?? false;
-      write(socket, {
-        id: request.id,
-        ok: true,
-        outcome: stopped ? 'cancelled' : 'nothing to cancel',
-      });
-      return;
+      const outcome = this.turns?.cancel() === true ? 'cancelled' : 'nothing to cancel';
+      return write(socket, { id: request.id, ok: true, outcome });
     }
-    const response = await this.answer(request).catch((err: unknown): DaemonResponse => ({
-      id: request.id,
-      ok: false,
-      error: String(err),
-    }));
+    if (request.method === DAEMON_METHOD.SPEAK) return speak(socket, request, this.deps);
+    const response = await this.answer(request, principal).catch(
+      (err: unknown): DaemonResponse => ({
+        id: request.id,
+        ok: false,
+        error: String(err),
+      }),
+    );
     write(socket, response);
   }
 
   broadcast(event: DaemonEvent): void {
-    for (const socket of this.subscribers.keys())
-      write(socket, { id: 0, ok: true, event });
+    const stamped = this.hold.stamp(event);
+    for (const socket of this.subscribers.keys()) {
+      if (!this.phones.has(socket) || heardRemotely(event))
+        write(socket, { id: 0, ok: true, event: stamped });
+    }
   }
 
   drop(socket: Peer): void {
+    const deviceId = this.phones.get(socket);
+    if (deviceId !== undefined) this.hold.unsubscribed(deviceId);
+    this.phones.delete(socket);
     if (!this.subscribers.delete(socket) || this.subscribers.size > 0) return;
     void clearVoiceListening(this.deps.home).catch(() => undefined);
   }
@@ -176,29 +233,58 @@ export class VoiceSurface {
     this.feedTimer = null;
     if (this.noticeTimer !== null) clearInterval(this.noticeTimer);
     this.noticeTimer = null;
+    this.hold.close();
     for (const socket of this.subscribers.keys()) socket.destroy();
     this.subscribers.clear();
     void clearVoiceListening(this.deps.home).catch(() => undefined);
     this.turns?.close();
   }
 
-  private async answer(request: DaemonRequest): Promise<DaemonResponse> {
-    const { home } = this.deps;
+  private async answer(
+    request: DaemonRequest,
+    principal?: RemotePrincipal,
+  ): Promise<DaemonResponse> {
     const feed = this.feed;
-    if (request.method === DAEMON_METHOD.LOCATE) return this.locate(request);
-    if (request.method === DAEMON_METHOD.SESSION_VIEW) return this.sessionView(request);
+    if (request.method === DAEMON_METHOD.LOCATE)
+      return locateAnswer(this.deps.home, request);
+    if (request.method === DAEMON_METHOD.SESSION_VIEW)
+      return sessionViewAnswer(this.views, request);
+    if (isHomeMethod(request.method))
+      return answerHome(this.deps.home, request, this.views);
     if (request.method === DAEMON_METHOD.SESSIONS_LIST) {
       return { id: request.id, ok: true, sessions: await this.views.list() };
     }
-    if (request.method === DAEMON_METHOD.VOCABULARY) {
-      return { id: request.id, ok: true, words: await readVocabulary(this.deps.home) };
+    if (isWordsMethod(request.method)) {
+      return wordsAnswer(this.deps.home, request, this.deps.now());
     }
     if (request.method === DAEMON_METHOD.WAITING) {
       return { id: request.id, ok: true, waiting: await feed.current(this.deps.now()) };
     }
-    if (request.method === DAEMON_METHOD.REGISTER_KEY) return this.registerKey(request);
-    if (request.method === DAEMON_METHOD.DELIVERED) return this.delivered(request);
-    if (request.method === DAEMON_METHOD.TRACE) return this.macSpans(request);
+    if (request.method === DAEMON_METHOD.REGISTER_KEY)
+      return registerKeyAnswer(this.deps.home, request, this.deps.now());
+    if (request.method === DAEMON_METHOD.DELIVERED) {
+      await this.router.delivered(request.subject ?? '', request.answer ?? '');
+      return deliveredAnswer(this.deps.home, request, this.deps.now());
+    }
+    if (request.method === DAEMON_METHOD.SEEN) {
+      await this.router.delivered(request.subject ?? '', SEEN);
+      return seenAnswer(this.deps.home, request);
+    }
+    if (request.method === DAEMON_METHOD.TRACE)
+      return macSpansAnswer(this.deps.home, request);
+    if (request.method === DAEMON_METHOD.FILES_LIST)
+      return filesListAnswer(this.deps.home, request);
+    if (isVoiceAgentMethod(request.method)) {
+      return answerVoiceAgents(request, this.deps.voiceAgents);
+    }
+    return this.confirm(request, principal);
+  }
+
+  /** A person's answer; a Mac proposal a phone signed is shown on the Mac once it counts. */
+  private async confirm(
+    request: DaemonRequest,
+    principal?: RemotePrincipal,
+  ): Promise<DaemonResponse> {
     if (request.subject === undefined || request.answer === undefined) {
       return {
         id: request.id,
@@ -206,82 +292,26 @@ export class VoiceSurface {
         error: 'confirm needs a subject and an answer',
       };
     }
-    const result = await confirmAnswer(home, {
+    const result = await confirmAnswer(this.deps.home, {
       subject: request.subject,
       answer: request.answer,
       at: this.deps.now(),
       ...(request.signature === undefined ? {} : { signature: request.signature }),
+      ...(principal === undefined ? {} : { principal }),
     });
-    return result.ok
-      ? { id: request.id, ok: true, outcome: result.outcome }
-      : { id: request.id, ok: false, error: result.error };
-  }
-
-  /** Whether a typed instruction landed, kept for the brain that is waiting to say so. */
-  private async delivered(request: DaemonRequest): Promise<DaemonResponse> {
-    const outcome = request.answer;
-    if (request.subject === undefined || !isDelivery(outcome)) {
-      return {
-        id: request.id,
-        ok: false,
-        error: 'delivered needs a subject and an outcome',
-      };
+    if (!result.ok) {
+      const refused =
+        result.refused === true ? { outcome: 'refused', reason: result.error } : {};
+      return { id: request.id, ok: false, error: result.error, ...refused };
     }
-    const kept = await new DisplayRequests(this.deps.home).deliver(request.subject, {
-      outcome,
-      at: this.deps.now(),
-      ...(request.reason === undefined ? {} : { reason: request.reason }),
-    });
-    return { id: request.id, ok: true, outcome: kept ? 'kept' : 'nobody waiting' };
-  }
-
-  /** A session as it is right now, for the live window on it. */
-  private async sessionView(request: DaemonRequest): Promise<DaemonResponse> {
-    if (request.sessionId === undefined) {
-      return { id: request.id, ok: false, error: 'session-view needs a session' };
+    if (result.release !== undefined) {
+      await this.router.release(
+        result.release.event,
+        result.release.deviceId,
+        this.macPeers(),
+      );
     }
-    const session = await this.views.view(request.sessionId);
-    return session === null
-      ? {
-          id: request.id,
-          ok: false,
-          error: `nothing is known about ${request.sessionId}`,
-        }
-      : { id: request.id, ok: true, session };
-  }
-
-  /** The Mac app's key, trusted on first use and never replaced from here. */
-  private async registerKey(request: DaemonRequest): Promise<DaemonResponse> {
-    if (request.point === undefined || !isP256Point(request.point)) {
-      return { id: request.id, ok: false, error: 'register-key needs a P-256 point' };
-    }
-    const outcome = await new ConfirmKeys(this.deps.home).register(
-      request.point,
-      this.deps.now(),
-    );
-    if ('registered' in outcome)
-      return { id: request.id, ok: true, outcome: 'registered' };
-    // Said, never replaced: the app compares and tells the person when it is not theirs.
-    const same = outcome.alreadyRegistered.point === request.point;
-    return { id: request.id, ok: same, outcome: same ? 'registered' : 'another key' };
-  }
-
-  /** Where the session's agent runs, and whether it still does. */
-  private async locate(request: DaemonRequest): Promise<DaemonResponse> {
-    const sessionId = request.sessionId;
-    if (sessionId === undefined) {
-      return { id: request.id, ok: false, error: 'locate needs a session' };
-    }
-    const host = await new SessionHosts(this.deps.home).read(sessionId);
-    if (host === null) {
-      return {
-        id: request.id,
-        ok: false,
-        error: `nothing is known about where ${sessionId} runs`,
-      };
-    }
-    const { pid, seenAt, ...where } = host;
-    return { id: request.id, ok: true, location: { ...where, alive: isRunning(pid) } };
+    return { id: request.id, ok: true, outcome: result.outcome };
   }
 
   /** Something that happened, told by the brain in its own words, streamed like an answer. */
@@ -338,8 +368,9 @@ export class VoiceSurface {
       const notice = this.notices.recent(request.subject);
       return notice === null ? null : noticeBrief(notice, await this.howToAddress());
     }
-    if (request.briefing === BRIEFING.HELD) {
-      return event === undefined ? null : heldBrief(event, await this.howToAddress());
+    if (request.briefing === BRIEFING.HELD && request.subject !== undefined) {
+      const held = event ?? (await this.feed.held(request.subject, this.deps.now()));
+      return held === null ? null : heldBrief(held, await this.howToAddress());
     }
     if (request.briefing === BRIEFING.PAUSED && request.subject !== undefined) {
       const pause = await new SessionPauses(this.deps.home).read(request.subject);
@@ -356,15 +387,39 @@ export class VoiceSurface {
     return null;
   }
 
-  /** What the person said, answered by their own brain one chunk per line. */
-  private async ask(socket: Peer, request: DaemonRequest): Promise<void> {
+  /** What the person said, answered by their own brain one chunk per line, back to whoever asked. */
+  private async ask(
+    socket: Peer,
+    request: DaemonRequest,
+    principal?: RemotePrincipal,
+  ): Promise<void> {
     const said = request.said?.trim() ?? '';
     if (said === '' || this.asking === null) {
       const error = said === '' ? 'ask needs what was said' : 'no brain is configured';
       write(socket, { id: request.id, ok: false, error });
       return;
     }
-    await this.asking.ask(socket, request, said);
+    const deviceId = principal?.device.id;
+    // Set from the session that asked, never from what a client wrote.
+    const { origin: _client, ...rest } = request;
+    const asked = deviceId === undefined ? rest : { ...rest, origin: { deviceId } };
+    const ask = this.router.asked(deviceId, this.deps.now());
+    if (deviceId !== undefined) this.startFeed();
+    if (principal !== undefined) this.hold.began(principal.device);
+    const { now } = this.deps;
+    const mirror = mirrorFor(principal, request, { mac: () => this.macPeers(), now });
+    try {
+      await this.asking.ask(socket, asked, said, mirror?.chunk.bind(mirror));
+    } finally {
+      ask.endedAt = this.deps.now();
+      mirror?.end();
+      if (deviceId !== undefined) this.hold.ended(deviceId);
+    }
+  }
+
+  /** The Mac app's own subscriptions, where a show only the Mac can do is sent. */
+  private macPeers(): Peer[] {
+    return [...this.subscribers.keys()].filter((peer) => !this.phones.has(peer));
   }
 
   /** What a brief may open with: the address they chose, else their name, which a held call earns. */
@@ -372,39 +427,34 @@ export class VoiceSurface {
     return (await readAddress(this.deps.home)) ?? (await readOwner(this.deps.home));
   }
 
-  /** The Mac's own timings, hung on the question they belong to so one trace shows the whole answer. */
-  private async macSpans(request: DaemonRequest): Promise<DaemonResponse> {
-    for (const span of (request.spans ?? []).slice(0, MOST_MAC_SPANS)) {
-      await recordSpan(this.deps.home, {
-        name: `mac.${span.name}`,
-        kind: SPAN_KIND.MAC,
-        startAt: span.startAt,
-        endAt: span.endAt,
-        status: SPAN_STATUS.OK,
-        attributes: span.attributes ?? {},
-        under: 'root',
-      });
-    }
-    return { id: request.id, ok: true, outcome: 'kept' };
-  }
-
   /** Everything already waiting first, then each new thing as it appears. */
-  private async subscribe(socket: Peer, id: number): Promise<void> {
-    const feed = this.feed;
+  private async subscribe(
+    socket: Peer,
+    id: number,
+    principal?: RemotePrincipal,
+  ): Promise<void> {
     const told = new Set<string>();
     this.subscribers.set(socket, told);
+    // A live stream means its app is open, so the phone holds the voice until the stream ends.
+    if (principal !== undefined && !this.phones.has(socket)) {
+      this.phones.set(socket, principal.device.id);
+      this.hold.subscribed(principal.device);
+    }
     write(socket, { id, ok: true });
-    // So a held question waits a moment for a spoken answer rather than only opening a picker.
-    await markVoiceListening(this.deps.home, process.pid, this.deps.now()).catch(
-      () => undefined,
-    );
+    await markListeningFor(this.deps.home, this.deps.now(), principal);
     // The Mac app is listening, so the first question should meet a brain that is already up.
     void this.turns?.warm();
-    for (const event of await feed.everything(this.deps.now())) {
+    for (const event of await this.feed.everything(this.deps.now())) {
       told.add(event.subject);
-      write(socket, { id, ok: true, event });
+      if (principal === undefined || heardRemotely(event))
+        write(socket, { id, ok: true, event: this.hold.stamp(markNeedsMac(event)) });
     }
     this.watchNotices();
+    this.startFeed();
+  }
+
+  /** Polls for what is waiting while somebody listens or a phone's question may still raise a show. */
+  private startFeed(): void {
     if (this.feedTimer !== null) return;
     this.feedTimer = setInterval(
       () => void this.pushWaiting(),
@@ -430,52 +480,20 @@ export class VoiceSurface {
   }
 
   private async pushWaiting(): Promise<void> {
-    if (this.subscribers.size === 0) return;
+    if (this.subscribers.size === 0 && !this.router.active()) return;
     try {
-      const waiting = await this.feed.everything(this.deps.now());
-      const still = new Set(waiting.map((event) => event.subject));
-      for (const [socket, told] of this.subscribers) {
-        for (const event of waiting) {
-          if (told.has(event.subject)) continue;
-          told.add(event.subject);
-          write(socket, { id: 0, ok: true, event });
-        }
-        // Said, so a question answered in a terminal or a DM stops being asked out loud.
-        for (const subject of [...told]) {
-          if (still.has(subject)) continue;
-          told.delete(subject);
-          write(socket, { id: 0, ok: true, event: settled(subject, this.deps.now()) });
-        }
-      }
+      const waiting = (await this.feed.everything(this.deps.now())).map(markNeedsMac);
+      // A phone's shows go first, so the Mac app is never sent the raw one as well.
+      const claimed = await this.router.claim(waiting, this.macPeers());
+      sendWaiting(this.subscribers, waiting, {
+        claimed,
+        now: this.deps.now(),
+        phoneOf: (socket) => this.phones.get(socket),
+        originOf: (event) => this.router.originFor(event),
+        stamp: (event) => this.hold.stamp(event),
+      });
     } catch (err) {
       this.deps.log(`could not read what is waiting: ${String(err)}`);
     }
   }
-}
-
-function settled(subject: string, at: string): DaemonEvent {
-  return {
-    kind: DAEMON_EVENT.SETTLED,
-    subject,
-    agent: UNNAMED_AGENT,
-    summary: 'no longer waiting on you',
-    at,
-  };
-}
-
-/** Signal zero asks whether the process exists without touching it. */
-function isRunning(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (err) {
-    // Not ours to signal still means it is there.
-    return (err as NodeJS.ErrnoException).code === 'EPERM';
-  }
-}
-
-const DELIVERIES: readonly string[] = Object.values(DELIVERY);
-
-function isDelivery(value: string | undefined): value is Delivery {
-  return value !== undefined && DELIVERIES.includes(value);
 }

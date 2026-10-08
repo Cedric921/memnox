@@ -36,6 +36,17 @@ const HELD: HoldRequest = {
   reason: 'pushing to main needs a person',
 };
 
+/** A delete inside the repository the session works in, which a tap may allow. */
+const INSIDE: HoldRequest = {
+  sessionId: 'ses_voice',
+  agent: 'claude-code',
+  operation: 'filesystem.delete',
+  target: '/work/shop/old.ts',
+  fingerprint: 'def456abc123',
+  reason: 'a delete asks first',
+  withinSession: true,
+};
+
 const TEN_SECONDS = 10_000;
 
 interface Held {
@@ -47,7 +58,7 @@ interface Held {
 }
 
 /** An agent's call held exactly as a shell seam holds one, with no terminal to ask at. */
-async function held(): Promise<Held> {
+async function held(request: HoldRequest = HELD): Promise<Held> {
   const home = await mkdtemp(join(tmpdir(), 'memnox-voice-answer-'));
   const { publicKey, privateKey } = generateKeyPairSync('ec', {
     namedCurve: 'prime256v1',
@@ -63,7 +74,7 @@ async function held(): Promise<Held> {
     TEN_SECONDS,
     new FileGrants(home),
   );
-  const result = service.hold(HELD);
+  const result = service.hold(request);
   const id = await raised(approvals);
   return {
     home,
@@ -142,6 +153,80 @@ describe('answering a held call by voice', () => {
     expect(said.ok).toBe(false);
 
     // Still answerable from the terminal or a DM, which is who settles it here.
+    await new PendingApprovals(call.home).answer(
+      call.id,
+      HOLD_ANSWER.DENY,
+      'the workspace',
+      now(),
+    );
+    expect(await call.result).toMatchObject({ outcome: HOLD_OUTCOME.DENIED });
+  });
+
+  it('lets a call that stays in its repository through on a yes with no Touch ID', async () => {
+    const call = await held(INSIDE);
+    const said = await confirmAnswer(call.home, {
+      subject: call.id,
+      answer: HOLD_ANSWER.ONCE,
+      at: now(),
+    });
+
+    expect(said).toEqual({ ok: true, outcome: HOLD_ANSWER.ONCE });
+    expect(await call.result).toMatchObject({ outcome: HOLD_OUTCOME.ALLOWED });
+    const rows = await withEvents(call.home, (store) =>
+      store.query({ sessionId: INSIDE.sessionId, limit: 10 }),
+    );
+    expect(rows).toContainEqual(
+      expect.objectContaining({
+        actorType: 'human',
+        effect: 'allow',
+        authorizedBy: 'person (inside the session)',
+      }),
+    );
+  });
+
+  it('confirms a spoken yes to a call that stays in its repository with no Touch ID', async () => {
+    const call = await held(INSIDE);
+    const proposal = await new Proposals(call.home).propose({
+      change: {
+        kind: PROPOSAL_KIND.ANSWER,
+        pendingId: call.id,
+        answer: HOLD_ANSWER.ONCE,
+      },
+      rationale: 'yes, delete it',
+      proposedBy: 'agt_memnox-operator',
+      at: now(),
+      ttlMs: TEN_SECONDS,
+    });
+    const said = await confirmAnswer(call.home, {
+      subject: proposal.id,
+      answer: PROPOSAL_ANSWER.CONFIRMED,
+      at: now(),
+    });
+
+    expect(said.ok).toBe(true);
+    expect(await call.result).toMatchObject({ outcome: HOLD_OUTCOME.ALLOWED });
+  });
+
+  it('still wants Touch ID for a spoken yes to a call that reaches outside', async () => {
+    const call = await held();
+    const proposal = await new Proposals(call.home).propose({
+      change: {
+        kind: PROPOSAL_KIND.ANSWER,
+        pendingId: call.id,
+        answer: HOLD_ANSWER.ONCE,
+      },
+      rationale: 'yes, push it',
+      proposedBy: 'agt_memnox-operator',
+      at: now(),
+      ttlMs: TEN_SECONDS,
+    });
+    const said = await confirmAnswer(call.home, {
+      subject: proposal.id,
+      answer: PROPOSAL_ANSWER.CONFIRMED,
+      at: now(),
+    });
+
+    expect(said.ok).toBe(false);
     await new PendingApprovals(call.home).answer(
       call.id,
       HOLD_ANSWER.DENY,
