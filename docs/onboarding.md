@@ -118,7 +118,9 @@ change or commit it.
 `core/src/daemon/protocol.ts`: `evaluate` (the hot path, with a latency budget), `hold`,
 `record`, `status`, `ping`, `subscribe`, `waiting`, `confirm`, `register-key`, `ask`,
 `cancel`, `locate`, `brief`, `warm`, `vocabulary`, `session-view`, `sessions-list` and
-more. Interceptors fall back to the in-process engine when the daemon is absent.
+more. Interceptors fall back to the in-process engine when the daemon is absent. On
+Windows the same protocol runs over a named pipe, named by `socketPathFor` in
+`core/src/daemon/protocol.ts`; ADR 0003 says what that pipe does not protect against.
 
 ### Runtime to cloud
 

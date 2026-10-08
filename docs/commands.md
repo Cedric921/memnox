@@ -48,6 +48,19 @@ draws, which is idempotent, so the hooks and the service point at it; the rules 
 left alone. The version is asked of `npm view` only when you run this, and offline
 it says so and changes nothing.
 
+Before anything is installed it checks who built the release. npm installs exactly
+that version into a scratch directory with no scripts run, `npm audit signatures`
+checks every registry signature and provenance attestation in it, and every `memnox`
+and `@memnox/*` package must carry provenance from `github.com/Memnox/memnox`'s
+`release.yml` at a version tag. Anything else refuses the update and names the
+package and what failed, and the install that follows is pinned to the version that
+was checked. Each update is a line in `~/.memnox/updates.jsonl`.
+
+| Flag | What it does |
+|---|---|
+| `-y, --yes` | update without asking |
+| `--skip-verify` | install without the check; said on screen and recorded as unverified |
+
 ## What can act here
 
 ### `memnox scan`
