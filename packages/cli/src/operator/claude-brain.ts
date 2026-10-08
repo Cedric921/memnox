@@ -11,7 +11,7 @@ import { voicePrompt } from './voice-prompts';
  * propose, and can never edit a file or run a command.
  */
 
-const OPERATOR_SERVER = 'memnox-operator';
+export const OPERATOR_SERVER = 'memnox-operator';
 
 /** Whose record the brain's own session goes on, so it is never mistaken for work. */
 const OPERATOR_AGENT_NAME = 'memnox-operator';
@@ -32,6 +32,8 @@ interface ClaudeBrainOptions {
   vocabulary?: () => Promise<string[]>;
   /** How the person asked to be addressed, read when the brain starts; undefined is no honorific. */
   address?: () => Promise<string | undefined>;
+  /** Their name, said far less often than the address and only once they chose an address at all. */
+  name?: () => Promise<string | undefined>;
   /** Every memnox command, one line each, so the brain knows all it can run before it is asked. */
   catalogue?: () => Promise<string>;
 }
@@ -133,13 +135,14 @@ export class ClaudeCodeBrain implements Brain {
     this.turns = resume?.turns ?? 0;
     const words = (await this.options.vocabulary?.().catch(() => [])) ?? [];
     const address = await this.options.address?.().catch(() => undefined);
+    const name = await this.options.name?.().catch(() => undefined);
     const catalogue = (await this.options.catalogue?.().catch(() => '')) ?? '';
     // A fresh queue per process, since the last one ended when its process did.
     const lines = new LineQueue();
     this.lines = lines;
     const child = spawn(
       this.options.command ?? 'claude',
-      claudeArgs(this.options, resume, { words, address, catalogue }),
+      claudeArgs(this.options, resume, { words, address, name, catalogue }),
       {
         env: brainEnv(this.options.env ?? process.env),
         ...(this.options.cwd === undefined ? {} : { cwd: this.options.cwd }),
@@ -226,6 +229,7 @@ function claudeArgs(
 interface Spoken {
   words: readonly string[];
   address: string | undefined;
+  name?: string | undefined;
   catalogue: string;
 }
 
@@ -235,7 +239,7 @@ function voiceFlags(options: ClaudeBrainOptions, spoken: Spoken): string[] {
     // Replaces Claude Code's own coding prompt rather than adding to it, since that one asks
     // for thorough written answers and a voice needs one spoken sentence.
     '--system-prompt',
-    voicePrompt(spoken.words, spoken.address, spoken.catalogue),
+    voicePrompt(spoken.words, spoken.address, spoken.catalogue, spoken.name),
     // Only a project's settings, and the brain starts where there is no project: no hooks on
     // every tool call, and nothing of the person's own memory or instructions rides along.
     '--setting-sources',
@@ -268,7 +272,7 @@ function userTurn(said: string): unknown {
 }
 
 /** The person's own login, with the brain recorded as the operator and never as their work. */
-function brainEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+export function brainEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const out: NodeJS.ProcessEnv = {
     ...env,
     [ENV_AGENT_NAME]: OPERATOR_AGENT_NAME,
