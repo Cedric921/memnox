@@ -114,14 +114,35 @@ export async function refreshVscodeTerminals(
 /** Whether any installed copy in this extensions folder is exactly the script this memnox ships. */
 async function holdsShipped(folder: string, shipped: string): Promise<boolean> {
   const names = await readdir(folder).catch(() => [] as string[]);
+  const removed = await obsolete(folder);
   const copies = await Promise.all(
     names
-      .filter((name) => name.startsWith(`${TERMINALS_EXTENSION}-`))
+      .filter((name) => name.startsWith(`${TERMINALS_EXTENSION}-`) && !removed.has(name))
       .map((name) =>
         readFile(join(folder, name, 'dist', 'extension.js'), 'utf8').catch(() => null),
       ),
   );
   return copies.includes(shipped);
+}
+
+/**
+ * The folders an editor uninstalled but has not yet deleted, which it lists in `.obsolete` and
+ * never loads, so a copy named there answers no link however exactly it matches.
+ */
+async function obsolete(folder: string): Promise<Set<string>> {
+  const text = await readFile(join(folder, '.obsolete'), 'utf8').catch(() => null);
+  if (text === null) return new Set();
+  try {
+    const parsed: unknown = JSON.parse(text);
+    if (typeof parsed !== 'object' || parsed === null) return new Set();
+    return new Set(
+      Object.entries(parsed)
+        .filter(([, marked]) => marked === true)
+        .map(([name]) => name),
+    );
+  } catch {
+    return new Set();
+  }
 }
 
 /** Every editor's row, then what changed for the voice, or that nothing did. */

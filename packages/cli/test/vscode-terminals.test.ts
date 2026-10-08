@@ -87,6 +87,22 @@ describe('the extension that shows a session its own VS Code terminal', () => {
     expect(calls).toEqual([]);
   });
 
+  it('puts itself back when the editor uninstalled it and left the folder behind', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'memnox-vscode-'));
+    const calls: string[][] = [];
+    const seams = await seamsFor(calls);
+    const extensions = join(home, '.vscode', 'extensions');
+    const folder = `${TERMINALS_EXTENSION}-0.13.14`;
+    await mkdir(join(extensions, folder, 'dist'), { recursive: true });
+    await writeFile(
+      join(extensions, folder, 'dist', 'extension.js'),
+      await readFile(seams.script() ?? '', 'utf8'),
+    );
+    await writeFile(join(extensions, '.obsolete'), JSON.stringify({ [folder]: true }));
+    await refreshVscodeTerminals(home, () => undefined, seams);
+    expect(calls.filter((each) => each[0] === CODE)).toHaveLength(1);
+  });
+
   it('takes itself back out by its id', async () => {
     const calls: string[][] = [];
     const home = await mkdtemp(join(tmpdir(), 'memnox-vscode-'));
