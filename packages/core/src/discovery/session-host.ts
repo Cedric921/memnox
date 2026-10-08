@@ -22,10 +22,14 @@ export interface SessionHost {
   app?: string;
   /** The terminal device, such as `ttys004`, which is how a tab is found in Terminal and iTerm2. */
   tty?: string;
+  /** Runs in an editor's own agent panel, so any terminal its process inherited is not where it is typed into. */
+  panel?: boolean;
   cwd?: string;
   /** The agent's own id when `memnox run` keys the ledger by another, which is what its transcript is named after. */
   agentSession?: string;
   seenAt: string;
+  /** When the person closed it and its SessionEnd hook said so, which ends it whatever its pid now says. */
+  endedAt?: string;
 }
 
 /** One process in a `ps` walk: its executable's full path, spaces kept, and its terminal. */
@@ -72,6 +76,17 @@ export function hostOf(
   };
 }
 
+/** What Claude Code names the editor extension it was started by, as against `cli` in a terminal. */
+const PANEL_ENTRYPOINTS: readonly string[] = ['claude-vscode'];
+
+/**
+ * Whether the agent was started by an editor's own panel. A terminal device alone cannot say:
+ * an editor launched from a shell hands that shell's terminal to everything it starts.
+ */
+export function startedInPanel(entrypoint: string | undefined): boolean {
+  return entrypoint !== undefined && PANEL_ENTRYPOINTS.includes(entrypoint);
+}
+
 /** Editors whose sessions run in their own terminal or in an agent's panel inside them. */
 const EDITORS: readonly string[] = [
   'visual studio code',
@@ -90,7 +105,7 @@ export function describeHost(host: SessionHost): string | undefined {
   const folder = host.cwd === undefined ? '' : `, opened on ${basename(host.cwd)}`;
   const editor = EDITORS.some((name) => host.app?.toLowerCase().includes(name) === true);
   if (!editor) return host.tty === undefined ? host.app : `a tab in ${host.app}${folder}`;
-  return host.tty === undefined
+  return host.tty === undefined || host.panel === true
     ? `${host.app}, in its ${agentShown(host.agent)} panel${folder}`
     : `${host.app}, in its terminal${folder}`;
 }
@@ -115,7 +130,9 @@ export class SessionHosts {
   /** Once per session: a second start of the same session keeps the first answer, bar the agent's own id. */
   async note(host: SessionHost): Promise<void> {
     const kept = await this.read(host.sessionId);
-    if (kept === null) return this.records.write(idFor(host.sessionId), host);
+    // A closed session started again, as a resume does, is a fresh start rather than the closed one.
+    if (kept === null || kept.endedAt !== undefined)
+      return this.records.write(idFor(host.sessionId), host);
     // A cleared or resumed conversation under one `memnox run` is a new transcript in the same session.
     if (host.agentSession === undefined || host.agentSession === kept.agentSession)
       return;
@@ -123,6 +140,13 @@ export class SessionHosts {
       ...kept,
       agentSession: host.agentSession,
     });
+  }
+
+  /** Marked ended when the person closes it, so it stops being tracked though its pid may live on. */
+  async end(sessionId: string, at: string): Promise<void> {
+    const kept = await this.read(sessionId);
+    if (kept === null || kept.endedAt !== undefined) return;
+    await this.records.write(idFor(sessionId), { ...kept, endedAt: at });
   }
 
   all(): Promise<SessionHost[]> {

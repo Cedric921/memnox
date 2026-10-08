@@ -135,6 +135,30 @@ describe('noting where a session runs', () => {
     expect((await new SessionHosts(home).read('abc-123'))?.cwd).toBe('/code/runtime');
   });
 
+  it('notes a panel session without the terminal its editor inherited from a shell', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'memnox-host-note-'));
+    await noteSessionHost(
+      { hook_event_name: 'SessionStart', session_id: 'panel-1', cwd: '/work/shop' },
+      {
+        home,
+        agent: 'claude-code',
+        runSession: undefined,
+        pid: process.pid,
+        cwd: '/w',
+        now: () => new Date(),
+        entrypoint: 'claude-vscode',
+      },
+      () =>
+        [
+          `  ${process.ppid}   400 ttys002  /Users/me/.local/bin/claude`,
+          '  400     1 ttys002  /Applications/Visual Studio Code.app/Contents/MacOS/Electron',
+        ].join('\n'),
+    );
+    const host = await new SessionHosts(home).read('panel-1');
+    expect(host).toMatchObject({ app: 'Visual Studio Code', panel: true });
+    expect(host?.tty).toBeUndefined();
+  });
+
   it('notes nothing for a hook that names no session', async () => {
     const home = await mkdtemp(join(tmpdir(), 'memnox-host-note-'));
     await noteSessionHost(

@@ -53,3 +53,5 @@ export * from './approval-posture';
 export * from './agent-host';
 export * from './node-host-inspector';
 export * from './agent-lifecycle';
+export * from './hermes-sessions';
+export * from './platform-coverage';

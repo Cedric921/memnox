@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import {
   agentProcessOf,
   describeHost,
+  startedInPanel,
   hostOf,
   SessionHosts,
   type HostProcess,
@@ -104,10 +105,19 @@ describe('where a session runs', () => {
     expect(describeHost({ ...at, app: 'Visual Studio Code', tty: 'ttys003' })).toBe(
       'Visual Studio Code, in its terminal, opened on memnox-runtime',
     );
+    expect(
+      describeHost({ ...at, app: 'Visual Studio Code', tty: 'ttys003', panel: true }),
+    ).toBe(describeHost({ ...at, app: 'Visual Studio Code' }));
     expect(describeHost({ ...at, app: 'iTerm', tty: 'ttys004' })).toBe(
       'a tab in iTerm, opened on memnox-runtime',
     );
     expect(describeHost(at)).toBeUndefined();
+  });
+
+  it('knows a session started by an editor panel from one in a terminal', () => {
+    expect(startedInPanel('claude-vscode')).toBe(true);
+    expect(startedInPanel('cli')).toBe(false);
+    expect(startedInPanel(undefined)).toBe(false);
   });
 
   it('says nothing it does not know, rather than guessing an app', () => {
@@ -130,5 +140,17 @@ describe('where a session runs', () => {
     await hosts.note(first);
     await hosts.note({ ...first, app: 'Terminal', seenAt: 't2' });
     expect(await hosts.read('a/b:c')).toEqual(first);
+  });
+
+  it('marks a session the person closed as ended, and a resume as a fresh start', async () => {
+    const hosts = new SessionHosts(await mkdtemp(join(tmpdir(), 'memnox-hosts-')));
+    const first = { sessionId: 's1', agent: 'claude-code', pid: 30, seenAt: 't1' };
+    await hosts.note(first);
+    await hosts.end('s1', 't2');
+    expect((await hosts.read('s1'))?.endedAt).toBe('t2');
+    await hosts.end('s1', 't3');
+    expect((await hosts.read('s1'))?.endedAt).toBe('t2');
+    await hosts.note({ ...first, pid: 31, seenAt: 't4' });
+    expect(await hosts.read('s1')).toEqual({ ...first, pid: 31, seenAt: 't4' });
   });
 });

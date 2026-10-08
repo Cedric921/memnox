@@ -4,6 +4,7 @@ import {
   agentProcessOf,
   hostOf,
   SessionHosts,
+  startedInPanel,
   UNNAMED_SESSION,
   type HostProcess,
 } from '@memnox/core';
@@ -36,11 +37,14 @@ export async function noteSessionHost(
   try {
     const chain = readableChain(process.ppid, listing);
     const agent = agentProcessOf(chain);
+    const { tty, ...place } = hostOf(chain);
+    const panel = startedInPanel(context.entrypoint);
     await new SessionHosts(context.home).note({
       sessionId,
       agent: context.agent,
       pid: agent?.pid ?? process.ppid,
-      ...hostOf(chain),
+      ...place,
+      ...(panel ? { panel } : tty === undefined ? {} : { tty }),
       cwd: start.cwd ?? context.cwd,
       ...(start.sessionId === '' || start.sessionId === sessionId
         ? {}
