@@ -1,7 +1,11 @@
 import { basename, isAbsolute } from 'node:path';
 import {
+  answeredBy,
+  confirmationMessage,
+  Devices,
+  driveCovers,
+  holds,
   SessionPauses,
-  ConfirmKeys,
   HOLD_ANSWER,
   Milestones,
   NodeGit,
@@ -10,12 +14,24 @@ import {
   PROPOSAL_ANSWER,
   PROPOSAL_KIND,
   Proposals,
-  verifiesConfirmation,
+  proposalCapability,
+  readAccount,
+  REMOTE_CAPABILITY,
+  RULE_SCOPE,
+  verifiesSigned,
+  type DaemonEvent,
+  type DeviceRecord,
   type HoldAnswer,
+  type Policy,
   type Proposal,
-  type ProposalAnswer,
+  type RemoteCapability,
+  type RuleScope,
 } from '@memnox/core';
+import { machinePolicyPath } from '../protect/machine-rules';
 import { mergeRules, WRITTEN_POLICY_FILE } from '../protect/merge-rules';
+import { fileForScope, scopeAnswered, scopedRules } from '../protect/rule-scope';
+import { recordLocalDecisions } from '../sync/local-decisions';
+import { FROM_NOW_ON, proposeFromNowOn } from './from-now-on';
 import { registerPolicyFile } from '../policy-registry';
 import { recordAnswer } from './record-answer';
 import {
@@ -28,10 +44,15 @@ import {
 } from '../session-tools/voice-commands';
 
 /**
- * A person's answer arriving from the Mac app. Refusing never needs proof, since saying no
- * can do no harm; anything that lets something happen carries a signature only their
- * fingerprint could have made.
+ * A person's answer arriving from the Mac app or a paired phone. Refusing never needs proof; a yes
+ * carries a signature from a trusted device, unless the Mac allows a call that stays inside its session.
  */
+
+/** The device a remote answer arrives from, as its handshake proved it, and whether it drives the Mac now. */
+export interface RemotePrincipal {
+  device: DeviceRecord;
+  driving: boolean;
+}
 
 interface ConfirmInput {
   subject: string;
@@ -40,16 +61,25 @@ interface ConfirmInput {
   at: string;
   /** How a confirmed memnox command is run; memnox itself unless a test hands in another. */
   run?: CommandRunner;
+  /** Absent on the local socket. A phone's yes is always signed, since a tap proves nobody is at the Mac. */
+  principal?: RemotePrincipal;
 }
 
 /** A confirmed command still running on its own, such as a login waiting on its browser page. */
 const STARTED = 'started';
 
-type ConfirmResult = { ok: true; outcome: string } | { ok: false; error: string };
+/** A held call let through: allowed, and still the agent's to run, so the Mac never calls it done. */
+const LET_THROUGH = 'let-through';
+
+/** A Mac proposal confirmed hands back what to show on the Mac and which device asked for it. */
+type ConfirmResult =
+  | { ok: true; outcome: string; release?: { event: DaemonEvent; deviceId: string } }
+  | { ok: false; error: string; refused?: true };
 
 /** Who the ledger says answered, since a refusal arrives unsigned and an allow does not. */
-const BY_TOUCH_ID = 'person (Touch ID)';
 const BY_VOICE = 'person (voice)';
+/** A yes to a call that stays inside its session's repository, which needs no fingerprint. */
+const IN_SESSION = 'person (inside the session)';
 
 const PENDING_PREFIX = 'apr_';
 const PROPOSAL_PREFIX = 'prp_';
@@ -71,17 +101,22 @@ export async function confirmAnswer(
 }
 
 async function answerHeld(home: string, input: ConfirmInput): Promise<ConfirmResult> {
-  if (!SPOKEN_HOLD_ANSWERS.includes(input.answer)) {
+  const fromNowOn = input.answer === FROM_NOW_ON;
+  if (!fromNowOn && !SPOKEN_HOLD_ANSWERS.includes(input.answer)) {
     return { ok: false, error: `"${input.answer}" is not an answer a held call takes` };
   }
-  // Narrowed by the membership check above.
-  const answer = input.answer as HoldAnswer;
-  const refusing = answer === HOLD_ANSWER.DENY;
-  if (!refusing && !(await signed(home, input))) return unsigned();
-
+  // This call runs once; what stops the next one asking is a rule the person places and signs.
+  const answer = fromNowOn ? HOLD_ANSWER.ONCE : (input.answer as HoldAnswer);
   const approvals = new PendingApprovals(home);
   const held = await approvals.read(input.subject);
-  const by = refusing ? BY_VOICE : BY_TOUCH_ID;
+  const consent = await consentFor(home, input, {
+    refusing: answer === HOLD_ANSWER.DENY,
+    capability: REMOTE_CAPABILITY.ANSWER,
+    withinSession: held?.request.withinSession === true,
+    driven: false,
+  });
+  if ('refused' in consent) return { ok: false, error: consent.refused, refused: true };
+  const by = consent.by;
   const outcome = await approvals.answer(input.subject, answer, by, input.at);
   if (outcome === null || held === null)
     return { ok: false, error: `${input.subject} is no longer held` };
@@ -92,36 +127,45 @@ async function answerHeld(home: string, input: ConfirmInput): Promise<ConfirmRes
     };
   }
   await recordAnswer(home, { request: held.request, answer, by, at: input.at });
-  return { ok: true, outcome: answer };
+  if (!fromNowOn) return { ok: true, outcome: answer };
+  const offered = await proposeFromNowOn(home, held.request, input.at);
+  return {
+    ok: true,
+    outcome:
+      'proposed' in offered
+        ? `${answer}, and the rule for from now on waits on the Mac as ${offered.proposed}`
+        : `${answer}, and nothing from now on: ${offered.notProposed}`,
+  };
+}
+
+/** A rule's answer may be the place the person picked, which the signature then covers. */
+function scopeOf(found: Proposal | null, answer: string): RuleScope | undefined {
+  return found?.change.kind === PROPOSAL_KIND.RULES && found.change.scopes !== undefined
+    ? scopeAnswered(found.change.scopes, answer)
+    : undefined;
 }
 
 async function answerProposal(home: string, input: ConfirmInput): Promise<ConfirmResult> {
-  const answers: readonly string[] = Object.values(PROPOSAL_ANSWER);
-  if (!answers.includes(input.answer)) {
-    return { ok: false, error: `"${input.answer}" is not an answer a proposal takes` };
-  }
-  // Narrowed by the membership check above.
-  const answer = input.answer as ProposalAnswer;
-  const confirming = answer === PROPOSAL_ANSWER.CONFIRMED;
-  if (confirming && !(await signed(home, input))) return unsigned();
-
   const proposals = new Proposals(home);
   const found = await proposals.read(input.subject);
+  const scope = scopeOf(found, input.answer);
+  const answers: readonly string[] = Object.values(PROPOSAL_ANSWER);
+  if (!answers.includes(input.answer) && scope === undefined) {
+    return { ok: false, error: `"${input.answer}" is not an answer a proposal takes` };
+  }
+  const confirming = input.answer !== PROPOSAL_ANSWER.DECLINED;
+  const answer = confirming ? PROPOSAL_ANSWER.CONFIRMED : PROPOSAL_ANSWER.DECLINED;
+  const consent = await consentFor(home, input, await proposalNeeds(home, input, found));
+  if ('refused' in consent) return { ok: false, error: consent.refused, refused: true };
   if (found === null) return { ok: false, error: `${input.subject} was never proposed` };
   // Checked before it is marked, so a proposal aimed at another file is refused rather than half done.
-  if (confirming && !writesOnlyAPolicyFile(found)) {
+  if (confirming && !writesOnlyAPolicyFile(home, found, scope)) {
     return {
       ok: false,
       error: `${input.subject} names a file that is not a policy file`,
     };
   }
-
-  const outcome = await proposals.answer(
-    input.subject,
-    answer,
-    confirming ? BY_TOUCH_ID : BY_VOICE,
-    input.at,
-  );
+  const outcome = await proposals.answer(input.subject, answer, consent.by, input.at);
   if (outcome === null)
     return { ok: false, error: `${input.subject} was never proposed` };
   if ('alreadyAnswered' in outcome) {
@@ -132,28 +176,61 @@ async function answerProposal(home: string, input: ConfirmInput): Promise<Confir
   }
   if ('expired' in outcome) return { ok: false, error: `${input.subject} has expired` };
   if (!confirming) return { ok: true, outcome: answer };
-  return apply(home, outcome.answered, input.at, input.run ?? runMemnox);
+  const run = input.run ?? runMemnox;
+  return apply(home, outcome.answered, { at: input.at, run, by: consent.by, scope });
+}
+
+/** What answering this proposal takes: the capability, and whether the session or a drive excuses a signature. */
+async function proposalNeeds(
+  home: string,
+  input: ConfirmInput,
+  found: Proposal | null,
+): Promise<Needs> {
+  const principal = input.principal;
+  return {
+    // A no to a team's question is a refusal too, so it is never held up by a signature.
+    refusing:
+      input.answer === PROPOSAL_ANSWER.DECLINED ||
+      (found?.change.kind === PROPOSAL_KIND.TEAM &&
+        found.change.answer === HOLD_ANSWER.DENY),
+    capability: found === null ? null : proposalCapability(found.change),
+    withinSession: await answersWithinSession(home, found),
+    driven:
+      principal !== undefined &&
+      principal.driving &&
+      found !== null &&
+      driveCovers(found.change, principal.device.id),
+  };
+}
+
+/** When it was confirmed, how a command runs, who said yes, and where a rule goes, which only a rule uses. */
+interface Applying {
+  at: string;
+  run: CommandRunner;
+  by: string;
+  scope?: RuleScope;
 }
 
 async function apply(
   home: string,
   proposal: Proposal,
-  at: string,
-  run: CommandRunner,
+  { at, run, by, scope }: Applying,
 ): Promise<ConfirmResult> {
   const change = proposal.change;
+  if (change.kind === PROPOSAL_KIND.RULES && scope?.kind === RULE_SCOPE.TEAM) {
+    return offerToTeam(home, change.rules, at);
+  }
   if (change.kind === PROPOSAL_KIND.RULES) {
-    await mergeRules(change.file, change.rules, home);
+    // A repository's rule is narrowed to its folder, since every registered file is loaded for every agent.
+    const file = scope === undefined ? change.file : fileForScope(home, scope);
+    const rules = scope === undefined ? change.rules : scopedRules(change.rules, scope);
+    await mergeRules(file, rules, home);
     // Every seam loads only registered files, so a rule written anywhere else would be in force nowhere.
-    await registerPolicyFile(home, change.file);
+    await registerPolicyFile(home, file);
     return { ok: true, outcome: PROPOSAL_ANSWER.CONFIRMED };
   }
   if (change.kind === PROPOSAL_KIND.RESUME) {
-    const lifted = await new SessionPauses(home).resume(
-      change.sessionId,
-      BY_TOUCH_ID,
-      at,
-    );
+    const lifted = await new SessionPauses(home).resume(change.sessionId, by, at);
     return lifted === null
       ? { ok: false, error: `${change.sessionId} is not paused` }
       : { ok: true, outcome: PROPOSAL_ANSWER.CONFIRMED };
@@ -162,7 +239,45 @@ async function apply(
   if (change.kind === PROPOSAL_KIND.COMMAND) {
     return applyCommand(home, { id: proposal.id, argv: change.argv, at }, run);
   }
-  return applyHeldAnswer(home, proposal, change, at);
+  if (change.kind === PROPOSAL_KIND.MAC) {
+    const release = { event: change.event, deviceId: change.deviceId };
+    return { ok: true, outcome: PROPOSAL_ANSWER.CONFIRMED, release };
+  }
+  // The device answered the workspace itself, signed where it was a yes, so nothing is done here.
+  if (change.kind === PROPOSAL_KIND.TEAM)
+    return { ok: true, outcome: PROPOSAL_ANSWER.CONFIRMED };
+  return applyHeldAnswer(home, proposal, change, { at, by });
+}
+
+/**
+ * A rule picked for the team is written to no file here: it is offered on the next sync,
+ * where the control plane proposes it with this machine's owner as the decider and a second
+ * admin approves it. Only then does it hold, for every agent the workspace runs.
+ */
+async function offerToTeam(
+  home: string,
+  rules: readonly Policy[],
+  at: string,
+): Promise<ConfirmResult> {
+  const decided = rules.flatMap((rule) =>
+    rule.match.actions.map((operation) => ({
+      operation,
+      effect: rule.decision.effect,
+      decidedAt: at,
+      ...(rule.match.agents?.[0] === undefined ? {} : { agent: rule.match.agents[0] }),
+    })),
+  );
+  if ((await readAccount(home)) === null) {
+    return {
+      ok: false,
+      error: 'this Mac is not connected to a team, so there is nobody to offer it to',
+    };
+  }
+  await recordLocalDecisions(home, decided);
+  return {
+    ok: true,
+    outcome: `${PROPOSAL_ANSWER.CONFIRMED}: offered to the team, where a second admin approves it`,
+  };
 }
 
 /** The tree put back once the person signed for it; the tree as it was is kept first, so it can come back. */
@@ -185,33 +300,28 @@ async function applyRewind(
   }
 }
 
-/** A held call let through once the person signed for it, and the row that says who and in what words. */
+/** A held call let through once the person said yes, and the row that says who and in what words. */
 async function applyHeldAnswer(
   home: string,
   proposal: Proposal,
   change: { pendingId: string; answer: HoldAnswer },
-  at: string,
+  { at, by }: { at: string; by: string },
 ): Promise<ConfirmResult> {
   const approvals = new PendingApprovals(home);
   const held = await approvals.read(change.pendingId);
-  const outcome = await approvals.answer(
-    change.pendingId,
-    change.answer,
-    BY_TOUCH_ID,
-    at,
-  );
+  const outcome = await approvals.answer(change.pendingId, change.answer, by, at);
   if (outcome === null || held === null)
     return { ok: false, error: `${change.pendingId} is no longer held` };
   if ('answered' in outcome) {
     await recordAnswer(home, {
       request: held.request,
       answer: change.answer,
-      by: BY_TOUCH_ID,
+      by,
       ...(proposal.said === undefined ? {} : { said: proposal.said }),
       at,
     });
   }
-  return { ok: true, outcome: PROPOSAL_ANSWER.CONFIRMED };
+  return { ok: true, outcome: LET_THROUGH };
 }
 
 type CommandRunner = (argv: readonly string[], timeoutMs: number) => Promise<CommandRun>;
@@ -266,27 +376,86 @@ async function applyCommand(
     : { ok: false, error: `memnox ${argv[0] ?? ''} ended with exit ${ran.exitCode}` };
 }
 
-/** A model wrote the path, so a confirmed proposal may only ever touch the rule file itself. */
-function writesOnlyAPolicyFile(proposal: Proposal): boolean {
+/**
+ * A model wrote the path, so a confirmed proposal may only ever touch a rule file: a repository's
+ * own, by full path, or the machine's, at exactly the one place it lives.
+ */
+function writesOnlyAPolicyFile(
+  home: string,
+  proposal: Proposal,
+  scope?: RuleScope,
+): boolean {
   if (proposal.change.kind !== PROPOSAL_KIND.RULES) return true;
+  const file = scope === undefined ? proposal.change.file : fileForScope(home, scope);
+  if (file === machinePolicyPath(home)) return true;
   // Relative to where the daemon runs would be a file nobody meant, so only a full path is written.
-  return (
-    isAbsolute(proposal.change.file) &&
-    basename(proposal.change.file) === WRITTEN_POLICY_FILE
-  );
+  return isAbsolute(file) && basename(file) === WRITTEN_POLICY_FILE;
 }
 
-async function signed(home: string, input: ConfirmInput): Promise<boolean> {
-  if (input.signature === undefined) return false;
-  const key = await new ConfirmKeys(home).read();
-  if (key === null) return false;
-  return verifiesConfirmation(key, input.subject, input.answer, input.signature);
+/** What an answer needs before it counts. */
+interface Needs {
+  refusing: boolean;
+  /** Null when nothing but the Mac may answer it. */
+  capability: RemoteCapability | null;
+  /** A held call inside its session's repository, which the Mac may allow without Touch ID. */
+  withinSession: boolean;
+  /** A Mac proposal from the device driving the Mac now, which runs without Face ID. */
+  driven: boolean;
 }
 
-function unsigned(): ConfirmResult {
-  return {
-    ok: false,
-    error:
-      'letting something happen needs Touch ID, and this answer carries no valid signature',
-  };
+/** Who answered, in the ledger's words, or why the answer does not count. */
+async function consentFor(
+  home: string,
+  input: ConfirmInput,
+  needs: Needs,
+): Promise<{ by: string } | { refused: string }> {
+  const principal = input.principal?.device;
+  if (
+    principal !== undefined &&
+    (needs.capability === null || !holds(principal, needs.capability))
+  ) {
+    return { refused: `${principal.name} may not answer that from afar` };
+  }
+  if (needs.refusing)
+    return { by: principal === undefined ? BY_VOICE : `person (${principal.name})` };
+  const signer = await signerOf(home, input);
+  if (signer !== null) {
+    const lacks = needs.capability !== null && !holds(signer, needs.capability);
+    return lacks
+      ? { refused: `${signer.name} may not allow that` }
+      : { by: answeredBy(signer) };
+  }
+  if (principal !== undefined) {
+    return needs.driven
+      ? { by: `person (driving from ${principal.name})` }
+      : {
+          refused: `allowing from ${principal.name} needs Face ID, and this answer carries no valid signature`,
+        };
+  }
+  return needs.withinSession ? { by: IN_SESSION } : { refused: UNSIGNED };
 }
+
+/** The device whose key signed this answer: only the phone it came from, or any trusted device at the Mac. */
+async function signerOf(home: string, input: ConfirmInput): Promise<DeviceRecord | null> {
+  if (input.signature === undefined) return null;
+  const message = confirmationMessage(input.subject, input.answer);
+  const principal = input.principal?.device;
+  if (principal === undefined)
+    return new Devices(home).signerOf(message, input.signature);
+  return verifiesSigned(principal.signingPoint, message, input.signature)
+    ? principal
+    : null;
+}
+
+/** Only a yes to a held call, and only one that stays in its repository, goes without a fingerprint. */
+async function answersWithinSession(
+  home: string,
+  found: Proposal | null,
+): Promise<boolean> {
+  if (found?.change.kind !== PROPOSAL_KIND.ANSWER) return false;
+  const held = await new PendingApprovals(home).read(found.change.pendingId);
+  return held?.request.withinSession === true;
+}
+
+const UNSIGNED =
+  'letting something happen needs Touch ID, and this answer carries no valid signature';

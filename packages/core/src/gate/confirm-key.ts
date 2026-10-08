@@ -51,16 +51,25 @@ export function verifiesConfirmation(
   answer: string,
   signature: string,
 ): boolean {
-  if (!isP256Point(key.point)) return false;
+  return verifiesSigned(key.point, confirmationMessage(subject, answer), signature);
+}
+
+/** Whether a P-256 point signed exactly these words, for every message a person's key signs. */
+export function verifiesSigned(
+  point: string,
+  message: string,
+  signature: string,
+): boolean {
+  if (!isP256Point(point)) return false;
   try {
     const publicKey = createPublicKey({
-      key: Buffer.concat([P256_SPKI_PREFIX, Buffer.from(key.point, 'base64')]),
+      key: Buffer.concat([P256_SPKI_PREFIX, Buffer.from(point, 'base64')]),
       format: 'der',
       type: 'spki',
     });
     return verify(
       'sha256',
-      Buffer.from(confirmationMessage(subject, answer)),
+      Buffer.from(message),
       publicKey,
       Buffer.from(signature, 'base64'),
     );
