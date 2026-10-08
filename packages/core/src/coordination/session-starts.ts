@@ -17,8 +17,9 @@ export const START_TTL_MS = 5 * 60 * 1_000;
 export const STARTABLE_AGENT = {
   'claude-code': 'claude',
   codex: 'codex',
-  /** Cursor's own terminal agent; the editor has no way to be handed a task from outside. */
+  /** Cursor's own terminal agent; the editor itself is reached through its desktop app instead. */
   cursor: 'cursor-agent',
+  hermes: 'hermes',
 } as const;
 
 export type StartableAgent = keyof typeof STARTABLE_AGENT;
@@ -34,13 +35,23 @@ export const INSTALL_PLACES: Readonly<Record<StartableAgent, readonly string[]>>
     '/opt/homebrew/bin/claude',
   ],
   codex: [
+    '/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex',
+    '~/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex',
     '/Applications/ChatGPT.app/Contents/Resources/codex',
+    '/Applications/Codex.app/Contents/Resources/codex-cli/bin/codex',
     '/Applications/Codex.app/Contents/Resources/codex',
     '~/Applications/ChatGPT.app/Contents/Resources/codex',
     '~/.local/bin/codex',
     '/opt/homebrew/bin/codex',
   ],
   cursor: ['~/.local/bin/cursor-agent', '/opt/homebrew/bin/cursor-agent'],
+  hermes: ['~/.local/bin/hermes', '/opt/homebrew/bin/hermes'],
+};
+
+/** What goes between an agent's command and its task, for an agent that takes no bare task. */
+const TASK_FLAG: Partial<Record<StartableAgent, string>> = {
+  /** On a terminal, `chat -q` seeds an interactive session with the task as its first turn. */
+  hermes: 'chat -q',
 };
 
 export interface SessionStart {
@@ -55,6 +66,10 @@ export interface SessionStart {
   holdCredentials?: boolean;
   /** The workspace brief the agent is handed before its first turn, when the person named work. */
   brief?: string;
+  /** The agent's desktop app bundle, when it starts there rather than in a terminal tab. */
+  app?: string;
+  /** The editor's app bundle, when it starts in a new terminal inside that editor rather than a terminal tab. */
+  editor?: string;
   said?: string;
   proposedAt: string;
   expiresAt: string;
@@ -67,6 +82,8 @@ export interface StartProposal {
   task: string;
   holdCredentials?: boolean;
   brief?: string;
+  app?: string;
+  editor?: string;
   said?: string;
   at: string;
 }
@@ -86,7 +103,9 @@ export function startCommand(start: SessionStart): string {
     : shellQuoted(start.command);
   const hold = start.holdCredentials === true ? ' --hold-credentials' : '';
   const brief = start.brief === undefined ? '' : ` --brief ${shellQuoted(start.brief)}`;
-  return `cd ${shellQuoted(start.repository)} && memnox run${hold}${brief} -- ${command} ${shellQuoted(task)}`;
+  const flag = TASK_FLAG[start.agent];
+  const agent = flag === undefined ? command : `${command} ${flag}`;
+  return `cd ${shellQuoted(start.repository)} && memnox run${hold}${brief} -- ${agent} ${shellQuoted(task)}`;
 }
 
 /** A command name a shell reads as one word as it is, which a path with a space in it is not. */
@@ -113,6 +132,8 @@ export class SessionStarts {
       task: input.task,
       ...(input.holdCredentials === true ? { holdCredentials: true } : {}),
       ...(input.brief === undefined ? {} : { brief: input.brief }),
+      ...(input.app === undefined ? {} : { app: input.app }),
+      ...(input.editor === undefined ? {} : { editor: input.editor }),
       ...(input.said === undefined ? {} : { said: input.said }),
       proposedAt: input.at,
       expiresAt: new Date(Date.parse(input.at) + START_TTL_MS).toISOString(),

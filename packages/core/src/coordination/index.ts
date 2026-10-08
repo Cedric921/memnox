@@ -14,6 +14,7 @@ export * from './action-target';
 export * from './session-notes';
 export * from './spoken-instructions';
 export * from './session-starts';
+export * from './desktop-apps';
 export * from './voice-focus';
 export * from './desktop-notice';
 export * from './watch-list';
