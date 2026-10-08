@@ -8,10 +8,13 @@
 **What this plan is built toward.** `VISION.md` is the vision all three repositories share,
 written as a strategy note rather than as an architecture, over one move: do not sell protection,
 sell **the ability to safely increase agent autonomy**. The category it names is a **control
-plane for autonomous work**. Part I is the always-on case in twenty sections, Part II the local
-wedge in ten. Cite a section as `I.NN` or `II.NN` when a milestone is answering to one: `I.8` two
-agents on one file, `I.9` agent rollback, `II.2` effective capability, `II.9` cross-agent
-protection.
+plane for autonomous work**, in thirty-three numbered sections. Cite a section by its own number
+when a milestone is answering to one: `9` two agents on one file, `20` agent rollback, `23`
+effective capability, `24` one unified agent layer.
+
+**The `I.NN` and `II.NN` scheme is dead.** It promised a Part I and a Part II that `VISION.md`
+has never had. Any left in a comment or a test points at nothing, and is rewritten to the section
+it answers the next time that line is touched.
 
 **The sixty-five pains and the `§01` to `§12` phase index went with the previous vision.** A
 `2.NN` or `§NN` citation left in this plan, in a source comment or in a test resolves to nothing
@@ -314,7 +317,7 @@ Memnox refuses to let an agent change it, committing included.
 
 ---
 
-## M9 — Recovery and pre-flight (≈ 1.5 weeks) — vision `I.9`
+## M9 — Recovery and pre-flight (≈ 1.5 weeks) — vision `20`
 
 **Milestone demo:** an agent wrecks an uncommitted working tree; `memnox rewind` puts it
 back in one command and the wreckage is still reachable. `memnox check "deploy payments"`
@@ -353,7 +356,7 @@ Slack reader here would mean a token on every laptop and a demo instead of a pro
 
 ---
 
-## M10 — Leases and the broker (≈ 1.5 weeks) — vision `I.8`, `II.9`
+## M10 — Leases and the broker (≈ 1.5 weeks) — vision `9`, `24`
 
 **Milestone demo:** Cursor and Claude Code run in one repository. The second one to write
 `src/billing` is told who holds it and what they have been doing, waits, and proceeds when
@@ -377,7 +380,7 @@ the first session ends. `memnox lock --list` shows both from a third terminal.
 | OSS-10.4 | Reads never wait | Only write-class and destructive actions take or wait on a lease | Conformance row per class | 10.3, 5.11 | S |
 | OSS-10.5 | Reclaim a dead owner | A lease whose pid is gone is reclaimable rather than waited on | Kill a holder, next writer proceeds | 10.2 | M |
 | OSS-10.6 | Take at the seam | The interceptor takes a lease on the paths a command writes, once per session | One session writing ten files takes one lease, not ten | 10.2, 5.1 | M |
-| OSS-10.7 | The held prompt | Names the holder, how long, and what it has done — read from the ledger, not guessed | Matches the `I.8` block | 10.6, 6.5 | M |
+| OSS-10.7 | The held prompt | Names the holder, how long, and what it has done — read from the ledger, not guessed | Matches the section `9` block | 10.6, 6.5 | M |
 | OSS-10.8 | Wait, take, refuse | `[w]` bounded wait, `[t]` recorded override, `[d]` refuse; timeout is a refusal naming the holder | Race test: two writers, first wins, second waits then proceeds | 10.7, 9.9 | L |
 | OSS-10.9 | `memnox lock` | `--list`, `<path> --for <window>`, `--release <id>`; a third terminal sees both | Manual two-agent run | 10.2 | M |
 | OSS-10.10 | Release on session end | Session end releases its leases; `memnox uninstall` leaves none behind | No lease survives its session in the fixture | 10.2, 7.2 | S |
@@ -399,22 +402,26 @@ would otherwise be a hang.
 
 ## What the vision asked for, and where it is
 
-`VISION.md` is thirty sections. These are the ones with a surface, so the next person
+`VISION.md` is thirty-three sections. These are the ones with a surface, so the next person
 does not go looking for something that is not there.
 
 | Section | Where |
 |---|---|
-| `I.3` circuit breaker | `core/session/breaker.ts`, held via `core/session/pause.ts`; the daemon counts outcomes on `RECORD`. `memnox paused` / `memnox resume`. Error loop, no progress, action explosion, scope drift and a reported-spend ceiling. The flat ceilings stay in `core/daemon/limits.ts`. |
-| `I.4` skill quarantine | `core/discovery/skills.ts`, `memnox skills`. A skill whose reach grew since it was accepted is held. |
-| `I.6` progressive autonomy, `I.16` what to automate next, `I.20` the primary screen | `core/session/autonomy.ts`, `memnox next`. |
-| `I.7` role-based authority | `policy.match.roles` was already parsed and matched and nothing ever set the field. `memnox run --role`, `MEMNOX_AGENT_ROLE`. |
-| `I.8` two agents on one file | `core/coordination`, `memnox lock`. |
-| `I.10` black box | `timeline`, `why`, `trace`, and `memnox claims` for what was said against what was recorded. |
-| `I.12` grouped approval | `core/gate/grouping.ts`; `memnox approvals` groups by default, `approve --group`. |
-| `I.13` autonomy budget | `core/session/budget.ts`, `memnox budget`, enforced in the daemon. |
-| `I.15` daily agent CFO | `core/session/operations.ts`, `memnox report`. |
-| `I.1`, `I.2`, `I.5`, `I.14` autopilot and blast radius | `core/session/autopilot.ts`, rendered by `cli/next/boundary-report.ts` under `memnox next --agent`. |
-| `I.3` scope drift, and the task everything compares against | `core/session/session-task.ts`; `memnox run --task/--paths/--expect`. |
+| `15` circuit breaker | `core/session/breaker.ts`, held via `core/session/pause.ts`; the daemon counts outcomes on `RECORD`. `memnox paused` / `memnox resume`. Error loop, no progress, action explosion, scope drift and a reported-spend ceiling. The flat ceilings stay in `core/daemon/limits.ts`. |
+| `17` capability drift, as skill quarantine | `core/discovery/skills.ts`, `memnox skills`. A skill whose reach grew since it was accepted is held. |
+| `13` progressive autonomy, `21` what to automate next and the primary screen | `core/session/autonomy.ts`, `memnox next`. |
+| `10` the agent workforce, as role-based authority | `policy.match.roles` was already parsed and matched and nothing ever set the field. `memnox run --role`, `MEMNOX_AGENT_ROLE`. |
+| `9` two agents on one file | `core/coordination`, `memnox lock`. |
+| `18` black box, `19` `memnox why` | `timeline`, `why`, `trace`, and `memnox claims` for what was said against what was recorded. |
+| grouped approval, which no section of the current vision names | `core/gate/grouping.ts`; `memnox approvals` groups by default, `approve --group`. |
+| `16` agent budgets | `core/session/budget.ts`, `memnox budget`, enforced in the daemon. |
+| the daily report, which no section of the current vision names | `core/session/operations.ts`, `memnox report`. |
+| `14` autopilot, and blast radius | `core/session/autopilot.ts`, rendered by `cli/next/boundary-report.ts` under `memnox next --agent`. |
+| `15` scope drift, and the task everything compares against | `core/session/session-task.ts`; `memnox run --task/--paths/--expect`. |
+| `15` circuit breaker, as narrowing rather than stopping | `core/session/strain.ts`, applied in `LocalGate`. Three failures nothing has got past and changes outside the machine, and deletes, ask first; local work goes on. |
+| `13` progressive autonomy, as a question kept for later | `PendingApprovals.park` and `RoutedHoldPrompt`. Unanswered is parked for sixteen hours, the agent carries on, and a later yes lets its retry through. |
+| `18` black box, as one goal over many sessions | `core/session/mission.ts`, `memnox mission`. Sessions join by `--mission`, by inheritance, or by working in the mission's repository and worktrees; `mission show` is the screen for coming back. |
+| `21` the primary screen, reached by a person away | `cli/src/daemon/waiting-feed.ts`. Stopped, struggling and finished while nobody answered, beside every held call, waking a paired phone. |
 
 **Three rules these all had to obey, and they are worth keeping.**
 
