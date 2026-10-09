@@ -253,6 +253,13 @@ export function backBrief(since: string): string {
   ].join('\n');
 }
 
+/** A session beginning or ending, whose folder is where it was opened rather than where it wrote. */
+const LIFECYCLE: readonly string[] = [
+  NOTICE_KIND.STARTED,
+  NOTICE_KIND.CLOSED,
+  NOTICE_KIND.GONE,
+];
+
 /** Said unasked, which only something they asked for or something that needs them reaches: the news in one sentence, and no offer. */
 export function noticeBrief(event: DaemonEvent, person?: string): string {
   return [
@@ -266,7 +273,9 @@ export function noticeBrief(event: DaemonEvent, person?: string): string {
     event.task === undefined ? '' : `Its task, in the person's words: "${event.task}".`,
     event.place === undefined
       ? ''
-      : `Folder it last wrote in: ${event.place}. Say this folder, not one the task names.`,
+      : LIFECYCLE.includes(event.notice ?? '')
+        ? `Folder the session was opened in: ${event.place}.`
+        : `Folder it last wrote in: ${event.place}. Say this folder, not one the task names.`,
     person === undefined ? '' : `You may address them as ${person}, this once.`,
     event.notice === NOTICE_KIND.COLLISION
       ? ''

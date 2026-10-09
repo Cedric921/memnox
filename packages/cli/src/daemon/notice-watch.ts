@@ -41,6 +41,7 @@ import { withEvents } from '../event-store';
 import { repositoriesWritten, touchesOf } from '../session-tools/session-writes';
 import { readTestRuns, sessionTranscript } from './transcript';
 import { commandResults, type CommandResult } from '../session-tools/voice-commands';
+import { SessionLives } from './session-lifecycle';
 import { SessionViews } from './session-view';
 
 /**
@@ -59,6 +60,8 @@ export class NoticeWatcher {
   private readonly told = new Map<string, DaemonEvent>();
   /** Background commands whose end was told, kept for the daemon's life so none is told twice. */
   private readonly ended = new Set<string>();
+  /** Every session as it begins and ends, so none comes or goes unnoticed. */
+  private readonly lives: SessionLives;
   /** Pairs of sessions already told as colliding, so a pair working on for an hour is said once. */
   private readonly collided = new Set<string>();
   /** The newest clash told, so each held write is said once. */
@@ -70,6 +73,7 @@ export class NoticeWatcher {
   ) {
     this.watch = startWatch(started);
     this.clashSeen = started;
+    this.lives = new SessionLives(home, started);
   }
 
   /** New notices since the last look, as events ready to send. */
@@ -90,9 +94,10 @@ export class NoticeWatcher {
     const watched = await this.watched(moment);
     const finished = await this.commandsEnded(moment);
     const met = [...(await this.collisions(moment)), ...(await this.clashes(moment))];
-    for (const event of [...fresh, ...watched, ...finished, ...met])
-      this.told.set(event.subject, event);
-    return [...fresh, ...watched, ...finished, ...met];
+    const lived = await this.lives.look(moment);
+    const all = [...fresh, ...watched, ...finished, ...met, ...lived];
+    for (const event of all) this.told.set(event.subject, event);
+    return all;
   }
 
   /** Two sessions working on the same files at once, each pair told once with what they share. */

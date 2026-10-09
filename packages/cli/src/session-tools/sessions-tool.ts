@@ -314,6 +314,11 @@ function latestOf(moments: readonly (string | undefined)[]): string {
   );
 }
 
+/** The voice's own brain, which runs as an agent too and is never one of the person's sessions. */
+export function isOperatorAgent(agent: string): boolean {
+  return OPERATOR_AGENTS.has(agent);
+}
+
 /** The brain's own session, by any row or turn it recorded, so a question to the voice is never counted as an agent. */
 function isOperator(
   events: readonly MemnoxEvent[],

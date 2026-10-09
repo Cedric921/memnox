@@ -26,6 +26,12 @@ export const NOTICE_KIND = {
   COLLISION: 'collision',
   /** A session has failures it has not got past, so its changes outside this machine ask first. */
   STRUGGLING: 'struggling',
+  /** A session began, by its own start hook or its first action, which is shown and kept for the voice. */
+  STARTED: 'started',
+  /** A session ended: closed by the person, or its process gone with nothing in progress. */
+  CLOSED: 'closed',
+  /** A session's process went away in the middle of a turn, so whatever it was doing stopped unfinished. */
+  GONE: 'gone',
 } as const;
 
 export type NoticeKind = (typeof NOTICE_KIND)[keyof typeof NOTICE_KIND];
