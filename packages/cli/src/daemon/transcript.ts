@@ -62,13 +62,25 @@ export function readConversation(path: string): ConversationLine[] {
 
 /** The lines of a transcript worth showing a person, from its raw JSON lines. */
 export function conversationIn(raw: string): ConversationLine[] {
+  return everyLineIn(raw).slice(-MOST_LINES);
+}
+
+/** Enough for a long day of one session, bounded so a runaway transcript is read from its end. */
+const WHOLE_BYTES = 16 * 1024 * 1024;
+
+/** Every line of the conversation, oldest first, for an account of the whole session. */
+export function readWholeConversation(path: string): ConversationLine[] {
+  return everyLineIn(tailOf(path, WHOLE_BYTES));
+}
+
+function everyLineIn(raw: string): ConversationLine[] {
   const lines: ConversationLine[] = [];
   for (const text of raw.split('\n')) {
     const entry = parsed(text);
     if (entry === null || entry.isSidechain === true || entry.isMeta === true) continue;
     lines.push(...linesOf(entry));
   }
-  return lines.slice(-MOST_LINES);
+  return lines;
 }
 
 /** Long enough to answer "what did it find" from, short enough to never be a report read aloud. */
@@ -318,12 +330,12 @@ function parsed(line: string): Entry | null {
   }
 }
 
-function tailOf(path: string): string {
+function tailOf(path: string, bytes: number = TAIL_BYTES): string {
   try {
     const fd = openSync(path, 'r');
     try {
       const size = fstatSync(fd).size;
-      const length = Math.min(size, TAIL_BYTES);
+      const length = Math.min(size, bytes);
       const buffer = Buffer.alloc(length);
       readSync(fd, buffer, 0, length, size - length);
       return buffer.toString('utf8');

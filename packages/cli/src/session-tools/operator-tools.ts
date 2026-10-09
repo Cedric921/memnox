@@ -23,6 +23,7 @@ import { proposeStartTool, startSessionTool } from './start-tools';
 import { typeInAppTool } from './app-tools';
 import { walkThroughTool } from './walk-tool';
 import { watchForTool } from './watch-tool';
+import { historyTool } from './history-tool';
 import { sessionTool } from './session-tool';
 import { showTool } from './show-tool';
 import { LOOK_TOOL, lookTool } from './look-tool';
@@ -95,6 +96,11 @@ export const OPERATOR_TOOLS: readonly ToolDefinition[] = [
       },
       session: SESSION_ARG,
     },
+  ),
+  readTool(
+    'history',
+    'One session from start to end: when it started, whether and how it ended, and every turn in it, what the person asked, what the agent answered, the files it wrote, its commits and pushes, what was refused and what was put to them. Use it for "what happened in that session", "what did it do all day", "walk me through the whole session" and "when did it end"; use session for what it is doing right now. Works for any session, however long ago.',
+    { agent: AGENT_ARG, session: SESSION_ARG },
   ),
   readTool('replay', "What an agent's session did, step by step and newest last.", {
     agent: AGENT_ARG,
@@ -389,6 +395,7 @@ const OPERATOR_CALLS: Record<string, OperatorCall> = {
   keep_listening: () => ({ listening: true }),
   sessions: (deps, _seams, args) => sessionsTool(deps, args),
   session: (deps, _seams, args) => sessionTool(asAgent(deps, args), args),
+  history: (deps, _seams, args) => historyTool(asAgent(deps, args), args),
   reach: (deps) => readReach(deps.home),
   waiting: (deps) => new WaitingFeed(deps.home).current(deps.now().toISOString()),
   cloud_agents: (deps) => readCloudAgents(deps.home),
