@@ -96,6 +96,7 @@ export class WaitingFeed {
               ...((request.cwd ?? host.cwd) === undefined
                 ? {}
                 : { cwd: request.cwd ?? host.cwd }),
+              ...(request.marks === undefined ? {} : { marks: request.marks }),
             },
           }),
     };

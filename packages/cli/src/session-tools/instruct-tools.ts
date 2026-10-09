@@ -20,6 +20,7 @@ import { noteFocus } from './focus';
 import { textArg, type SessionToolDeps, type ToolArgs } from './read-tools';
 import { changesTool } from './changes-tool';
 import { liveHost } from './live-host';
+import { sessionMarks } from './session-marks';
 import { paneOn, typeIntoPane, type Pane } from './multiplexer';
 import { unlessMacTold } from './mac-told';
 import type { RewindSeams } from './rewind-tool';
@@ -423,12 +424,14 @@ async function showFor(
   route: Route,
   host: SessionHost | null,
 ): Promise<DisplayRequest> {
+  const marks = await sessionMarks(deps, instruction.sessionId, host);
   return new DisplayRequests(deps.home).request({
     display: route === ROUTE.TYPED ? DISPLAY.TYPE : DISPLAY.PREFILL,
     sessionId: instruction.sessionId,
     agent: instruction.agent,
     title: 'Instruction',
     text: instruction.message,
+    marks,
     ...(host?.cwd === undefined ? {} : { cwd: host.cwd }),
     // What an editor's extension checks its link against, so a link cannot aim the words at another terminal.
     ...(route === ROUTE.TYPED && host?.tty !== undefined ? { tty: host.tty } : {}),

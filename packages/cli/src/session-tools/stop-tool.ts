@@ -7,6 +7,7 @@ import {
   type DisplayDelivery,
 } from '@memnox/core';
 import { liveHost } from './live-host';
+import { sessionMarks } from './session-marks';
 import { unlessMacTold } from './mac-told';
 import { paneOn, pressEscapeIn, type Pane } from './multiplexer';
 import type { SessionToolDeps } from './read-tools';
@@ -33,9 +34,11 @@ export async function stopSession(
       ? null
       : paneOn(tty, deps.panes);
   if (pane !== null) return stoppedInPane(deps, scope, sessionId, pane);
+  const marks = await sessionMarks(deps, sessionId, live);
   const request = await new DisplayRequests(deps.home).request({
     display: DISPLAY.INTERRUPT,
     sessionId,
+    marks,
     agent: scope.agent,
     title: 'Stop',
     tty,

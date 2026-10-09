@@ -68,6 +68,8 @@ export interface DisplayRequest {
   via?: DisplayVia;
   /** On FOCUS, the terminal a tmux or WezTerm pane is seen in, which stands in for where it runs. */
   shownIn?: ShownIn;
+  /** Lines only this session's tab shows, so the Mac can find it among a terminal app's tabs by what is in it. */
+  marks?: string[];
   requestedAt: string;
   expiresAt: string;
   /** Set once the Mac says how typing it ended; a delivered request is never shown again. */
@@ -106,6 +108,7 @@ export interface DisplayInput {
   env?: Record<string, string>;
   via?: DisplayVia;
   shownIn?: ShownIn;
+  marks?: string[];
   at: string;
 }
 
@@ -116,16 +119,22 @@ export interface ShownIn {
   tty?: string;
 }
 
+/** Enough lines to tell one session's tab from another's, few enough to read each tab quickly. */
+const MOST_MARKS = 4;
+
 /** The app a request opens or shows the session in, and how it reaches it. */
 function whereItGoes(
   input: DisplayInput,
-): Pick<DisplayRequest, 'appPath' | 'links' | 'env' | 'via' | 'shownIn'> {
+): Pick<DisplayRequest, 'appPath' | 'links' | 'env' | 'via' | 'shownIn' | 'marks'> {
   return {
     ...(input.appPath === undefined ? {} : { appPath: input.appPath }),
     ...(input.links === undefined ? {} : { links: input.links.slice(0, APP_LINKS) }),
     ...(input.env === undefined ? {} : { env: input.env }),
     ...(input.via === undefined ? {} : { via: input.via }),
     ...(input.shownIn === undefined ? {} : { shownIn: input.shownIn }),
+    ...(input.marks === undefined || input.marks.length === 0
+      ? {}
+      : { marks: input.marks.slice(0, MOST_MARKS) }),
   };
 }
 

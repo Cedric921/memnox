@@ -25,6 +25,7 @@ import { scopeOf, type SessionScope } from './session-scope';
 import { stopSession } from './stop-tool';
 import { closeSessionNow } from './close-tool';
 import { liveHost } from './live-host';
+import { sessionMarks } from './session-marks';
 import { paneOn, showPane } from './multiplexer';
 
 /**
@@ -101,9 +102,12 @@ async function putUp(
   const appPath = host === null ? desktopAppOf(deps, sessionId) : null;
   const code = display === DISPLAY.CARD ? await codeFor(deps, seams, sessionId) : {};
   const shownIn = display === DISPLAY.FOCUS ? paneShownIn(deps, host) : null;
+  const marks =
+    display === DISPLAY.FOCUS ? await sessionMarks(deps, sessionId, host) : [];
   const request = await new DisplayRequests(deps.home).request({
     ...code,
     ...(shownIn === null ? {} : { shownIn }),
+    marks,
     display,
     sessionId: sessionId,
     agent: scope.agent,

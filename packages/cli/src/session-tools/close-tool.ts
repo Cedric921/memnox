@@ -3,6 +3,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { DISPLAY, DisplayRequests, SessionHosts, wentIn } from '@memnox/core';
 import { isAgentProgram } from './instruct-tools';
 import { liveHost } from './live-host';
+import { sessionMarks } from './session-marks';
 import { closePane, paneOn, type Pane } from './multiplexer';
 import type { SessionToolDeps } from './read-tools';
 import type { SessionScope } from './session-scope';
@@ -47,6 +48,7 @@ export async function closeSessionNow(
   return closedThroughMac(deps, {
     scope,
     sessionId,
+    marks: await sessionMarks(deps, sessionId, live),
     ...(tty === undefined ? {} : { tty }),
     ended,
   });
@@ -71,6 +73,8 @@ async function closedPane(
 interface MacClose {
   scope: SessionScope;
   sessionId: string;
+  /** Lines only its tab shows, for a terminal app that cannot say which tab is whose. */
+  marks: string[];
   tty?: string;
   /** The agent was already ended, so the session is over whatever becomes of its tab. */
   ended: boolean;
@@ -78,13 +82,14 @@ interface MacClose {
 
 async function closedThroughMac(
   deps: SessionToolDeps,
-  { scope, sessionId, tty, ended }: MacClose,
+  { scope, sessionId, tty, ended, marks }: MacClose,
 ): Promise<Record<string, unknown>> {
   const request = await new DisplayRequests(deps.home).request({
     display: DISPLAY.CLOSE,
     sessionId,
     agent: scope.agent,
     title: 'Session',
+    marks,
     ...(tty === undefined ? {} : { tty }),
     at: deps.now().toISOString(),
   });

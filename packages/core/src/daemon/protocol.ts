@@ -427,6 +427,8 @@ export interface DisplayHost {
    * where Memnox keyed the session by another.
    */
   conversation?: string;
+  /** Lines only this session's tab shows, so the Mac can find it among a terminal app's tabs by what is in it. */
+  marks?: string[];
 }
 
 export interface DaemonResponse extends ExtensionResponseFields {
