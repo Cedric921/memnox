@@ -1,4 +1,5 @@
 import { forgetHeardWord, keepHeardWord } from '../operator/heard-words';
+import type { OperatorCall } from './operator-call';
 import { textArg, type SessionToolDeps, type ToolArgs } from './read-tools';
 import type { ToolDefinition } from './session-tools';
 
@@ -41,6 +42,11 @@ export const HEARD_WORD_TOOLS: readonly ToolDefinition[] = [
     annotations: LOCAL_WRITE,
   },
 ];
+
+export const HEARD_WORD_CALLS: Readonly<Record<string, OperatorCall>> = {
+  remember_word: (deps, _seams, args) => rememberWordTool(deps, args),
+  forget_word: (deps, _seams, args) => forgetWordTool(deps, args),
+};
 
 export async function rememberWordTool(
   deps: SessionToolDeps,

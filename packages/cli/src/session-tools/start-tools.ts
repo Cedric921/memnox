@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { accessSync, constants, existsSync, readdirSync, type Dirent } from 'node:fs';
 import { homedir } from 'node:os';
-import { basename, dirname, isAbsolute, join } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative } from 'node:path';
 import {
   AGENT_ID,
   DESKTOP_APPS,
@@ -19,6 +19,7 @@ import {
   type StartableAgent,
   WorkBriefs,
 } from '@memnox/core';
+import { existingFolder, folderNamed } from '../operator/folders';
 import { noApp, openAppStart, resolveInstalledApp } from './app-tools';
 import { launched, startInPane, startInPanel } from './start-routes';
 import { mainCheckoutOf } from './main-checkout';
@@ -161,7 +162,7 @@ async function repositoryFor(
 ): Promise<ChosenRepository | null> {
   if (named !== undefined) {
     const path = repositoryNamed(named, known);
-    return path === null ? null : { path };
+    return path === null ? folderFor(deps, named) : { path };
   }
   const ticket = brief === undefined ? null : await new WorkBriefs(deps.home).read(brief);
   const fromTicket = ticket?.sources
@@ -179,6 +180,26 @@ async function repositoryFor(
   return last === undefined
     ? null
     : { path: last, from: 'the repository your last session worked in' };
+}
+
+/**
+ * Any folder by that path or name when no repository answers to it, since a session can start in a
+ * folder that is not a repository; one found by a near name is read back, never started on a guess.
+ */
+async function folderFor(
+  deps: SessionToolDeps,
+  named: string,
+): Promise<ChosenRepository | null> {
+  const byPath = isAbsolute(named) ? await existingFolder(deps.home, named) : null;
+  if (byPath !== null) return { path: byPath };
+  const found = await folderNamed(deps.home, named, deps.now().getTime());
+  if (found === null) return null;
+  return found.exact
+    ? { path: found.path }
+    : {
+        path: found.path,
+        from: `the folder ${relative(deps.home, found.path)}, the closest name`,
+      };
 }
 
 /** The repositories it could see, so the voice offers the closest names rather than asking again. */
@@ -278,7 +299,7 @@ function runnable(path: string): boolean {
 
 const ONLY_KNOWN_AGENTS = `Only ${Object.keys(STARTABLE_AGENT).join(' or ')} can be started by voice.`;
 const NO_SUCH_REPOSITORY =
-  'No repository on this Mac goes by that name. Offer the closest from known, by name.';
+  'No repository or folder on this Mac goes by that name. Offer the closest from known, by name, or to create a folder by that name with create_folder and start there, as one question.';
 const READ_BACK =
   'Nothing has started. Read it back once, as one whole sentence that ends in a courteous question, saying the app when in names one, such as "Shall I open the Codex app in memnox runtime to review your changes?", "Shall I start Codex in memnox macos to review the changes?" or "I can start Claude Code in memnox cloud on the failing auth test. Would you like me to go ahead?", varying the words. Say nothing before it and nothing after the question. Call start_session with this id only after they say yes. When they asked for exactly this plainly, the agent, the repository and what to do, or only to open an app such as "open Hermes", or they already said yes to it or corrected it to this, skip the read back: their asking is their yes, so call start_session with this id now. Never ask the same thing twice.';
 const START_NOW =

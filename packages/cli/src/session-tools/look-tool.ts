@@ -2,6 +2,7 @@ import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { DISPLAY, DisplayRequests, MEMNOX_HOME, type Sight } from '@memnox/core';
+import type { OperatorCall } from './operator-call';
 import { textArg, type SessionToolDeps, type ToolArgs } from './read-tools';
 import type { ToolDefinition } from './session-tools';
 
@@ -43,7 +44,12 @@ const NOT_SEEN =
 const OUTLINE_ONLY =
   'Memnox may not record the screen, so only the outline of the window came back. Answer from it, say once that you could not see the picture, and that turning on Screen Recording for Memnox in System Settings lets you.';
 
-export async function lookTool(deps: SessionToolDeps, args: ToolArgs): Promise<unknown> {
+export const LOOK_CALLS: Readonly<Record<string, OperatorCall>> = {
+  look: (deps, _seams, args) => lookTool(deps, args),
+  forget_screen: (deps) => forgetScreenTool(deps),
+};
+
+async function lookTool(deps: SessionToolDeps, args: ToolArgs): Promise<unknown> {
   const app = textArg(args, 'app');
   const request = await new DisplayRequests(deps.home).request({
     display: DISPLAY.LOOK,
@@ -112,7 +118,7 @@ export const FORGET_SCREEN_TOOL: ToolDefinition = {
   annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
 };
 
-export async function forgetScreenTool(deps: SessionToolDeps): Promise<unknown> {
+async function forgetScreenTool(deps: SessionToolDeps): Promise<unknown> {
   await Promise.all(
     SCREEN_FOLDERS.map((folder) =>
       rm(join(deps.home, MEMNOX_HOME, folder), { recursive: true, force: true }),

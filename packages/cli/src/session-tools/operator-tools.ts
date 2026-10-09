@@ -26,7 +26,8 @@ import { watchForTool } from './watch-tool';
 import { historyTool } from './history-tool';
 import { sessionTool } from './session-tool';
 import { showTool } from './show-tool';
-import { FORGET_SCREEN_TOOL, forgetScreenTool, LOOK_TOOL, lookTool } from './look-tool';
+import { FORGET_SCREEN_TOOL, LOOK_CALLS, LOOK_TOOL } from './look-tool';
+import type { OperatorCall } from './operator-call';
 import { sessionsTool } from './sessions-tool';
 import {
   decisionsTool,
@@ -40,9 +41,9 @@ import {
 import type { RewindSeams } from './rewind-tool';
 import type { ToolCatalogue } from './session-server';
 import { ACTING_TOOLS } from './acting-tools';
-import { FOLDER_TOOLS, foldersTool, openFolderTool } from './folder-tools';
-import { forgetWordTool, HEARD_WORD_TOOLS, rememberWordTool } from './heard-words-tools';
-import { forgetAboutMeTool, PROFILE_TOOLS, rememberAboutMeTool } from './profile-tools';
+import { FOLDER_CALLS, FOLDER_TOOLS } from './folder-tools';
+import { HEARD_WORD_CALLS, HEARD_WORD_TOOLS } from './heard-words-tools';
+import { PROFILE_CALLS, PROFILE_TOOLS } from './profile-tools';
 import { AGENT_ARG, proposeTool, SAID_ARG } from './operator-args';
 import { readTool, SESSION_ARG, type ToolDefinition } from './session-tools';
 import { TOOL_ARG } from './session-tools.constants';
@@ -385,12 +386,6 @@ function asAgent(deps: SessionToolDeps, args: ToolArgs): SessionToolDeps {
   return readingFor(deps, textArg(args, 'agent') ?? DEFAULT_AGENT);
 }
 
-type OperatorCall = (
-  deps: SessionToolDeps,
-  seams: RewindSeams,
-  args: ToolArgs,
-) => unknown;
-
 const OPERATOR_CALLS: Record<string, OperatorCall> = {
   status: (deps) => statusTool(deps),
   // The Mac app sees the call in the stream and closes the orb; nothing here has anything to do.
@@ -445,14 +440,10 @@ const OPERATOR_CALLS: Record<string, OperatorCall> = {
   propose_answer: (deps, _seams, args) => proposeAnswerTool(deps, args),
   answer_question: (deps, _seams, args) => answerQuestionTool(deps, args),
   propose_rule: (deps, _seams, args) => proposeRuleTool(deps, args),
-  remember_word: (deps, _seams, args) => rememberWordTool(deps, args),
-  forget_word: (deps, _seams, args) => forgetWordTool(deps, args),
-  remember_about_me: (deps, _seams, args) => rememberAboutMeTool(deps, args),
-  forget_about_me: (deps, _seams, args) => forgetAboutMeTool(deps, args),
-  folders: (deps, _seams, args) => foldersTool(deps, args),
-  open_folder: (deps, _seams, args) => openFolderTool(deps, args),
-  look: (deps, _seams, args) => lookTool(deps, args),
-  forget_screen: (deps) => forgetScreenTool(deps),
+  ...HEARD_WORD_CALLS,
+  ...PROFILE_CALLS,
+  ...FOLDER_CALLS,
+  ...LOOK_CALLS,
 };
 
 export async function callOperatorTool(

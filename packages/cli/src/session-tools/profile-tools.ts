@@ -1,4 +1,5 @@
 import { forgetFacts, keepFact, PROFILE_TOPIC, topicOf } from '../operator/profile';
+import type { OperatorCall } from './operator-call';
 import { textArg, type SessionToolDeps, type ToolArgs } from './read-tools';
 import type { ToolDefinition } from './session-tools';
 
@@ -54,7 +55,12 @@ const FORGOTTEN =
 const NONE_FORGOTTEN =
   'Nothing you kept holds those words. Say so in a few words, and ask what to forget.';
 
-export async function rememberAboutMeTool(
+export const PROFILE_CALLS: Readonly<Record<string, OperatorCall>> = {
+  remember_about_me: (deps, _seams, args) => rememberAboutMeTool(deps, args),
+  forget_about_me: (deps, _seams, args) => forgetAboutMeTool(deps, args),
+};
+
+async function rememberAboutMeTool(
   deps: SessionToolDeps,
   args: ToolArgs,
 ): Promise<unknown> {
@@ -69,7 +75,7 @@ export async function rememberAboutMeTool(
     : { remembered: true, ...kept, said: KEPT };
 }
 
-export async function forgetAboutMeTool(
+async function forgetAboutMeTool(
   deps: SessionToolDeps,
   args: ToolArgs,
 ): Promise<unknown> {

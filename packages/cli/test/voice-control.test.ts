@@ -436,6 +436,51 @@ describe('starting a session out loud', () => {
     expect(proposed.repository).toBe('memnox-client');
   });
 
+  it('starts in a folder that is not a repository, and in a new folder it makes when asked', async () => {
+    const base = await depsAt();
+    const deps: SessionToolDeps = { ...base, resolveCommand: () => 'claude' };
+    const plain = join(deps.home, 'Documents', 'labvanced');
+    await mkdir(plain, { recursive: true });
+    const there = (await callOperatorTool(deps, SEAMS, 'propose_start', {
+      agent: 'claude-code',
+      repository: 'labvanced',
+    })) as { proposed: boolean; repository: string };
+    expect(there).toMatchObject({ proposed: true, repository: 'labvanced' });
+    // A name heard a little wrong is read back, never started on the guess.
+    const near = (await callOperatorTool(deps, SEAMS, 'propose_start', {
+      agent: 'claude-code',
+      repository: 'lab vansed',
+    })) as { repositoryFrom?: string };
+    expect(near.repositoryFrom ?? '').toContain('labvanced');
+
+    const made = (await callOperatorTool(deps, SEAMS, 'create_folder', {
+      name: 'health',
+    })) as { path: string; created: boolean };
+    expect(made).toMatchObject({
+      created: true,
+      path: join(deps.home, 'Documents', 'health'),
+    });
+    expect(
+      await callOperatorTool(deps, SEAMS, 'create_folder', { name: 'health' }),
+    ).toMatchObject({ created: false });
+    expect(
+      await callOperatorTool(deps, SEAMS, 'propose_start', {
+        agent: 'claude-code',
+        repository: made.path,
+      }),
+    ).toMatchObject({ proposed: true, repository: 'health' });
+    // Never a hidden folder, and never anywhere outside the home.
+    for (const unsafe of [
+      { name: '../escape' },
+      { name: 'x', in: '/tmp' },
+      { name: 'x', in: '~/.ssh' },
+    ]) {
+      expect(await callOperatorTool(deps, SEAMS, 'create_folder', unsafe)).toMatchObject({
+        created: false,
+      });
+    }
+  });
+
   it('starts an agent from where it is installed when the shell cannot find it', async () => {
     const base = await depsAt();
     const repo = await workedOn(base, 'memnox-runtime');

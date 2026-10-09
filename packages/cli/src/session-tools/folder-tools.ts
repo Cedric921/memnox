@@ -10,6 +10,8 @@ import {
   spokenName,
   weight,
 } from '../operator/folders';
+import { createFolder } from '../operator/new-folder';
+import type { OperatorCall } from './operator-call';
 import { textArg, type SessionToolDeps, type ToolArgs } from './read-tools';
 import type { ToolDefinition } from './session-tools';
 
@@ -70,7 +72,54 @@ export const FOLDER_TOOLS: readonly ToolDefinition[] = [
     // It writes a request to open a window, which changes nothing an agent can do.
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   },
+  {
+    name: 'create_folder',
+    description:
+      'Make one new, empty folder they named, inside their home: in the folder they said, such as "in Documents" or "in my projects folder", or in Documents when they named no place. When a folder by that name is already there it is used as it is. Use it when they ask to create a folder, or to start a session in a new folder; then pass the path it returns as repository to propose_start. Read it back once first, like "Shall I create a folder called health in Documents and start Claude Code there?".',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: "the new folder's name, as they said it" },
+        in: {
+          type: 'string',
+          description:
+            'the folder to make it in, by name or path; Documents when left out',
+        },
+      },
+    },
+    // It makes one empty folder inside the person's home and nothing else.
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+  },
 ];
+
+export const FOLDER_CALLS: Readonly<Record<string, OperatorCall>> = {
+  folders: (deps, _seams, args) => foldersTool(deps, args),
+  open_folder: (deps, _seams, args) => openFolderTool(deps, args),
+  create_folder: (deps, _seams, args) => createFolderTool(deps, args),
+};
+
+async function createFolderTool(
+  deps: SessionToolDeps,
+  args: ToolArgs,
+): Promise<unknown> {
+  const made = await createFolder(
+    deps.home,
+    textArg(args, 'name') ?? '',
+    textArg(args, 'in'),
+  );
+  if ('why' in made)
+    return {
+      created: false,
+      said: `Nothing was made: ${made.why}. Say so in a sentence.`,
+    };
+  await noteFolderUse(deps.home, made.path, deps.now().toISOString());
+  return {
+    ...made,
+    said: made.created
+      ? 'Made. Start the session with this path as repository, and say in a few words that the folder is made.'
+      : 'It was already there, so it is used as it is. Start the session with this path as repository.',
+  };
+}
 
 export async function foldersTool(
   deps: SessionToolDeps,

@@ -177,6 +177,33 @@ export async function existingFolder(home: string, path: string): Promise<string
   return found?.isDirectory() === true ? full : null;
 }
 
+/** Close enough to start a session in: a name misheard by a letter or two, never a stretch. */
+const FOLDER_MATCH_FLOOR = 0.7;
+
+/** The folder in the home best matching what was said, and whether its very name was said; null when none is close. */
+export async function folderNamed(
+  home: string,
+  said: string,
+  now: number = Date.now(),
+): Promise<{ path: string; exact: boolean } | null> {
+  const best = (await homeFolders(home, now))
+    .map((folder) => ({ folder, match: nameMatch(said, folder, home) }))
+    .filter((each) => each.match >= FOLDER_MATCH_FLOOR)
+    .sort((a, b) => b.match - a.match)[0];
+  return best === undefined ? null : { path: best.folder.path, exact: best.match === 1 };
+}
+
+/** Whether a folder sits inside the home and outside every hidden folder, such as Memnox's own. */
+export function insideHome(home: string, path: string): boolean {
+  const within = relative(home, path);
+  return (
+    within !== '' &&
+    !within.startsWith('..') &&
+    !isAbsolute(within) &&
+    !within.split('/').some((part) => part.startsWith('.'))
+  );
+}
+
 /** The folder name as said aloud, for the recognizer and the brain. */
 export function spokenName(path: string): string {
   return basename(path).replace(/[-_]/g, ' ');
