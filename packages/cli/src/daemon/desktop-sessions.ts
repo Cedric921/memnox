@@ -78,6 +78,11 @@ export function desktopSessions(roots: DesktopRoots, since: string): DesktopSess
 /** Looked for among every session, however long ago. */
 const EVER = '';
 
+/** Whether an id names a session kept by a desktop app, which no hook of Memnox's ever runs inside. */
+export function isDesktopSessionId(id: string): boolean {
+  return id.startsWith(DESKTOP_PREFIX);
+}
+
 export function desktopSessionById(
   roots: DesktopRoots,
   id: string,

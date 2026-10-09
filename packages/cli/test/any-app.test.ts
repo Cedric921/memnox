@@ -2,7 +2,7 @@ import { mkdir, mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { DisplayRequests } from '@memnox/core';
+import { DisplayRequests, SpokenInstructions } from '@memnox/core';
 import { installedAppNamed } from '../src/session-tools/app-tools';
 import { callOperatorTool } from '../src/session-tools/operator-tools';
 import type { SessionToolDeps } from '../src/session-tools/read-tools';
@@ -63,5 +63,38 @@ describe('typing into any app the person names', () => {
     })) as { typed: boolean; said: string };
     expect(missing.typed).toBe(false);
     expect(missing.said).toContain('No app called Perplexity');
+  });
+
+  it('types a follow up into the desktop app a session lives in, rather than waiting on a hook it never runs', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'memnox-app-follow-up-'));
+    const deps: SessionToolDeps = {
+      home,
+      cwd: home,
+      agent: 'claude-code',
+      env: {},
+      now: () => NOW,
+      readStatus: async () => ({}),
+      milestonesAt: async () => [],
+      brief: async () => null,
+      resolveApp: (agent) => (agent === 'codex' ? '/Applications/Codex.app' : null),
+      delivered: async () => ({ outcome: 'typed', at: NOW.toISOString() }),
+    };
+    const instruction = await new SpokenInstructions(home).propose({
+      sessionId: 'dsk_codex_019a',
+      agent: 'codex',
+      message: 'check the files changed',
+      at: NOW.toISOString(),
+    });
+    expect(
+      await callOperatorTool(deps, {} as RewindSeams, 'send_instruction', {
+        instruction: instruction.id,
+      }),
+    ).toMatchObject({ session: 'dsk_codex_019a', typed: true });
+    const [request] = await new DisplayRequests(home).open(NOW.toISOString());
+    expect(request).toMatchObject({
+      display: 'app',
+      appPath: '/Applications/Codex.app',
+      text: 'check the files changed',
+    });
   });
 });

@@ -52,8 +52,21 @@ export async function openAppStart(
     ...launch,
     at: moment,
   });
-  const opened = { repository: basename(start.repository), app: name };
-  return { ...opened, ...openedAs(delivery, launch.typed !== undefined) };
+  // Named as the app's own session, so a follow up to "the same session" is typed into this app.
+  const opened = {
+    repository: basename(start.repository),
+    app: name,
+    session: `${APP_SESSION_PREFIX}${start.agent}`,
+  };
+  const result: Record<string, unknown> = {
+    ...opened,
+    ...openedAs(delivery, launch.typed !== undefined),
+  };
+  // Words sent by the app's own prompt link wait in its chat for the person's Return, never asked about again.
+  const prefilled = launch.typed === undefined && start.task.trim() !== '';
+  return prefilled && result['said'] === APP_OPENED
+    ? { ...result, said: APP_PREFILLED }
+    : result;
 }
 
 /**
@@ -298,6 +311,8 @@ const APP_TYPED =
   'The app is open and the Mac typed their words into its message box and sent them, so it is answering now. Say so in a few words, like "Sent to Claude." Never say it is done.';
 const APP_OPENED =
   'The app opened on that repository. Say so in a few words, like "Hermes is open in memnox runtime.", and ask what they would like it to do.';
+const APP_PREFILLED =
+  'The app opened on that repository with their words already in its chat, where it waits for them to press Return, since the app asks before running a prompt it was handed. Say that in one sentence, like "Cursor is open with your question in its chat; press Return there to send it." Never ask what it should do, and never offer to send it again.';
 const APP_CLIPBOARD =
   'The app is open, but the Mac could not type into it, and it already told them out loud the words are on the clipboard and how to paste them. Write nothing more.';
 const UNCONFIRMED =
