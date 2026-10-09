@@ -138,9 +138,7 @@ function codexWorking(entries: readonly Record<string, unknown>[]): boolean {
 const CODEX_CONTEXT = /^\s*<[a-z_-]+>/;
 
 /** What the person asked, what Codex answered and the tools it ran, from its log. */
-function codexLines(
-  entries: readonly Record<string, unknown>[],
-): ConversationLine[] {
+function codexLines(entries: readonly Record<string, unknown>[]): ConversationLine[] {
   const lines: ConversationLine[] = [];
   for (const entry of entries) {
     const payload = objectOf(entry['payload']);
