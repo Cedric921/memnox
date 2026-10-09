@@ -1205,6 +1205,37 @@ describe('which branch, and what a session committed', () => {
     })) as { repositories: { name: string }[] };
     expect(named.repositories.map((each) => each.name)).toEqual([basename(repo)]);
   });
+
+  it('reads the git status where a session was opened, though it only ran commands', async () => {
+    const deps = await depsAt();
+    const repo = await mkdtemp(join(tmpdir(), 'memnox-cloud-'));
+    git(repo, 'init', '-q', '-b', 'main');
+    await writeFile(join(repo, 'orders.ts'), 'one\n');
+    git(repo, 'add', '.');
+    gitAt(repo, '2026-09-30T10:00:00Z', 'commit', '-q', '-m', 'before the session');
+    await writeFile(join(repo, 'orders.ts'), 'two\n');
+    await new SessionHosts(deps.home).note({
+      sessionId: 'ses_commands',
+      agent: 'claude-code',
+      pid: process.pid,
+      seenAt: '2026-09-30T11:00:00.000Z',
+      cwd: repo,
+    });
+    await recorded(deps.home, [
+      event('ses_commands', 'claude-code', { surface: 'shell', operation: 'shell.exec' }),
+    ]);
+
+    const answer = (await callOperatorTool(deps, SEAMS, 'repository', {
+      session: 'ses_commands',
+    })) as {
+      repositories: { name: string; uncommitted: { total: number; shown: string[] } }[];
+    };
+    expect(answer.repositories.map((each) => each.name)).toEqual([basename(repo)]);
+    expect(answer.repositories[0]?.uncommitted).toEqual({
+      total: 1,
+      shown: ['M orders.ts'],
+    });
+  });
 });
 
 describe('which session is working right now', () => {

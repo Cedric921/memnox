@@ -189,7 +189,7 @@ export const OPERATOR_TOOLS: readonly ToolDefinition[] = [
   ),
   readTool(
     'repository',
-    'Which branch a session\'s repository is on and the commits made there since the session started: each commit\'s short id, time, message and files. Answer "which branch", "read the commit it just made" or "what did it commit" from here. Pass repository with a folder name such as "memnox-runtime" when they name a project rather than a session.',
+    'Which branch a session\'s repository is on and the commits made there since the session started: each commit\'s short id, time, message and files, and uncommitted, what git status lists as not yet committed. Answer "which branch", "read the commit it just made", "what did it commit" and "check the git status" from here, yourself, rather than asking the agent to run it. Pass repository with a folder name such as "memnox-runtime" when they name a project rather than a session.',
     {
       agent: AGENT_ARG,
       session: SESSION_ARG,

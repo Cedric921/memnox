@@ -1,8 +1,16 @@
 import { basename } from 'node:path';
-import { HOUR_MS, LEDGER_SCAN_LIMIT, LEDGER_SESSION_LIMIT, NodeGit } from '@memnox/core';
+import {
+  HOUR_MS,
+  LEDGER_SCAN_LIMIT,
+  LEDGER_SESSION_LIMIT,
+  NodeGit,
+  SessionHosts,
+} from '@memnox/core';
 import { withEvents } from '../event-store';
 import { repositoriesOf } from './changes-tool';
+import { MOST_ROWS } from './bounded';
 import { textArg, type SessionToolDeps, type ToolArgs } from './read-tools';
+import { repositoryAround } from './repository-root';
 import { scopeOf } from './session-scope';
 
 /**
@@ -39,8 +47,9 @@ export async function repositoryTool(
     return { scope, mine, recent };
   });
   const startedAt = found.mine.map((each) => each.at).sort()[0] ?? since;
+  const opened = await openedIn(deps, found.scope.sessionId);
   const places = chosen(
-    repositoriesOf(found.mine),
+    [...new Set([...opened, ...repositoriesOf(found.mine)])],
     repositoriesOf(found.recent),
     textArg(args, 'repository'),
   );
@@ -56,6 +65,20 @@ export async function repositoryTool(
       ? { said: 'No repository was found for this session or by that name.' }
       : {}),
   };
+}
+
+/**
+ * The repository the session was opened in, which a session that has only run commands and
+ * written nothing has no other trace of, and which is where its git status is asked.
+ */
+async function openedIn(
+  deps: SessionToolDeps,
+  sessionId: string | null,
+): Promise<string[]> {
+  if (sessionId === null) return [];
+  const cwd = (await new SessionHosts(deps.home).read(sessionId))?.cwd;
+  const root = cwd === undefined ? null : repositoryAround(cwd);
+  return root === null ? [] : [root];
 }
 
 /** The session's own repositories, or the one named, matched by folder name against what was touched lately. */
@@ -93,7 +116,27 @@ async function describeRepository(
       '--format=%x1e%h%x1f%aI%x1f%s',
     ])
     .catch(() => '');
-  return { repository: place, name: basename(place), branch, commits: commitsIn(log) };
+  const status = await git.run(['status', '--porcelain=v1']).catch(() => null);
+  return {
+    repository: place,
+    name: basename(place),
+    branch,
+    commits: commitsIn(log),
+    ...(status === null ? {} : { uncommitted: uncommittedIn(status) }),
+  };
+}
+
+/** A status line as its state, such as M or ??, and its path, however the output was trimmed. */
+const STATUS_LINE = /^\s*(\S{1,2})\s+(.+)$/;
+
+/** What git status lists as not yet committed, each as its state and its path. */
+function uncommittedIn(status: string): { total: number; shown: string[] } {
+  const lines = status
+    .split('\n')
+    .map((each) => STATUS_LINE.exec(each))
+    .filter((each) => each !== null)
+    .map(([, state, path]) => `${state} ${path}`);
+  return { total: lines.length, shown: lines.slice(0, MOST_ROWS) };
 }
 
 /** git log split on the record separator each commit starts with, its files on the lines after. */
