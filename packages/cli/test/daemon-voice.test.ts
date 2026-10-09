@@ -342,7 +342,11 @@ describe('asking the daemon in your own words', () => {
     });
 
     expect(heard.map((each) => each.chunk?.kind)).toEqual(['tool', 'text', 'done']);
-    expect(heard[1]?.chunk?.text).toBe('You asked: what is claude doing.');
+    // The first words in a while carry the hour ahead of them, so the brain can greet for it.
+    expect(heard[1]?.chunk?.text).toMatch(
+      /^You asked: \[Memnox, not the person\] It is /,
+    );
+    expect(heard[1]?.chunk?.text).toMatch(/\nwhat is claude doing\.$/);
     expect(heard.every((each) => each.id === 11)).toBe(true);
     await daemon.close();
   });
