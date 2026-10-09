@@ -65,7 +65,7 @@ export class WaitingFeed {
   private async displayEvent(request: DisplayRequest): Promise<DaemonEvent> {
     const recorded = await new SessionHosts(this.home).read(request.sessionId);
     // Its terminal as it is now; a session whose process has ended has no window to bring forward.
-    const host = recorded === null ? null : liveHost(recorded);
+    const host = seenIn(recorded === null ? null : liveHost(recorded), request);
     return {
       kind: DAEMON_EVENT.SHOW,
       subject: request.id,
@@ -82,6 +82,7 @@ export class WaitingFeed {
       ...(request.agents === undefined ? {} : { agents: request.agents }),
       ...(request.trace === undefined ? {} : { trace: request.trace }),
       ...appOf(request),
+      ...(request.via === undefined ? {} : { via: request.via }),
       ...(host === null
         ? requestedHost(request)
         : {
@@ -320,6 +321,13 @@ async function keepIf<T>(
 ): Promise<T[]> {
   const kept = await Promise.all(items.map(keep));
   return items.filter((_, index) => kept[index]);
+}
+
+/** A pane is seen in the terminal its multiplexer shows it in, which is the tab to bring forward. */
+function seenIn(live: SessionHost | null, request: DisplayRequest): SessionHost | null {
+  if (live === null || request.shownIn === undefined) return live;
+  const { tty: _inner, ...rest } = live;
+  return { ...rest, ...request.shownIn };
 }
 
 /** Where to show it when no session runs there yet: the folder, and the app an APP start opens. */

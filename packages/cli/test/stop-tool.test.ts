@@ -97,7 +97,7 @@ describe('stopping an agent by voice', () => {
     expect(answer.said).toContain('still going');
   });
 
-  it('says plainly when it runs in a panel with no terminal to press it in', async () => {
+  it('asks the Mac to stop a session in an editor panel, where it has no terminal', async () => {
     const home = await mkdtemp(join(tmpdir(), 'memnox-stop-'));
     await new SessionHosts(home).note({
       sessionId: 'ses_a',
@@ -108,12 +108,15 @@ describe('stopping an agent by voice', () => {
       tty: 'ttys004',
       seenAt: NOW.toISOString(),
     });
-    const answer = (await callOperatorTool(depsAt(home, 'typed'), SEAMS, 'show', {
-      session: 'ses_a',
-      display: 'stop',
-    })) as { stopped: boolean; said: string };
-    expect(answer.stopped).toBe(false);
-    expect(answer.said).toContain('no terminal to press Escape in');
-    expect(await new DisplayRequests(home).open(NOW.toISOString())).toEqual([]);
+    expect(
+      await callOperatorTool(depsAt(home, 'typed'), SEAMS, 'show', {
+        session: 'ses_a',
+        display: 'stop',
+      }),
+    ).toMatchObject({ stopped: true });
+    const [request] = await new DisplayRequests(home).open(NOW.toISOString());
+    // No terminal named, since the panel's inherited one is never where its agent listens.
+    expect(request).toMatchObject({ display: 'interrupt', sessionId: 'ses_a' });
+    expect(request?.tty).toBeUndefined();
   });
 });

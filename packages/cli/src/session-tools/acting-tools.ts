@@ -114,6 +114,16 @@ export const ACTING_TOOLS: readonly ToolDefinition[] = [
         description:
           '"true" to open a new chat in the agent\'s own desktop app on the repository and type the task into it, when they say app, desktop, or the app by name such as Claude desktop, Codex app, ChatGPT, or Cursor when Cursor itself is the agent; "false" for a new terminal tab; left out, it goes where they last had this agent, the app, an editor or a terminal. An agent named in an editor, like Claude Code in VS Code, is editor, never app. With app "true", task may be left out to only open the app',
       },
+      panel: {
+        type: 'string',
+        description:
+          '"true" to start Claude Code in its panel inside the editor as a new conversation, when they ask for the Claude panel, the Claude extension or the chat in the editor rather than a terminal; pass editor too when they named one',
+      },
+      terminal: {
+        type: 'string',
+        description:
+          'the terminal to start it in, as they named it, such as "tmux", "WezTerm", "Ghostty", "Warp", "kitty" or "iTerm", when they ask for one: a new window opens there on the repository and the agent starts in it; leave it out otherwise',
+      },
       editor: {
         type: 'string',
         description:
@@ -171,6 +181,11 @@ export const ACTING_TOOLS: readonly ToolDefinition[] = [
           description:
             'any other app by the name they said, such as Windsurf or Perplexity, when it is none of those four; leave agent out then',
         },
+        new_chat: {
+          type: 'string',
+          description:
+            '"true" to start a new chat in the app first, when they ask for a new chat or conversation there, rather than typing into the one open',
+        },
         message: {
           type: 'string',
           description:
@@ -179,6 +194,24 @@ export const ACTING_TOOLS: readonly ToolDefinition[] = [
       },
     },
     // It types what the person asked into an app they use; what that agent then does is ruled as ever.
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+  },
+  {
+    name: 'control_app',
+    description:
+      'Stop or close an agent\'s desktop app or any app the person names, when no session of theirs runs there: action "stop" stops the reply it is writing, like "stop Claude desktop" or "cancel that in ChatGPT", and "close" closes its window, keeping the chat in the app. A session in a terminal, an editor or its panel is stopped and closed with show instead.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', description: 'stop or close' },
+        agent: {
+          type: 'string',
+          description: 'claude-code, codex, cursor or hermes for their own apps',
+        },
+        app: { type: 'string', description: 'any other app by the name they said' },
+      },
+    },
+    // It presses Stop or closes a window the person named; nothing in the app is deleted.
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   },
   proposeTool(

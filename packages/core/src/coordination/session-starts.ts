@@ -70,6 +70,12 @@ export interface SessionStart {
   app?: string;
   /** The editor's app bundle, when it starts in a new terminal inside that editor rather than a terminal tab. */
   editor?: string;
+  /** tmux or WezTerm, when it starts in a new window of the one running here. */
+  pane?: string;
+  /** In the editor's Claude Code panel as a new conversation, rather than in a terminal inside the editor. */
+  panel?: boolean;
+  /** Any other terminal app's bundle, such as Ghostty, when it starts in a new window there. */
+  terminal?: string;
   said?: string;
   proposedAt: string;
   expiresAt: string;
@@ -84,6 +90,9 @@ export interface StartProposal {
   brief?: string;
   app?: string;
   editor?: string;
+  pane?: string;
+  panel?: boolean;
+  terminal?: string;
   said?: string;
   at: string;
 }
@@ -134,6 +143,9 @@ export class SessionStarts {
       ...(input.brief === undefined ? {} : { brief: input.brief }),
       ...(input.app === undefined ? {} : { app: input.app }),
       ...(input.editor === undefined ? {} : { editor: input.editor }),
+      ...(input.pane === undefined ? {} : { pane: input.pane }),
+      ...(input.panel === true ? { panel: true } : {}),
+      ...(input.terminal === undefined ? {} : { terminal: input.terminal }),
       ...(input.said === undefined ? {} : { said: input.said }),
       proposedAt: input.at,
       expiresAt: new Date(Date.parse(input.at) + START_TTL_MS).toISOString(),

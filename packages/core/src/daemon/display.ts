@@ -37,3 +37,15 @@ export const DISPLAY = {
 } as const;
 
 export type DisplayKind = (typeof DISPLAY)[keyof typeof DISPLAY];
+
+/** How a LAUNCH reaches where it runs, when that is not a terminal tab or an editor's own terminal. */
+export const DISPLAY_VIA = {
+  /** Another terminal app, such as Ghostty, opened on the folder with the line typed into its new window. */
+  TERMINAL_APP: 'terminal-app',
+  /** An editor's agent panel, opened on the folder with the task sent as a new conversation. */
+  PANEL: 'panel',
+  /** On APP, a new chat started in the app before the words are typed, rather than the one open. */
+  NEW_CHAT: 'new-chat',
+} as const;
+
+export type DisplayVia = (typeof DISPLAY_VIA)[keyof typeof DISPLAY_VIA];

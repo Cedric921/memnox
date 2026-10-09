@@ -9,7 +9,12 @@ import {
   type SessionStart,
   type StartableAgent,
 } from '@memnox/core';
-import { resolveInstalledApp } from './app-tools';
+import { installedAppNamed, resolveInstalledApp } from './app-tools';
+import {
+  multiplexerNamed,
+  runningMultiplexer,
+  type MultiplexerName,
+} from './multiplexer';
 import { textArg, type SessionToolDeps, type ToolArgs } from './read-tools';
 import { lastSurface, START_SURFACE, type KeptSurface } from './start-surface';
 
@@ -24,12 +29,29 @@ export const PLACE = {
   EDITOR: 'editor',
   /** They named an editor that is not installed, which is said rather than started elsewhere. */
   NO_EDITOR: 'no-editor',
+  /** A new window of the tmux or WezTerm running here. */
+  PANE: 'pane',
+  /** A new window of another terminal app they named, such as Ghostty or Warp. */
+  TERMINAL_APP: 'terminal-app',
+  /** They named a terminal that is not installed, or a tmux that is not running. */
+  NO_TERMINAL: 'no-terminal',
 } as const;
 
 /** Where a new session runs: a terminal tab, the agent's desktop app, or a terminal inside an editor. */
 type Place =
-  | { kind: typeof PLACE.APP | typeof PLACE.TERMINAL | typeof PLACE.NO_EDITOR }
-  | { kind: typeof PLACE.EDITOR; editor: EditorApp; path: string };
+  | {
+      kind:
+        | typeof PLACE.APP
+        | typeof PLACE.TERMINAL
+        | typeof PLACE.NO_EDITOR
+        | typeof PLACE.NO_TERMINAL;
+    }
+  | { kind: typeof PLACE.EDITOR; editor: EditorApp; path: string }
+  | { kind: typeof PLACE.PANE; multiplexer: MultiplexerName }
+  | { kind: typeof PLACE.TERMINAL_APP; path: string };
+
+/** The terminals the voice already opens a tab in, by the names people call them. */
+const OWN_TERMINALS = /^(iterm2?|terminal|the terminal|a terminal|terminal app)$/i;
 
 /**
  * The editor they named, then the desktop app when they said so, then where they last had this
@@ -42,13 +64,29 @@ export async function placeFor(
   agent: StartableAgent,
 ): Promise<Place> {
   const editorSaid = textArg(args, 'editor');
+  // The Claude Code panel lives in an editor, the first one installed when they named none.
+  if (
+    textArg(args, 'panel') === 'true' &&
+    (editorSaid === undefined || editorSaid === 'false')
+  )
+    return inEditor(deps, null) ?? { kind: PLACE.NO_EDITOR };
   if (editorSaid !== undefined && editorSaid !== 'false') {
     const editor = editorSaid === 'true' ? null : editorNamed(editorSaid);
     return inEditor(deps, editor) ?? { kind: PLACE.NO_EDITOR };
   }
+  const terminalSaid = textArg(args, 'terminal');
+  if (terminalSaid !== undefined)
+    return terminalNamed(deps, terminalSaid) ?? { kind: PLACE.NO_TERMINAL };
   const said = textArg(args, 'app');
   if (said !== undefined) return { kind: said === 'true' ? PLACE.APP : PLACE.TERMINAL };
   const last = await lastSurface(deps.home, agent);
+  if (
+    last?.surface === START_SURFACE.PANE ||
+    last?.surface === START_SURFACE.TERMINAL_APP
+  ) {
+    const again = terminalNamed(deps, last.pane ?? last.terminal ?? '');
+    if (again !== null) return again;
+  }
   if (last?.surface === START_SURFACE.EDITOR) {
     return inEditor(deps, last.editor ?? null) ?? { kind: PLACE.TERMINAL };
   }
@@ -56,6 +94,18 @@ export async function placeFor(
     last?.surface === START_SURFACE.APP &&
     (deps.resolveApp ?? resolveInstalledApp)(agent) !== null;
   return { kind: appThere ? PLACE.APP : PLACE.TERMINAL };
+}
+
+/** The terminal they named: a running tmux or WezTerm, iTerm or Terminal, or another terminal app installed here. */
+function terminalNamed(deps: SessionToolDeps, said: string): Place | null {
+  if (OWN_TERMINALS.test(said.trim())) return { kind: PLACE.TERMINAL };
+  const multiplexer = multiplexerNamed(said);
+  if (multiplexer !== null)
+    return runningMultiplexer(multiplexer, deps.panes) === null
+      ? null
+      : { kind: PLACE.PANE, multiplexer };
+  const path = said.startsWith('/') ? said : (deps.findApp ?? installedAppNamed)(said);
+  return path === null || !existsSync(path) ? null : { kind: PLACE.TERMINAL_APP, path };
 }
 
 /** The editor named, or with none named the first installed, or null when it is not on this Mac. */
@@ -81,6 +131,9 @@ function resolveInstalledEditor(editor: EditorApp): string | null {
 /** Where to start this agent next time, which is where it started now. */
 export function surfaceOf(deps: SessionToolDeps, start: SessionStart): KeptSurface {
   if (start.app !== undefined) return { surface: START_SURFACE.APP };
+  if (start.pane !== undefined) return { surface: START_SURFACE.PANE, pane: start.pane };
+  if (start.terminal !== undefined)
+    return { surface: START_SURFACE.TERMINAL_APP, terminal: start.terminal };
   const editor = editorOf(deps, start);
   return editor === null
     ? { surface: START_SURFACE.TERMINAL }

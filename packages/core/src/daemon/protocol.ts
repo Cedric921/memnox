@@ -6,7 +6,7 @@ import type { DecisionEffect } from '../constants/decision.constants';
 import type { RunTally } from '../session/notices';
 import type { TurnTests } from '../session/turn-tests';
 import type { DeliveryProof, Sight } from './delivery';
-import type { DisplayKind } from './display';
+import type { DisplayKind, DisplayVia } from './display';
 import type {
   ExtensionEventFields,
   ExtensionRequestFields,
@@ -200,7 +200,7 @@ export interface DaemonAskChunk {
   tool?: string;
 }
 
-export { DISPLAY, type DisplayKind } from './display';
+export { DISPLAY, DISPLAY_VIA, type DisplayKind, type DisplayVia } from './display';
 
 /** Who said a line of a session's conversation. */
 export const SPEAKER = {
@@ -357,6 +357,8 @@ export interface DaemonEvent extends ExtensionEventFields {
   draft?: MailDraft;
   /** On APP, the app's links opened in order after `host.appPath`, and what it reads as it opens. */
   app?: { links: string[]; env?: Record<string, string> };
+  /** On LAUNCH, a terminal app or an editor's agent panel rather than a terminal tab or an editor's own terminal. */
+  via?: DisplayVia;
   /** On a PROPOSAL of a rule, the rule and where it could go, so the person picks a place before Touch ID. */
   rule?: RuleDraft;
   /**

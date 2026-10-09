@@ -8,6 +8,7 @@ import {
   wentIn,
   DESKTOP_APPS,
   DISPLAY,
+  DISPLAY_VIA,
   DisplayRequests,
   isStartableAgent,
   type DisplayDelivery,
@@ -59,7 +60,9 @@ export async function typeInAppTool(
   if (message === undefined) return { typed: false, said: NEEDS_MESSAGE };
   const named = textArg(args, 'app');
   const agent = textArg(args, 'agent') ?? (named === undefined ? 'claude-code' : named);
-  if (!isStartableAgent(agent)) return typeInNamedApp(deps, named ?? agent, message);
+  const newChat = textArg(args, 'new_chat') === 'true';
+  if (!isStartableAgent(agent))
+    return typeInNamedApp(deps, named ?? agent, message, newChat);
   const resolve = deps.resolveApp ?? resolveInstalledApp;
   const appPath = resolve(agent);
   if (appPath === null) return { typed: false, ...noApp(agent, resolve) };
@@ -71,6 +74,7 @@ export async function typeInAppTool(
     appPath,
     links: [],
     typed: message.split(/\r?\n/).join(' ').trim().slice(0, MOST_MESSAGE_CHARS),
+    ...(newChat ? { newChat } : {}),
     at: moment,
   });
   const result = openedAs(delivery, true);
@@ -86,6 +90,8 @@ interface AppShow {
   env?: Record<string, string>;
   links: string[];
   typed?: string;
+  /** A new chat first, rather than typing into the one open. */
+  newChat?: boolean;
   at: string;
 }
 
@@ -104,10 +110,58 @@ async function shown(
     ...(show.appPath === undefined ? {} : { appPath: show.appPath }),
     links: show.links,
     ...(show.env === undefined ? {} : { env: show.env }),
+    ...(show.newChat === true ? { via: DISPLAY_VIA.NEW_CHAT } : {}),
     at: show.at,
   });
   return deps.delivered === undefined ? null : deps.delivered(request.id);
 }
+
+/**
+ * An agent's desktop app, or any app the person names, stopped or closed the way they would:
+ * its Stop button or Escape for a reply in progress, and its window closed, the chat kept in the app.
+ */
+export async function controlAppTool(
+  deps: SessionToolDeps,
+  args: ToolArgs,
+): Promise<unknown> {
+  const action = textArg(args, 'action');
+  if (action !== 'stop' && action !== 'close') return { done: false, said: NEEDS_ACTION };
+  const named = textArg(args, 'app') ?? textArg(args, 'agent') ?? 'claude-code';
+  const appPath = isStartableAgent(named)
+    ? (deps.resolveApp ?? resolveInstalledApp)(named)
+    : (deps.findApp ?? installedAppNamed)(named);
+  if (appPath === null) return { done: false, said: noSuchApp(named) };
+  const name = basename(appPath).replace(/\.app$/, '');
+  const request = await new DisplayRequests(deps.home).request({
+    display: action === 'stop' ? DISPLAY.INTERRUPT : DISPLAY.CLOSE,
+    sessionId: `app_${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
+    agent: name,
+    title: name,
+    appPath,
+    at: deps.now().toISOString(),
+  });
+  const delivery = deps.delivered === undefined ? null : await deps.delivered(request.id);
+  if (delivery === null) return { app: name, done: false, said: CONTROL_UNCONFIRMED };
+  if (wentIn(delivery.outcome))
+    return { app: name, done: true, said: action === 'stop' ? APP_STOPPED : APP_CLOSED };
+  return {
+    app: name,
+    done: false,
+    ...(delivery.reason === undefined ? {} : { why: delivery.reason }),
+    said: unlessMacTold(delivery, APP_NOT_CONTROLLED),
+  };
+}
+
+const NEEDS_ACTION =
+  'Pass action: "stop" for a reply in progress, or "close" for its window.';
+const CONTROL_UNCONFIRMED =
+  'Handed to the Mac, which has not said it worked yet. Say you asked it to; never that it is done.';
+const APP_STOPPED =
+  'Its reply in progress was stopped, and the chat is as it was. Say it is stopped in a few words.';
+const APP_CLOSED =
+  'Its window is closed; the app keeps the chat, so it can be opened again. Say it is closed in a few words.';
+const APP_NOT_CONTROLLED =
+  'The Mac could not do it: why says the reason. Say sorry in a few words and the reason in plain words.';
 
 /** What the brain may say, from what the Mac reported, so words never typed are never called sent. */
 function openedAs(
@@ -137,6 +191,7 @@ async function typeInNamedApp(
   deps: SessionToolDeps,
   name: string,
   message: string,
+  newChat: boolean,
 ): Promise<unknown> {
   const appPath = (deps.findApp ?? installedAppNamed)(name);
   if (appPath === null) return { typed: false, said: noSuchApp(name) };
@@ -148,6 +203,7 @@ async function typeInNamedApp(
     appPath,
     links: [],
     typed: message.split(/\r?\n/).join(' ').trim().slice(0, MOST_MESSAGE_CHARS),
+    ...(newChat ? { newChat } : {}),
     at: deps.now().toISOString(),
   });
   const result = openedAs(delivery, true);

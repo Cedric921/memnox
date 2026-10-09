@@ -3,10 +3,10 @@ import { accessSync, constants, existsSync, readdirSync, type Dirent } from 'nod
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join } from 'node:path';
 import {
-  wentIn,
   DESKTOP_APPS,
   DISPLAY,
   DISPLAY_TEXT_LIMIT,
+  DISPLAY_VIA,
   DisplayRequests,
   INSTALL_PLACES,
   isStartableAgent,
@@ -14,17 +14,15 @@ import {
   SessionStarts,
   STARTABLE_AGENT,
   startCommand,
-  type DisplayDelivery,
   type SessionStart,
   type StartableAgent,
   WorkBriefs,
 } from '@memnox/core';
 import { noApp, openAppStart, resolveInstalledApp } from './app-tools';
-import { unlessMacTold } from './mac-told';
+import { launched, startInPane, startInPanel } from './start-routes';
 import { mainCheckoutOf } from './main-checkout';
 import { keepSurface } from './start-surface';
 import { editorName, PLACE, placeFor, surfaceOf } from './start-place';
-import { noteFocus } from './focus';
 import { textArg, type SessionToolDeps, type ToolArgs } from './read-tools';
 import { withBrief } from './work-tools';
 
@@ -45,6 +43,7 @@ export async function proposeStartTool(
   if (!isStartableAgent(agent)) return { proposed: false, said: ONLY_KNOWN_AGENTS };
   const place = await placeFor(deps, args, agent);
   if (place.kind === PLACE.NO_EDITOR) return { proposed: false, said: NO_EDITOR };
+  if (place.kind === PLACE.NO_TERMINAL) return { proposed: false, said: NO_TERMINAL };
   const inApp = place.kind === PLACE.APP;
   const resolve = resolverFor(deps, inApp);
   const command = resolve(agent);
@@ -66,7 +65,7 @@ export async function proposeStartTool(
     ...(textArg(args, 'hold_credentials') === 'true' ? { holdCredentials: true } : {}),
     ...(brief === undefined ? {} : { brief }),
     ...(inApp ? { app: command } : {}),
-    ...(place.kind === PLACE.EDITOR ? { editor: place.path } : {}),
+    ...whereItStarts(place, agent, args),
     ...(said === undefined ? {} : { said }),
     at: deps.now().toISOString(),
   });
@@ -74,6 +73,22 @@ export async function proposeStartTool(
     ...readBackOf(deps, start, chosen, task),
     ...(found === undefined ? {} : { found }),
   };
+}
+
+/** Where the start runs beyond a terminal tab: an editor or its Claude Code panel, a pane, or a terminal app. */
+function whereItStarts(
+  place: Awaited<ReturnType<typeof placeFor>>,
+  agent: StartableAgent,
+  args: ToolArgs,
+): Pick<SessionStart, 'editor' | 'panel' | 'pane' | 'terminal'> {
+  if (place.kind === PLACE.EDITOR) {
+    // Only Claude Code has a panel Memnox can start a conversation in.
+    const panel = agent === 'claude-code' && textArg(args, 'panel') === 'true';
+    return { editor: place.path, ...(panel ? { panel } : {}) };
+  }
+  if (place.kind === PLACE.PANE) return { pane: place.multiplexer };
+  if (place.kind === PLACE.TERMINAL_APP) return { terminal: place.path };
+  return {};
 }
 
 /** The agent's command, or with app "true" its desktop app, each found where it is installed. */
@@ -104,7 +119,16 @@ function readBackOf(
       : { in: `the ${DESKTOP_APPS[start.agent].name} app` }),
     ...(start.editor === undefined
       ? {}
-      : { in: `a new terminal in ${editorName(deps, start)}` }),
+      : {
+          in:
+            start.panel === true
+              ? `a new conversation in the Claude Code panel in ${editorName(deps, start)}`
+              : `a new terminal in ${editorName(deps, start)}`,
+        }),
+    ...(start.pane === undefined ? {} : { in: `a new ${start.pane} window` }),
+    ...(start.terminal === undefined
+      ? {}
+      : { in: `a new ${basename(start.terminal, '.app')} window` }),
     ...(start.holdCredentials === true ? { holdsCredentials: true } : {}),
     said: READ_BACK,
   };
@@ -172,6 +196,8 @@ export async function startSessionTool(
   const line = startCommand(start);
   // Cut short, the quotes would not close, so a line too long for the screen is never typed at all.
   if (line.length > DISPLAY_TEXT_LIMIT) return { started: false, said: TOO_LONG };
+  if (start.pane !== undefined) return startInPane(deps, start, line, moment);
+  if (start.panel === true) return startInPanel(deps, start, moment);
   const request = await new DisplayRequests(deps.home).request({
     display: DISPLAY.LAUNCH,
     sessionId: start.id,
@@ -181,54 +207,14 @@ export async function startSessionTool(
     cwd: start.repository,
     // The Mac opens this editor on the repository and its Memnox extension starts the agent there.
     ...(start.editor === undefined ? {} : { appPath: start.editor }),
+    // Or opens a window of this terminal app on the repository and types the line into it.
+    ...(start.terminal === undefined
+      ? {}
+      : { appPath: start.terminal, via: DISPLAY_VIA.TERMINAL_APP }),
     at: moment,
   });
   const delivery = deps.delivered === undefined ? null : await deps.delivered(request.id);
   return launched(deps, start, delivery, moment);
-}
-
-/** What the Mac reported for the tab, checked against whether the agent itself came up. */
-async function launched(
-  deps: SessionToolDeps,
-  start: SessionStart,
-  delivery: DisplayDelivery | null,
-  moment: string,
-): Promise<Record<string, unknown>> {
-  const handed = delivery === null || wentIn(delivery.outcome);
-  if (handed) await noteFocus(deps, start, 'started');
-  // Typed is not running: a missing command or a shell prompt left waiting looks the same to the Mac.
-  const seen =
-    handed && deps.startSeen !== undefined
-      ? await deps.startSeen(start.repository, moment)
-      : null;
-  return {
-    repository: basename(start.repository),
-    ...(start.editor === undefined ? {} : { in: editorName(deps, start) }),
-    ...startedAs(
-      delivery,
-      seen,
-      start.editor === undefined ? STARTED : STARTED_IN_EDITOR,
-    ),
-  };
-}
-
-/** What the brain may say, from what the Mac reported, so a tab that never opened is never called working. */
-function startedAs(
-  delivery: DisplayDelivery | null,
-  seen: boolean | null,
-  started: string,
-): Record<string, unknown> {
-  if (seen === true) return { started: true, said: started };
-  if (delivery === null) return { started: true, said: UNCONFIRMED };
-  if (wentIn(delivery.outcome))
-    return seen === false
-      ? { started: true, confirmed: false, said: NOT_SEEN }
-      : { started: true, said: started };
-  return {
-    started: false,
-    ...(delivery.reason === undefined ? {} : { why: delivery.reason }),
-    said: unlessMacTold(delivery, NOT_STARTED),
-  };
 }
 
 const TOO_LONG =
@@ -290,16 +276,8 @@ const READ_BACK =
   'Nothing has started. Read it back once, as one whole sentence that ends in a courteous question, saying the app when in names one, such as "Shall I open the Codex app in memnox runtime to review your changes?", "Shall I start Codex in memnox macos to review the changes?" or "I can start Claude Code in memnox cloud on the failing auth test. Would you like me to go ahead?", varying the words. Say nothing before it and nothing after the question. Call start_session with this id only after they say yes. When they asked for exactly this plainly, the agent, the repository and what to do, or only to open an app such as "open Hermes", or they already said yes to it or corrected it to this, skip the read back: their asking is their yes, so call start_session with this id now. Never ask the same thing twice.';
 const GONE =
   'That start is gone or more than five minutes old. Read it back again with propose_start.';
-const UNCONFIRMED =
-  'Handed to the Mac to open a tab and start it, and neither the Mac nor the agent has said it is running yet. Say you asked for it and it has not come up yet; never that it is starting or working.';
-const NOT_SEEN =
-  'The Mac typed the line that starts it into a new terminal, but the agent has not shown itself running there yet. Say in one sentence that you typed it in and it has not come up yet, and that they can ask you to check; never say it is starting or working.';
-const NOT_STARTED =
-  'The Mac could not open the tab and start it. Say sorry in a few words and say why in plain words; nothing started.';
-const STARTED =
-  'A new terminal tab opened in that repository and the agent is starting on the task. Say so in a few words, and offer to tell them when it finishes.';
-const STARTED_IN_EDITOR =
-  'A new terminal opened inside the editor named in, on that repository, and the agent is starting on the task there. Say so in a few words, naming the editor, like "Claude Code is starting in VS Code on memnox runtime.", and offer to tell them when it finishes.';
+const NO_TERMINAL =
+  'The terminal they named is not installed on this Mac, or no tmux or WezTerm is running to open a window in, so nothing was proposed. Say so plainly and offer a new terminal tab instead, as a question.';
 const NO_EDITOR =
   'The editor they named is not installed on this Mac, so nothing was proposed. Say so plainly and offer a new terminal tab instead, as a question; never start it anywhere else unasked.';
 

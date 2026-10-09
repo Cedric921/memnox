@@ -1,7 +1,8 @@
 import { execFileSync } from 'node:child_process';
 import { basename } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
-import type { DeliveryProof } from '@memnox/core';
+import { hostOf, type DeliveryProof, type HostProcess, type ShownIn } from '@memnox/core';
+import { processChain } from '@memnox/interceptors';
 
 /**
  * Typing into an agent that runs in a tmux or WezTerm pane, through the multiplexer's own command
@@ -108,6 +109,87 @@ export async function typeIntoPane(
         sent: true,
         proof: { checked: `the words in its ${pane.multiplexer} pane`, seen },
       };
+}
+
+/** The multiplexer a person names, as they say it, or null for anything else. */
+export function multiplexerNamed(said: string): MultiplexerName | null {
+  const name = said.toLowerCase().replace(/[^a-z]/g, '');
+  if (name === 'tmux' || name === 'teamux') return MULTIPLEXER.TMUX;
+  if (name === 'wezterm' || name === 'westerm') return MULTIPLEXER.WEZTERM;
+  return null;
+}
+
+/** Where the multiplexer is installed and answering, or null when none of it is running here. */
+export function runningMultiplexer(
+  multiplexer: MultiplexerName,
+  seams: PaneSeams = NODE_SEAMS,
+): string | null {
+  const asks = multiplexer === MULTIPLEXER.TMUX ? ['list-sessions'] : ['cli', 'list'];
+  return (
+    PROGRAMS[multiplexer].find((program) => seams.run(program, asks) !== null) ?? null
+  );
+}
+
+/** A new window in the running multiplexer, opened in the folder, or null when it would not open. */
+export function openPane(
+  multiplexer: MultiplexerName,
+  folder: string,
+  seams: PaneSeams = NODE_SEAMS,
+): Pane | null {
+  const program = runningMultiplexer(multiplexer, seams);
+  if (program === null) return null;
+  const opened = seams.run(
+    program,
+    multiplexer === MULTIPLEXER.TMUX
+      ? ['new-window', '-c', folder, '-P', '-F', '#{pane_id}']
+      : ['cli', 'spawn', '--cwd', folder],
+  );
+  const id = opened?.trim() ?? '';
+  return id === '' ? null : { multiplexer, id, program };
+}
+
+/** The pane closed, which hangs up on the agent in it as closing a terminal tab does. */
+export function closePane(pane: Pane, seams: PaneSeams = NODE_SEAMS): boolean {
+  return (
+    seams.run(
+      pane.program,
+      pane.multiplexer === MULTIPLEXER.TMUX
+        ? ['kill-pane', '-t', pane.id]
+        : ['cli', 'kill-pane', '--pane-id', pane.id],
+    ) !== null
+  );
+}
+
+/**
+ * The pane brought to the front inside its multiplexer, and the terminal it is seen in: the app and
+ * tab running the tmux client attached to it, or WezTerm itself.
+ */
+export function showPane(
+  pane: Pane,
+  seams: PaneSeams = NODE_SEAMS,
+  chainOf: (pid: number) => HostProcess[] = processChain,
+): ShownIn | null {
+  if (pane.multiplexer === MULTIPLEXER.WEZTERM) {
+    seams.run(pane.program, ['cli', 'activate-pane', '--pane-id', pane.id]);
+    return { app: 'WezTerm' };
+  }
+  seams.run(pane.program, ['select-window', '-t', pane.id]);
+  seams.run(pane.program, ['select-pane', '-t', pane.id]);
+  const session = seams
+    .run(pane.program, ['display-message', '-p', '-t', pane.id, '#{session_name}'])
+    ?.trim();
+  const clients = (
+    seams.run(pane.program, ['list-clients', '-F', '#{client_session} #{client_pid}']) ??
+    ''
+  )
+    .split('\n')
+    .map((line) => line.trim().split(' '))
+    .filter((parts) => parts.length === 2);
+  const client = clients.find(([name]) => name === session) ?? clients[0];
+  const pid = Number(client?.[1]);
+  if (!Number.isInteger(pid) || pid <= 0) return null;
+  const seen = hostOf(chainOf(pid));
+  return seen.app === undefined ? null : seen;
 }
 
 /** Escape in the pane, as the person would press it to stop the agent there. */

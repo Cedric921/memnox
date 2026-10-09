@@ -20,7 +20,7 @@ import { answerQuestionTool } from './question-tool';
 import { proposeRewindTool } from './rewind-proposal';
 import { pauseSessionTool, proposeResumeTool } from './session-actions';
 import { proposeStartTool, startSessionTool } from './start-tools';
-import { typeInAppTool } from './app-tools';
+import { controlAppTool, typeInAppTool } from './app-tools';
 import { walkThroughTool } from './walk-tool';
 import { watchForTool } from './watch-tool';
 import { historyTool } from './history-tool';
@@ -434,6 +434,7 @@ const OPERATOR_CALLS: Record<string, OperatorCall> = {
   propose_start: (deps, _seams, args) => proposeStartTool(deps, args),
   start_session: (deps, _seams, args) => startSessionTool(deps, args),
   type_in_app: (deps, _seams, args) => typeInAppTool(deps, args),
+  control_app: (deps, _seams, args) => controlAppTool(deps, args),
   propose_rewind: (deps, seams, args) =>
     proposeRewindTool(asAgent(deps, args), seams, args),
   send_instruction: (deps, _seams, args) => sendInstructionTool(deps, args),

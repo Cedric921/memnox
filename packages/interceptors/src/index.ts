@@ -31,3 +31,4 @@ export * from './containment-loader';
 export * from './egress-server';
 export * from './egress-relay';
 export * from './fast-intercept';
+export { processChain } from './session-host-note';

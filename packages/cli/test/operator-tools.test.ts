@@ -138,11 +138,11 @@ async function stamp(path: string, moment: string): Promise<void> {
 }
 
 describe('what the operator is offered', () => {
-  it("reads, and writes nothing but a proposal, a pause, a watch, the person's answer to their agent's question, their words typed into an agent's app, a word they were misheard saying, a folder to open, or a request to show or start what the person said yes to", () => {
+  it("reads, and writes nothing but a proposal, a pause, a watch, the person's answer to their agent's question, their words typed into an agent's app, an app they named stopped or closed, a word they were misheard saying, a folder to open, or a request to show or start what the person said yes to", () => {
     for (const tool of OPERATOR_TOOLS) {
       if (tool.annotations.readOnlyHint) continue;
       expect(tool.name).toMatch(
-        /^(propose_|show$|pause_session$|send_instruction$|type_in_app$|answer_question$|watch_for$|walk_through$|start_session$|show_agents$|memnox_command$|traces$|remember_word$|forget_word$|open_folder$)/,
+        /^(propose_|show$|pause_session$|send_instruction$|type_in_app$|control_app$|answer_question$|watch_for$|walk_through$|start_session$|show_agents$|memnox_command$|traces$|remember_word$|forget_word$|open_folder$)/,
       );
     }
   });

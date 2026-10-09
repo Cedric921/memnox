@@ -59,6 +59,8 @@ export interface SessionToolDeps {
   startSeen?: (repository: string, since: string) => Promise<boolean>;
   /** Where an app the person named by voice is installed, or null; absent means the folders apps are kept in. */
   findApp?: (name: string) => string | null;
+  /** Ends an agent's process as closing its terminal would; absent means signalling it for real. */
+  endAgent?: (pid: number) => Promise<boolean>;
   /** How tmux and WezTerm are asked about their panes and typed into; absent means the programs themselves. */
   panes?: PaneSeams;
   /** What the Mac saw for a LOOK, or null when it said nothing in time; absent means waiting on the file. */

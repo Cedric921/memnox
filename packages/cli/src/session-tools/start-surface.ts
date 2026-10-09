@@ -18,6 +18,10 @@ export const START_SURFACE = {
   APP: 'app',
   TERMINAL: 'terminal',
   EDITOR: 'editor',
+  /** A new window of the tmux or WezTerm running here. */
+  PANE: 'pane',
+  /** A new window of another terminal app, such as Ghostty. */
+  TERMINAL_APP: 'terminal-app',
 } as const;
 
 type StartSurface = (typeof START_SURFACE)[keyof typeof START_SURFACE];
@@ -26,6 +30,10 @@ type StartSurface = (typeof START_SURFACE)[keyof typeof START_SURFACE];
 export interface KeptSurface {
   surface: StartSurface;
   editor?: EditorApp;
+  /** tmux or WezTerm, for a pane. */
+  pane?: string;
+  /** The terminal app's bundle, for a terminal app. */
+  terminal?: string;
 }
 
 /** An editor is kept as `editor:vscode`, so a file written before editors still reads. */
@@ -41,6 +49,14 @@ export async function lastSurface(
   const surface = kept?.[agent];
   if (surface === START_SURFACE.APP || surface === START_SURFACE.TERMINAL)
     return { surface };
+  for (const kind of [START_SURFACE.PANE, START_SURFACE.TERMINAL_APP] as const) {
+    const where =
+      surface?.startsWith(`${kind}:`) === true ? surface.slice(kind.length + 1) : '';
+    if (where === '') continue;
+    return kind === START_SURFACE.PANE
+      ? { surface: kind, pane: where }
+      : { surface: kind, terminal: where };
+  }
   const editor = surface?.startsWith(EDITOR_PREFIX)
     ? surface.slice(EDITOR_PREFIX.length)
     : undefined;
@@ -60,9 +76,7 @@ export async function keepSurface(
 ): Promise<void> {
   const path = join(home, MEMNOX_HOME, SURFACE_FILE);
   const all = (await readJsonFile<Record<string, string>>(path)) ?? {};
-  const value =
-    kept.surface === START_SURFACE.EDITOR && kept.editor !== undefined
-      ? `${EDITOR_PREFIX}${kept.editor}`
-      : kept.surface;
+  const where = kept.editor ?? kept.pane ?? kept.terminal;
+  const value = where === undefined ? kept.surface : `${kept.surface}:${where}`;
   await writeJsonFile(path, { ...all, [agent]: value });
 }

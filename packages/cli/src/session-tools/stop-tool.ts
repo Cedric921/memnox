@@ -8,7 +8,7 @@ import {
 } from '@memnox/core';
 import { liveHost } from './live-host';
 import { unlessMacTold } from './mac-told';
-import { paneOn, pressEscapeIn } from './multiplexer';
+import { paneOn, pressEscapeIn, type Pane } from './multiplexer';
 import type { SessionToolDeps } from './read-tools';
 import type { SessionScope } from './session-scope';
 
@@ -23,25 +23,16 @@ export async function stopSession(
 ): Promise<Record<string, unknown>> {
   const recorded = await new SessionHosts(deps.home).read(sessionId);
   const live = recorded === null ? null : liveHost(recorded);
-  const tty = live?.panel === true ? undefined : live?.tty;
-  // An editor's agent panel and a desktop app have no terminal, so there is nowhere to press it.
-  if (tty === undefined) return { ...scope, stopped: false, said: NO_TERMINAL };
-  // A tmux or WezTerm pane takes the key from its own command line, whatever app shows it.
-  const pane = DIRECT_APPS.test(live?.app ?? '') ? null : paneOn(tty, deps.panes);
-  if (pane !== null) {
-    const pressed = pressEscapeIn(pane, deps.panes);
-    if (pressed) await turnOver(deps, scope, sessionId);
-    return {
-      ...scope,
-      ...(pressed
-        ? { stopped: true, said: STOPPED }
-        : {
-            stopped: false,
-            why: `${pane.multiplexer} would not take the key`,
-            said: NOT_STOPPED,
-          }),
-    };
-  }
+  const inPanel = live?.panel === true;
+  const tty = inPanel ? undefined : live?.tty;
+  // An editor's agent panel is stopped by the Mac in its conversation; nothing else without a terminal can be.
+  if (tty === undefined && !inPanel)
+    return { ...scope, stopped: false, said: NO_TERMINAL };
+  const pane =
+    tty === undefined || DIRECT_APPS.test(live?.app ?? '')
+      ? null
+      : paneOn(tty, deps.panes);
+  if (pane !== null) return stoppedInPane(deps, scope, sessionId, pane);
   const request = await new DisplayRequests(deps.home).request({
     display: DISPLAY.INTERRUPT,
     sessionId,
@@ -69,6 +60,25 @@ function turnOver(
   );
 }
 
+/** A tmux or WezTerm pane takes the key from its own command line, whatever app shows it. */
+async function stoppedInPane(
+  deps: SessionToolDeps,
+  scope: SessionScope,
+  sessionId: string,
+  pane: Pane,
+): Promise<Record<string, unknown>> {
+  if (!pressEscapeIn(pane, deps.panes)) {
+    return {
+      ...scope,
+      stopped: false,
+      why: `${pane.multiplexer} would not take the key`,
+      said: NOT_STOPPED,
+    };
+  }
+  await turnOver(deps, scope, sessionId);
+  return { ...scope, stopped: true, said: STOPPED };
+}
+
 /** What the brain may say, from what the Mac reported, so an agent still working is never called stopped. */
 function stoppedAs(delivery: DisplayDelivery | null): Record<string, unknown> {
   if (delivery === null) return { stopped: false, said: STOP_UNCONFIRMED };
@@ -90,4 +100,4 @@ const STOP_UNCONFIRMED =
 const NOT_STOPPED =
   'The Mac could not press Escape in its terminal, so it is still going: why says the reason. Say sorry in a few words and the reason in plain words, then offer as one question to pause it, which holds it at its next step, or to close its tab now.';
 const NO_TERMINAL =
-  'It runs where there is no terminal to press Escape in, such as an editor panel or a desktop app, so nothing was stopped. Say so in a sentence and offer as one question to pause it, which holds it at its next step.';
+  'It runs where Memnox cannot press Escape, such as a desktop app it has no window for, so nothing was stopped. Say so in a sentence and offer as one question to pause it, which holds it at its next step.';

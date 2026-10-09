@@ -6,6 +6,7 @@ import type {
   TraceCard,
   CardFile,
   DisplayKind,
+  DisplayVia,
   WalkPage,
 } from '../daemon/protocol';
 import type { Delivery, DeliveryProof, Sight } from '../daemon/delivery';
@@ -63,6 +64,10 @@ export interface DisplayRequest {
   appPath?: string;
   links?: string[];
   env?: Record<string, string>;
+  /** On LAUNCH, a terminal app or an editor's agent panel rather than a terminal tab. */
+  via?: DisplayVia;
+  /** On FOCUS, the terminal a tmux or WezTerm pane is seen in, which stands in for where it runs. */
+  shownIn?: ShownIn;
   requestedAt: string;
   expiresAt: string;
   /** Set once the Mac says how typing it ended; a delivered request is never shown again. */
@@ -99,7 +104,29 @@ export interface DisplayInput {
   appPath?: string;
   links?: string[];
   env?: Record<string, string>;
+  via?: DisplayVia;
+  shownIn?: ShownIn;
   at: string;
+}
+
+/** The app and tab a person sees a session in, when that is not where its process runs. */
+export interface ShownIn {
+  app?: string;
+  appPath?: string;
+  tty?: string;
+}
+
+/** The app a request opens or shows the session in, and how it reaches it. */
+function whereItGoes(
+  input: DisplayInput,
+): Pick<DisplayRequest, 'appPath' | 'links' | 'env' | 'via' | 'shownIn'> {
+  return {
+    ...(input.appPath === undefined ? {} : { appPath: input.appPath }),
+    ...(input.links === undefined ? {} : { links: input.links.slice(0, APP_LINKS) }),
+    ...(input.env === undefined ? {} : { env: input.env }),
+    ...(input.via === undefined ? {} : { via: input.via }),
+    ...(input.shownIn === undefined ? {} : { shownIn: input.shownIn }),
+  };
 }
 
 export class DisplayRequests {
@@ -139,9 +166,7 @@ export class DisplayRequests {
       ...(input.trace === undefined
         ? {}
         : { trace: { ...input.trace, rows: input.trace.rows.slice(0, TRACE_ROWS) } }),
-      ...(input.appPath === undefined ? {} : { appPath: input.appPath }),
-      ...(input.links === undefined ? {} : { links: input.links.slice(0, APP_LINKS) }),
-      ...(input.env === undefined ? {} : { env: input.env }),
+      ...whereItGoes(input),
       requestedAt: input.at,
       expiresAt: new Date(Date.parse(input.at) + DISPLAY_TTL_MS).toISOString(),
     };

@@ -10,9 +10,9 @@ import {
   SessionTurns,
   type CardExcerpt,
   type CardFile,
-  type DisplayDelivery,
   type DisplayKind,
   type SessionHost,
+  type ShownIn,
 } from '@memnox/core';
 import { withEvents } from '../event-store';
 import { changesTool, repositoriesOf } from './changes-tool';
@@ -20,10 +20,12 @@ import { mainCheckoutOf } from './main-checkout';
 import { noteFocus } from './focus';
 import { textArg, type SessionToolDeps, type ToolArgs } from './read-tools';
 import type { RewindSeams } from './rewind-tool';
-import { liveHost } from './live-host';
 import { resolveInstalledApp } from './app-tools';
 import { scopeOf, type SessionScope } from './session-scope';
 import { stopSession } from './stop-tool';
+import { closeSessionNow } from './close-tool';
+import { liveHost } from './live-host';
+import { paneOn, showPane } from './multiplexer';
 
 /**
  * Shows the person a session: its own window brought forward, or a card with its summary in
@@ -98,8 +100,10 @@ async function putUp(
   // A session in an agent's own desktop app has no tab or folder, so the app itself is what comes forward.
   const appPath = host === null ? desktopAppOf(deps, sessionId) : null;
   const code = display === DISPLAY.CARD ? await codeFor(deps, seams, sessionId) : {};
+  const shownIn = display === DISPLAY.FOCUS ? paneShownIn(deps, host) : null;
   const request = await new DisplayRequests(deps.home).request({
     ...code,
+    ...(shownIn === null ? {} : { shownIn }),
     display,
     sessionId: sessionId,
     agent: scope.agent,
@@ -116,6 +120,16 @@ async function putUp(
   await noteFocus(deps, scope, 'opened');
   if (failed !== null) return { ...scope, showing, ...failed };
   return { ...scope, showing, ...shownAs(display, host?.app), ...onCard(code) };
+}
+
+/** For a session in a tmux or WezTerm pane, the pane selected and the terminal it is seen in. */
+function paneShownIn(deps: SessionToolDeps, host: SessionHost | null): ShownIn | null {
+  const live = host === null ? null : liveHost(host);
+  const app = live?.app ?? live?.appPath ?? '';
+  if (live?.tty === undefined || /iterm|terminal|code|cursor|windsurf/i.test(app))
+    return null;
+  const pane = paneOn(live.tty, deps.panes);
+  return pane === null ? null : showPane(pane, deps.panes);
 }
 
 /** A few seconds, since bringing a window forward is quick and the voice is waiting to speak. */
@@ -154,40 +168,11 @@ async function closeSession(
   const showing = await aboutSession(deps, sessionId);
   if (showing['turn'] === 'in progress' && !now)
     return { ...scope, closed: false, said: MID_TURN };
-  const recorded = await new SessionHosts(deps.home).read(sessionId);
-  // The terminal it runs in now, which an editor's extension checks its close link against.
-  const tty = recorded === null ? undefined : liveHost(recorded)?.tty;
-  const request = await new DisplayRequests(deps.home).request({
-    display: DISPLAY.CLOSE,
-    sessionId,
-    agent: scope.agent,
-    title: DEFAULT_TITLE,
-    ...(tty === undefined ? {} : { tty }),
-    at: deps.now().toISOString(),
-  });
-  const delivery = deps.delivered === undefined ? null : await deps.delivered(request.id);
-  return { ...scope, showing, ...closedAs(delivery) };
-}
-
-/** What the brain may say, from what the Mac reported, so a tab still open is never called closed. */
-function closedAs(delivery: DisplayDelivery | null): Record<string, unknown> {
-  if (delivery === null) return { closed: true, said: CLOSE_UNCONFIRMED };
-  if (wentIn(delivery.outcome)) return { closed: true, said: CLOSED };
-  return {
-    closed: false,
-    ...(delivery.reason === undefined ? {} : { why: delivery.reason }),
-    said: NOT_CLOSED,
-  };
+  return { ...scope, showing, ...(await closeSessionNow(deps, scope, sessionId)) };
 }
 
 const MID_TURN =
   'Nothing was closed yet: it is in the middle of a turn, and closing its tab ends the agent there, though its conversation is kept. Ask once, in one short question, whether to stop it first and keep the tab, which is show with display stop, or close it now anyway, which is show with display close and now "true"; do which they say at once. Never refuse it twice.';
-const CLOSED =
-  'Its live window and its terminal tab are closed, which ended the agent there; its conversation is kept and can be resumed. Say it is closed in a few words.';
-const CLOSE_UNCONFIRMED =
-  'Handed to the Mac to close its window and tab, which has not confirmed yet. Say you are closing it; never that it is closed.';
-const NOT_CLOSED =
-  'Its window on their screen is closed, but its own tab or terminal is still open: why says the reason. Say exactly that in one sentence, the reason in plain words, never that nothing closed and never that it is all closed. When closing several, say it once for all of them together, not once per session.';
 
 /** What names no session: every session up at once, or every card and window taken down. */
 function withoutSession(
