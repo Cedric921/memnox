@@ -5,6 +5,7 @@ import { AddressLimit, addressForms } from '../src/daemon/address-limit';
 import { BrainTurns } from '../src/daemon/brain-turns';
 import { SpokenFilter } from '../src/daemon/spoken-filter';
 import { streamTurn, withoutHolds } from '../src/daemon/stream-turn';
+import { actedNote } from '../src/daemon/voice-ask';
 import { isAgentProgram, waitingRoute } from '../src/session-tools/instruct-tools';
 
 function spoken(pieces: readonly (string | null)[]): string {
@@ -323,5 +324,32 @@ describe('which program in a terminal is the agent', () => {
     expect(isAgentProgram('/opt/homebrew/bin/node')).toBe(true);
     expect(isAgentProgram('-zsh')).toBe(false);
     expect(isAgentProgram('/bin/zsh')).toBe(false);
+  });
+});
+
+describe('a reply cut off after it acted', () => {
+  it('says what it did, so the words that follow are never acted on twice', async () => {
+    const chunks: BrainChunk[] = [
+      { kind: BRAIN_CHUNK.TOOL, tool: 'mcp__memnox-operator__sessions' },
+      { kind: BRAIN_CHUNK.TOOL, tool: 'mcp__memnox-operator__type_in_app' },
+      { kind: BRAIN_CHUNK.CANCELLED },
+    ];
+    const brain: Brain = {
+      name: 'claude',
+      async *ask() {
+        yield* chunks;
+      },
+      close: () => undefined,
+      cancel: () => undefined,
+      warm: async () => undefined,
+    };
+    const turn = await streamTurn(
+      new BrainTurns(() => brain, 60_000),
+      'type it',
+      () => undefined,
+    );
+    expect(turn.ended).toBe(false);
+    expect(turn.acted).toEqual(['type_in_app']);
+    expect(actedNote(turn.acted)).toContain('already called type_in_app');
   });
 });

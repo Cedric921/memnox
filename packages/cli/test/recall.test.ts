@@ -114,6 +114,7 @@ describe('an offer and the answer to it', () => {
       answered: 'Done.',
       ended: true,
       held: false,
+      acted: [],
     });
     expect(
       (

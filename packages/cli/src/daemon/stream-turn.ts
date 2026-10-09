@@ -2,6 +2,7 @@ import type { DaemonAskChunk } from '@memnox/core';
 import { BRAIN_CHUNK } from '../operator/brain';
 import type { BrainTurns } from './brain-turns';
 import { OpeningHold } from './opening-hold';
+import { acts } from './speculation';
 import { SpokenFilter } from './spoken-filter';
 
 /**
@@ -14,15 +15,16 @@ export async function streamTurn(
   send: (chunk: DaemonAskChunk) => void,
   unsaid: readonly string[] = [],
   wanted?: () => boolean,
-): Promise<{ answered: string; ended: boolean; held: boolean }> {
+): Promise<{ answered: string; ended: boolean; held: boolean; acted: string[] }> {
   let held = false;
   let cut = false;
-  // Set once the brain ended the conversation after speaking, so a second wording of it is never said.
-  let ending = false;
+  let ending = false; // Set once the brain ended it after speaking, so a second wording is never said.
   const answered: string[] = [];
+  const acted: string[] = [];
   const spoken = new SpokenFilter(unsaid);
   const opening = openingFor(answered, send);
   const each = (arrived: DaemonAskChunk): void => {
+    if (acts(arrived)) acted.push(bareName(arrived)); // It ran whether or not the chunk is passed on.
     if (held) return;
     if (arrived.kind === BRAIN_CHUNK.TEXT) {
       if (!ending) opening.push(spoken.text(arrived.text ?? ''));
@@ -45,7 +47,15 @@ export async function streamTurn(
     turns.cancel();
   };
   await turns.ask(asked, each, wanted);
-  return { answered: answered.join(''), ended: !held && !cut, held };
+  return { answered: answered.join(''), ended: !held && !cut, held, acted };
+}
+
+/** What separates an MCP tool's server prefix from its own name, as in mcp__memnox-operator__show. */
+const TOOL_PREFIX_SEPARATOR = '__';
+
+/** A tool by its own name, which is how a reply cut off after acting says what it already did. */
+function bareName(chunk: DaemonAskChunk): string {
+  return (chunk.tool ?? '').split(TOOL_PREFIX_SEPARATOR).pop() ?? '';
 }
 
 /**

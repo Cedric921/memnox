@@ -54,6 +54,11 @@ const HELD_WITHIN_MS = 60_000;
  * sentence said with pauses: building one reads every session, and doing it twice made an answer wait.
  */
 const CONTEXT_REUSE_MS = 5_000;
+
+/** Said ahead of the next words when a reply was cut off after it had already done something. */
+export function actedNote(tools: readonly string[]): string {
+  return `[Memnox, not the person] Your last reply was cut off when they spoke, after you had already called ${tools.join(', ')}. That ran and is done: never call it again for the same request. Answer only what their new words add, and when they add nothing new, say in a few words that it is done.`;
+}
 /** A request this long already says what to do, so a hold on it is a misread and never waits on them. */
 const WHOLE_REQUEST_WORDS = 8;
 
@@ -93,6 +98,8 @@ export class VoiceAsk {
 
   /** When the last answered turn held for the rest, so the next one may not hold again. */
   private heldAt: number | null = null;
+  /** What the last reply did before it was cut off, kept until a reply that reached its end has been told. */
+  private actedBeforeCut: string[] = [];
   /** The context built last and when, shared by a guess and the question after it until a turn is kept. */
   private building: {
     at: number;
@@ -204,7 +211,13 @@ export class VoiceAsk {
     // Best effort: without it the brain looks the sessions up itself, only slower.
     const { context, sessions } = await this.contextFor(moment);
     trace.contextBuilt(moment, sessions);
-    const whole = [overtaken ? OVERTAKEN_NOTE : '', said, finished ? FINISHED_NOTE : '']
+    const acted = this.actedBeforeCut;
+    const whole = [
+      overtaken ? OVERTAKEN_NOTE : '',
+      acted.length === 0 ? '' : actedNote(acted),
+      said,
+      finished ? FINISHED_NOTE : '',
+    ]
       .filter((part) => part !== '')
       .join('\n');
     await trace.brainStarted();
@@ -238,6 +251,10 @@ export class VoiceAsk {
       seams.send({ kind: BRAIN_CHUNK.DONE });
     }
     await trace.finish();
+    // Told once a reply that heard it ran to its end; a reply cut off after acting is remembered for the next.
+    if (heard && turn.ended) this.actedBeforeCut = [];
+    if (!turn.ended && !turn.held && turn.acted.length > 0)
+      this.actedBeforeCut = [...new Set([...acted, ...turn.acted])];
     return heard
       ? { text: turn.answered, ended: turn.ended, held: turn.held, moment, names }
       : undefined;
