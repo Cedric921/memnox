@@ -1,7 +1,7 @@
 import { closeSync, openSync, readSync, realpathSync, statSync } from 'node:fs';
 import { basename, dirname, extname, isAbsolute, join, relative, sep } from 'node:path';
 import { ACTION, type FileChange, type MemnoxEvent } from '@memnox/core';
-import { repositoryRootOf } from '@memnox/interceptors';
+import { repositoryAround } from './repository-root';
 
 /**
  * Which changed files a session wrote. An agent's own edit tool names the file; a shell command
@@ -111,7 +111,7 @@ export function repositoriesWritten(touches: readonly Touch[]): string[] {
   const roots: string[] = [];
   for (const touch of [...touches].reverse()) {
     if (!isAbsolute(touch.path)) continue;
-    const root = repositoryRootOf(touch.folder ? touch.path : dirname(touch.path));
+    const root = repositoryAround(touch.folder ? touch.path : dirname(touch.path));
     if (root !== null && !roots.includes(root)) roots.push(root);
     if (roots.length >= MOST_PLACES) break;
   }
