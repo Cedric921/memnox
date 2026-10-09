@@ -140,7 +140,7 @@ export function heardWordsContext(words: readonly HeardWord[]): string {
 export function profileContext(facts: readonly ProfileFact[], offered: boolean): string {
   if (facts.length === 0) {
     return offered
-      ? ''
+      ? '[Memnox, not the person] You know nothing about them yet. When they ask what you know about them, say so in a few words and offer to ask a few quick questions; remember_about_me keeps what they tell you.'
       : '[Memnox, not the person] You know nothing about them yet. Once, as the last sentence of this reply, and only when nothing failed, nothing needs them and they do not sound rushed, offer in one sentence to learn a little about them, like "May I ask you a few quick questions, so I know what matters to you?". This is the only time it is offered; if they decline, leave it.';
   }
   const lines = facts.map((each) => `${each.topic}: "${each.fact}"`);

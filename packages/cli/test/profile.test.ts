@@ -71,7 +71,10 @@ describe('what the voice knows about the person it works for', () => {
     expect(profileContext([], false)).toContain('May I ask you a few quick questions');
     await noteOffered(deps.home, NOW.toISOString());
     const { facts, offeredAt } = await readProfile(deps.home);
-    expect(profileContext(facts, offeredAt !== undefined)).toBe('');
+    const after = profileContext(facts, offeredAt !== undefined);
+    // Offered once, so never again; it still knows to say plainly that it knows nothing yet.
+    expect(after).not.toContain('May I ask you a few quick questions');
+    expect(after).toContain('You know nothing about them yet');
     const told = profileContext(
       [{ topic: 'projects', fact: 'memnox runtime matters most', at: NOW.toISOString() }],
       true,

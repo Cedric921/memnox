@@ -41,7 +41,8 @@ export async function proposeStartTool(
   deps: SessionToolDeps,
   args: ToolArgs,
 ): Promise<unknown> {
-  const agent = textArg(args, TOOL_ARG.AGENT) ?? AGENT_ID.CLAUDE_CODE;
+  const named = textArg(args, TOOL_ARG.AGENT);
+  const agent = named ?? AGENT_ID.CLAUDE_CODE;
   if (!isStartableAgent(agent)) return { proposed: false, said: ONLY_KNOWN_AGENTS };
   const place = await placeFor(deps, args, agent);
   if (place.kind === PLACE.NO_EDITOR) return { proposed: false, said: NO_EDITOR };
@@ -71,7 +72,7 @@ export async function proposeStartTool(
     at: deps.now().toISOString(),
   });
   return {
-    ...readBackOf(deps, start, chosen, task),
+    ...readBackOf(deps, start, chosen, { task, agentNamed: named !== undefined }),
     ...(found === undefined ? {} : { found }),
   };
 }
@@ -111,8 +112,10 @@ function readBackOf(
   deps: SessionToolDeps,
   start: SessionStart,
   chosen: ChosenRepository,
-  task: string,
+  { task, agentNamed }: { task: string; agentNamed: boolean },
 ): Record<string, unknown> {
+  // Nothing guessed, the agent named and the repository taken from their words, is a plain ask, which is its own yes.
+  const plain = agentNamed && chosen.from === undefined;
   return {
     proposed: true,
     start: start.id,
@@ -135,7 +138,7 @@ function readBackOf(
       ? {}
       : { in: `a new ${basename(start.terminal, APP_BUNDLE_SUFFIX)} window` }),
     ...(start.holdCredentials === true ? { holdsCredentials: true } : {}),
-    said: READ_BACK,
+    said: plain ? START_NOW : READ_BACK,
   };
 }
 
@@ -278,6 +281,8 @@ const NO_SUCH_REPOSITORY =
   'No repository on this Mac goes by that name. Offer the closest from known, by name.';
 const READ_BACK =
   'Nothing has started. Read it back once, as one whole sentence that ends in a courteous question, saying the app when in names one, such as "Shall I open the Codex app in memnox runtime to review your changes?", "Shall I start Codex in memnox macos to review the changes?" or "I can start Claude Code in memnox cloud on the failing auth test. Would you like me to go ahead?", varying the words. Say nothing before it and nothing after the question. Call start_session with this id only after they say yes. When they asked for exactly this plainly, the agent, the repository and what to do, or only to open an app such as "open Hermes", or they already said yes to it or corrected it to this, skip the read back: their asking is their yes, so call start_session with this id now. Never ask the same thing twice.';
+const START_NOW =
+  'They asked for exactly this, naming the agent and the repository, so their asking is their yes: call start_session with this id now, in this same reply, without a word before it. Never read it back, and never say that nothing has started.';
 const GONE =
   'That start is gone or more than five minutes old. Read it back again with propose_start.';
 const NO_TERMINAL =

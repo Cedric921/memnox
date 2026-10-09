@@ -406,13 +406,21 @@ describe('starting a session out loud', () => {
       repository: 'memnox runtime',
       task: 'fix the build',
       hold_credentials: 'true',
-    })) as { start: string; holdsCredentials?: boolean };
+    })) as { start: string; holdsCredentials?: boolean; said: string };
     expect(proposed.holdsCredentials).toBe(true);
+    // No agent named, so it was a guess and is read back first.
+    expect(proposed.said).toContain('Read it back once');
     await callOperatorTool(deps, SEAMS, 'start_session', { start: proposed.start });
     const [request] = await new DisplayRequests(deps.home).open(NOW.toISOString());
     expect(request?.text).toBe(
       `cd '${repo}' && memnox run --hold-credentials -- claude 'fix the build'`,
     );
+    const plain = (await callOperatorTool(deps, SEAMS, 'propose_start', {
+      agent: 'claude-code',
+      repository: 'memnox runtime',
+      task: 'fix the build',
+    })) as { said: string };
+    expect(plain.said).toContain('call start_session with this id now');
   });
 
   it('finds a repository no session has opened yet, in the folders code is kept in', async () => {
