@@ -163,6 +163,36 @@ describe('closing a session by voice', () => {
   });
 });
 
+describe('closing a session mid turn because they said to', () => {
+  it('asks once, then closes it now on their say so', async () => {
+    const deps = await depsAt();
+    await new SessionTurns(deps.home).prompted(
+      'ses_a',
+      'claude-code',
+      '2026-10-02T11:59:00.000Z',
+    );
+    const closing = {
+      ...deps,
+      delivered: async () => ({ outcome: 'typed' as const, at: NOW.toISOString() }),
+    };
+    const asked = (await callOperatorTool(closing, SEAMS, 'show', {
+      session: 'ses_a',
+      display: 'close',
+    })) as { closed: boolean; said: string };
+    expect(asked.closed).toBe(false);
+    expect(asked.said).toContain('now "true"');
+    expect(
+      await callOperatorTool(closing, SEAMS, 'show', {
+        session: 'ses_a',
+        display: 'close',
+        now: 'true',
+      }),
+    ).toMatchObject({ closed: true });
+    const [request] = await new DisplayRequests(deps.home).open(NOW.toISOString());
+    expect(request).toMatchObject({ display: 'close', sessionId: 'ses_a' });
+  });
+});
+
 describe('running memnox by voice', () => {
   it('signs in with one Touch ID, runs on its own, and tells the person when it ends', async () => {
     const ran: string[][] = [];

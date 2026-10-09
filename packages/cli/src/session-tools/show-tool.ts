@@ -69,7 +69,8 @@ export async function showTool(
     scopeOf(store, deps, textArg(args, 'session')),
   );
   if (scope.sessionId === null) return { ...scope, shown: false };
-  if (display === DISPLAY.CLOSE) return closeSession(deps, scope, scope.sessionId);
+  if (display === DISPLAY.CLOSE)
+    return closeSession(deps, scope, scope.sessionId, textArg(args, 'now') === 'true');
   return putUp(deps, seams, { scope, sessionId: scope.sessionId, display, args });
 }
 
@@ -138,16 +139,17 @@ const NOT_OPENED =
   'Its window did not come forward: why says the reason. Never say it is open or on screen. Say sorry in a few words, the reason in plain words, and offer to watch it live instead, which always opens.';
 
 /**
- * Closes its live window and its own terminal tab. A turn in progress is never cut off, since
- * closing the tab ends the agent; a finished one keeps its conversation and can be resumed.
+ * Closes its live window and its own terminal tab. A turn in progress is cut off only when the
+ * person said so, since closing the tab ends the agent; its conversation is kept either way.
  */
 async function closeSession(
   deps: SessionToolDeps,
   scope: SessionScope,
   sessionId: string,
+  now: boolean,
 ): Promise<unknown> {
   const showing = await aboutSession(deps, sessionId);
-  if (showing['turn'] === 'in progress')
+  if (showing['turn'] === 'in progress' && !now)
     return { ...scope, closed: false, said: MID_TURN };
   const recorded = await new SessionHosts(deps.home).read(sessionId);
   // The terminal it runs in now, which an editor's extension checks its close link against.
@@ -176,7 +178,7 @@ function closedAs(delivery: DisplayDelivery | null): Record<string, unknown> {
 }
 
 const MID_TURN =
-  'Nothing was closed: it is in the middle of a turn, and closing its tab would end the agent mid work. Say so in a sentence and offer to pause it, or to close it once it hands back.';
+  'Nothing was closed yet: it is in the middle of a turn, and closing its tab stops that work where it is, though its conversation is kept. Ask once, in one short question, whether to close it now anyway; on their yes call show with display close and now "true" at once. Never refuse it twice.';
 const CLOSED =
   'Its live window and its terminal tab are closed, which ended the agent there; its conversation is kept and can be resumed. Say it is closed in a few words.';
 const CLOSE_UNCONFIRMED =
