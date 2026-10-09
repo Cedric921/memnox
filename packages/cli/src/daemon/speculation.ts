@@ -1,6 +1,7 @@
 import type { DaemonAskChunk } from '@memnox/core';
 import { BRAIN_CHUNK } from '../operator/brain';
 import { OPERATOR_TOOLS } from '../session-tools/operator-tools';
+import { GUESS_STATE, type GuessState } from './guess-state';
 
 /**
  * An answer started while the person pauses, said only once an ask brings the same words, and
@@ -57,14 +58,21 @@ export class Speculation<R> {
   /** A dropped guess reached the brain, so the next question says it was not theirs. */
   private overtaken = false;
 
-  /** @param stop stops the brain's turn in flight, which is the guess's when it has started. */
-  constructor(private readonly stop: () => void) {}
+  /**
+   * @param stop stops the brain's turn in flight, which is the guess's when it has started.
+   * @param noted hears where the guess stands, so a tool that acts waits on it rather than running in a guess.
+   */
+  constructor(
+    private readonly stop: () => void,
+    private readonly noted: (state: GuessState) => void = () => undefined,
+  ) {}
 
   /** Starts a guess at these words, unless one for the same words is already going. */
   start(said: string, run: (seams: GuessSeams) => Promise<R>): void {
     if (this.guess !== null && !this.guess.dropped && sameWords(this.guess.said, said))
       return;
     this.drop();
+    this.noted(GUESS_STATE.GUESSING);
     const guess: Guess<R> = {
       said,
       held: [],
@@ -113,6 +121,7 @@ export class Speculation<R> {
       return null;
     }
     this.guess = null;
+    this.noted(GUESS_STATE.ADOPTED);
     for (const chunk of guess.held.splice(0)) forward(chunk);
     guess.forward = forward;
     return { answer: await guess.done };
@@ -134,6 +143,7 @@ export class Speculation<R> {
   private dropGuess(guess: Guess<R>): void {
     if (guess.dropped || guess.forward !== null) return;
     guess.dropped = true;
+    this.noted(GUESS_STATE.DROPPED);
     if (guess.started) this.overtaken = true;
     // Only a guess the brain is on is stopped there; a queued one is skipped when its moment comes.
     if (guess.started && !guess.finished) this.stop();

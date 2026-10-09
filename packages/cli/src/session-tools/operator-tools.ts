@@ -28,6 +28,7 @@ import { sessionTool } from './session-tool';
 import { showTool } from './show-tool';
 import { FORGET_SCREEN_TOOL, LOOK_CALLS, LOOK_TOOL } from './look-tool';
 import type { OperatorCall } from './operator-call';
+import { heldInGuess } from './guess-hold';
 import { sessionsTool } from './sessions-tool';
 import {
   decisionsTool,
@@ -454,6 +455,8 @@ export async function callOperatorTool(
 ): Promise<unknown> {
   const call = Object.hasOwn(OPERATOR_CALLS, name) ? OPERATOR_CALLS[name] : undefined;
   if (call === undefined) return null;
+  const held = await heldInGuess(deps.home, name, OPERATOR_TOOLS);
+  if (held !== null) return held;
   const startAt = deps.now().toISOString();
   try {
     const answer = await call(deps, seams, args);

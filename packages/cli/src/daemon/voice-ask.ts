@@ -36,6 +36,7 @@ import {
 } from './recall';
 import type { SessionViews } from './session-view';
 import { write, type Peer } from './socket-write';
+import { GUESS_STATE, noteGuess, type GuessState } from './guess-state';
 import { OVERTAKEN_NOTE, Speculation, type GuessSeams } from './speculation';
 import { streamTurn, withoutHolds } from './stream-turn';
 import { VoiceTurnTrace } from '../trace/voice-trace';
@@ -102,6 +103,8 @@ export class VoiceAsk {
   private heldAt: number | null = null;
   /** What the last reply did before it was cut off, kept until a reply that reached its end has been told. */
   private actedBeforeCut: string[] = [];
+  /** Each change to where the guess stands, written one after another. */
+  private guessWrites: Promise<void> = Promise.resolve();
   /** The context built last and when, shared by a guess and the question after it until a turn is kept. */
   private building: {
     at: number;
@@ -117,7 +120,10 @@ export class VoiceAsk {
   private openSession: string | undefined;
 
   constructor(private readonly deps: AskDeps) {
-    this.speculation = new Speculation(() => deps.turns.cancel());
+    this.speculation = new Speculation(
+      () => deps.turns.cancel(),
+      (state) => this.noteGuess(state),
+    );
   }
 
   /** `mirror` sees every chunk the asker does, so the Mac island can show a phone's turn. */
@@ -169,6 +175,8 @@ export class VoiceAsk {
     if (finished) this.speculation.drop();
     const guessed = finished ? null : await this.speculation.adopt(said, forward);
     if (guessed !== null) return this.keep(said, guessed.answer);
+    // A question asked whole, so whatever it does is done, never held as a guess's.
+    await this.noteGuess(GUESS_STATE.ASKED);
     const overtaken = this.speculation.takeOvertaken();
     const seams = { send: forward, wanted: () => true };
     const words = rule ? `${RULE_NOTE}\n${said}` : said;
@@ -179,6 +187,14 @@ export class VoiceAsk {
     return (
       this.heldAt !== null && Date.parse(this.deps.now()) - this.heldAt < HELD_WITHIN_MS
     );
+  }
+
+  /** Where the guess stands, written in the order it changed, since a tool that acts reads it. */
+  private noteGuess(state: GuessState): Promise<void> {
+    this.guessWrites = this.guessWrites
+      .then(() => noteGuess(this.deps.home, state))
+      .catch(() => undefined);
+    return this.guessWrites;
   }
 
   /** What was said and answered, kept for recall, once the person has heard it. */
