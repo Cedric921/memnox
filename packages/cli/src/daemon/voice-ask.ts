@@ -48,6 +48,12 @@ import { keepTeamCalls, teamCallsContext } from './team-calls-store';
 
 /** Long enough to cover the rest of a sentence said after a hold, short of a new question. */
 const HELD_WITHIN_MS = 60_000;
+
+/**
+ * How long a context built for a guess is used again for the words that follow it, within one
+ * sentence said with pauses: building one reads every session, and doing it twice made an answer wait.
+ */
+const CONTEXT_REUSE_MS = 5_000;
 /** A request this long already says what to do, so a hold on it is a misread and never waits on them. */
 const WHOLE_REQUEST_WORDS = 8;
 
@@ -87,6 +93,11 @@ export class VoiceAsk {
 
   /** When the last answered turn held for the rest, so the next one may not hold again. */
   private heldAt: number | null = null;
+  /** The context built last and when, shared by a guess and the question after it until a turn is kept. */
+  private building: {
+    at: number;
+    built: Promise<{ context: string; sessions: number }>;
+  } | null = null;
 
   /** The app the person was in at their last words, which the next turn's context names. */
   private lookingAt: string | undefined;
@@ -164,6 +175,8 @@ export class VoiceAsk {
   /** What was said and answered, kept for recall, once the person has heard it. */
   private async keep(said: string, answered: Answered | undefined): Promise<void> {
     if (answered === undefined) return;
+    // What was just said is part of the next context, so it is built afresh.
+    this.building = null;
     this.heldAt = answered.held ? Date.parse(answered.moment) : null;
     this.deps.address.noteSaid(answered.text, answered.names, this.deps.now());
     // Held or talked over, the words come again whole, so only the turn that ends is one.
@@ -230,8 +243,18 @@ export class VoiceAsk {
       : undefined;
   }
 
+  /** The context a guess a moment ago is already building, or a new one. */
+  private contextFor(moment: string): Promise<{ context: string; sessions: number }> {
+    const at = Date.parse(moment);
+    if (this.building !== null && at - this.building.at < CONTEXT_REUSE_MS)
+      return this.building.built;
+    const built = this.buildContext(moment);
+    this.building = { at, built };
+    return built;
+  }
+
   /** What is put ahead of their words: the recall, then the sessions right now. */
-  private async contextFor(
+  private async buildContext(
     moment: string,
   ): Promise<{ context: string; sessions: number }> {
     const exchanges = await this.deps.exchanges.read(moment);

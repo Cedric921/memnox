@@ -108,7 +108,8 @@ export class Speculation<R> {
     const guess = this.guess;
     if (guess === null || guess.dropped || !sameWords(guess.said, said)) {
       this.drop();
-      if (guess !== null) await guess.done;
+      // Only a guess the brain is on is waited out; one still gathering its context is skipped when its moment comes.
+      if (guess !== null && guess.started) await guess.done;
       return null;
     }
     this.guess = null;

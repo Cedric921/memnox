@@ -126,6 +126,17 @@ describe('an answer guessed while the person pauses', () => {
     expect(speculation.takeOvertaken()).toBe(false);
   });
 
+  it('never waits on a guess the person talked past before it reached the brain', async () => {
+    const speculation = new Speculation<string>(() => undefined);
+    const gathering = manualTurn();
+    speculation.start('ask it to check', gathering.run);
+    // The guess never ends, as one still gathering its context has not, and the real question goes on regardless.
+    expect(
+      await speculation.adopt('ask it to check the git status', () => undefined),
+    ).toBe(null);
+    expect(gathering.begin()).toBe(false);
+  });
+
   it('disowns a guess the brain finished when the person said something else', async () => {
     const speculation = new Speculation<string>(() => undefined);
     const turn = manualTurn();
