@@ -183,23 +183,46 @@ export async function startSessionTool(
     at: moment,
   });
   const delivery = deps.delivered === undefined ? null : await deps.delivered(request.id);
-  if (delivery === null || wentIn(delivery.outcome)) {
-    await noteFocus(deps, start, 'started');
-  }
+  return launched(deps, start, delivery, moment);
+}
+
+/** What the Mac reported for the tab, checked against whether the agent itself came up. */
+async function launched(
+  deps: SessionToolDeps,
+  start: SessionStart,
+  delivery: DisplayDelivery | null,
+  moment: string,
+): Promise<Record<string, unknown>> {
+  const handed = delivery === null || wentIn(delivery.outcome);
+  if (handed) await noteFocus(deps, start, 'started');
+  // Typed is not running: a missing command or a shell prompt left waiting looks the same to the Mac.
+  const seen =
+    handed && deps.startSeen !== undefined
+      ? await deps.startSeen(start.repository, moment)
+      : null;
   return {
     repository: basename(start.repository),
     ...(start.editor === undefined ? {} : { in: editorName(deps, start) }),
-    ...startedAs(delivery, start.editor === undefined ? STARTED : STARTED_IN_EDITOR),
+    ...startedAs(
+      delivery,
+      seen,
+      start.editor === undefined ? STARTED : STARTED_IN_EDITOR,
+    ),
   };
 }
 
 /** What the brain may say, from what the Mac reported, so a tab that never opened is never called working. */
 function startedAs(
   delivery: DisplayDelivery | null,
+  seen: boolean | null,
   started: string,
 ): Record<string, unknown> {
+  if (seen === true) return { started: true, said: started };
   if (delivery === null) return { started: true, said: UNCONFIRMED };
-  if (wentIn(delivery.outcome)) return { started: true, said: started };
+  if (wentIn(delivery.outcome))
+    return seen === false
+      ? { started: true, confirmed: false, said: NOT_SEEN }
+      : { started: true, said: started };
   return {
     started: false,
     ...(delivery.reason === undefined ? {} : { why: delivery.reason }),
@@ -267,7 +290,9 @@ const READ_BACK =
 const GONE =
   'That start is gone or more than five minutes old. Read it back again with propose_start.';
 const UNCONFIRMED =
-  'Handed to the Mac to open a tab and start it, which has not confirmed yet. Say it is starting; never that it is working.';
+  'Handed to the Mac to open a tab and start it, and neither the Mac nor the agent has said it is running yet. Say you asked for it and it has not come up yet; never that it is starting or working.';
+const NOT_SEEN =
+  'The Mac typed the line that starts it into a new terminal, but the agent has not shown itself running there yet. Say in one sentence that you typed it in and it has not come up yet, and that they can ask you to check; never say it is starting or working.';
 const NOT_STARTED =
   'The Mac could not open the tab and start it. Say sorry in a few words and say why in plain words; nothing started.';
 const STARTED =

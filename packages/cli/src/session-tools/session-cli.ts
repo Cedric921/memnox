@@ -18,6 +18,7 @@ import { fetchBrief, refreshMemory } from '../sync/memory';
 import { readSource, readSources, readWorkspaceName } from '../sync/workspace-reads';
 import type { SessionToolDeps } from './read-tools';
 import type { RewindSeams } from './rewind-tool';
+import { awaitSessionStart } from './await-start';
 import { awaitDelivery } from './instruct-tools';
 import { OPERATOR_CATALOGUE } from './operator-tools';
 import { serveSession } from './session-server';
@@ -87,6 +88,7 @@ function depsFor(argv: readonly string[], env: NodeJS.ProcessEnv): SessionToolDe
     source: (link) => readSource(homedir(), link),
     workspaceName: () => readWorkspaceName(homedir()),
     delivered: (requestId, waitMs) => awaitDelivery(homedir(), requestId, waitMs),
+    startSeen: (repository, since) => awaitSessionStart(homedir(), repository, since),
   };
 }
 

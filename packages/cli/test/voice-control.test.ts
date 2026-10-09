@@ -357,6 +357,37 @@ describe('starting a session out loud', () => {
     ).toMatchObject({ started: false });
   });
 
+  it('calls it started only once the agent shows itself running in that repository', async () => {
+    const base = await depsAt();
+    await workedOn(base, 'memnox-runtime');
+    const asked: string[] = [];
+    const startAs = (seen: boolean): SessionToolDeps => ({
+      ...base,
+      resolveCommand: () => 'claude',
+      delivered: async () => ({ outcome: 'typed', at: NOW.toISOString() }),
+      startSeen: async (repository) => {
+        asked.push(basename(repository));
+        return seen;
+      },
+    });
+    const start = async (deps: SessionToolDeps): Promise<unknown> => {
+      const proposed = (await callOperatorTool(deps, SEAMS, 'propose_start', {
+        repository: 'memnox runtime',
+        task: 'fix the build',
+      })) as { start: string };
+      return callOperatorTool(deps, SEAMS, 'start_session', { start: proposed.start });
+    };
+
+    const unseen = (await start(startAs(false))) as { said: string };
+    expect(unseen).toMatchObject({ started: true, confirmed: false });
+    expect(unseen.said).toContain('has not come up yet');
+    expect(unseen.said).toContain('never say it is starting');
+    const seen = (await start(startAs(true))) as { said: string; confirmed?: boolean };
+    expect(seen.confirmed).toBeUndefined();
+    expect(seen.said).toContain('the agent is starting on the task');
+    expect(asked).toEqual(['memnox-runtime', 'memnox-runtime']);
+  });
+
   it('starts it without the tokens when they asked to keep them away from it', async () => {
     const base = await depsAt();
     const repo = await workedOn(base, 'memnox-runtime');
