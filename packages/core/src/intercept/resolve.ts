@@ -179,7 +179,9 @@ function placesReached(
 ): ResolvedAction[] {
   // Code nobody here can read: every path it names could be one it writes.
   const unreadable =
-    normalized.opaque.length > 0 || runsInterpreter(line, normalized.parsed);
+    normalized.opaque.some((reason) => reason !== OPAQUE_REASON.EXPANSION) ||
+    namesHiddenCommand(normalized.parsed) ||
+    runsInterpreter(line, normalized.parsed);
   const changes =
     unreadable ||
     actions.some(
@@ -201,6 +203,14 @@ function placesReached(
     because: 'the line changes something and reaches this place',
     target,
   }));
+}
+
+/**
+ * Whether a command's own name is an expansion, as in `$EDITOR f`. One only in an argument,
+ * as in `grep x $f`, leaves the program known, and its substitution was walked already.
+ */
+function namesHiddenCommand(parsed: readonly { argv: readonly string[] }[]): boolean {
+  return parsed.some(({ argv }) => /[$`]/.test(argv[0] ?? ''));
 }
 
 /** Code the line runs that nobody here could read first, which a person is asked about. */

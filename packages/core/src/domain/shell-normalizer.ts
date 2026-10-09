@@ -144,9 +144,11 @@ function walk(raw: string, depth: number, state: Walk): void {
     const part = substituteKnown(written, known);
     const assigned = tokenizeQuoted(part);
     const tokens = stripEnvTokens(assigned);
-    if (tokens.length === 0)
+    if (tokens.length === 0) {
       remember(assigned, split[index]?.then ?? '', bindable, known);
-    else walkCommand(part, tokens, line, state);
+      // `f=$(rm -rf ~)` runs the rm as surely as `echo $(rm -rf ~)` does.
+      for (const body of substitutionsIn(part)) walk(body, line.depth + 1, state);
+    } else walkCommand(part, tokens, line, state);
   }
 }
 
