@@ -9,6 +9,7 @@ import {
 import { liveHost } from './live-host';
 import { sessionMarks } from './session-marks';
 import { unlessMacTold } from './mac-told';
+import { witnessed } from './witnessed';
 import { paneOn, pressEscapeIn, type Pane } from './multiplexer';
 import type { SessionToolDeps } from './read-tools';
 import type { SessionScope } from './session-scope';
@@ -48,7 +49,7 @@ export async function stopSession(
   const delivery = deps.delivered === undefined ? null : await deps.delivered(request.id);
   if (delivery !== null && wentIn(delivery.outcome))
     await turnOver(deps, scope, sessionId);
-  return { ...scope, ...stoppedAs(delivery) };
+  return { ...scope, ...stoppedAs(delivery), ...witnessed(delivery) };
 }
 
 /** No hook says a turn ended when it was interrupted, so it is recorded here or it would look busy for hours. */

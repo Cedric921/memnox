@@ -17,6 +17,7 @@ import {
   type StartableAgent,
 } from '@memnox/core';
 import { unlessMacTold } from './mac-told';
+import { witnessed } from './witnessed';
 import { textArg, type SessionToolDeps, type ToolArgs } from './read-tools';
 import {
   APP_ACTION,
@@ -192,8 +193,16 @@ const APP_CLOSED =
 const APP_NOT_CONTROLLED =
   'The Mac could not do it: why says the reason. Say sorry in a few words and the reason in plain words.';
 
-/** What the brain may say, from what the Mac reported, so words never typed are never called sent. */
+/** What the brain may say, from what the Mac reported, with what the screen showed after. */
 function openedAs(
+  delivery: DisplayDelivery | null,
+  hadWords: boolean,
+): Record<string, unknown> {
+  return { ...outcomeOf(delivery, hadWords), ...witnessed(delivery) };
+}
+
+/** What the brain may say, from what the Mac reported, so words never typed are never called sent. */
+function outcomeOf(
   delivery: DisplayDelivery | null,
   hadWords: boolean,
 ): Record<string, unknown> {

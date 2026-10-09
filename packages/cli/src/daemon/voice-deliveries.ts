@@ -35,12 +35,14 @@ export async function deliveredAnswer(
   const reason = request.reason === undefined ? {} : { reason: request.reason };
   const proof = request.proof === undefined ? {} : { proof: request.proof };
   const told = request.told === true ? { told: true } : {};
+  const evidence = request.evidence === undefined ? {} : { evidence: request.evidence };
   const kept = await keep(home, request.subject, {
     outcome: answer,
     at,
     ...reason,
     ...proof,
     ...told,
+    ...evidence,
   });
   return { id: request.id, ok: true, outcome: kept ? 'kept' : 'nobody waiting' };
 }

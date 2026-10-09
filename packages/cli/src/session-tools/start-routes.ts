@@ -10,6 +10,7 @@ import {
 } from '@memnox/core';
 import { noteFocus } from './focus';
 import { unlessMacTold } from './mac-told';
+import { witnessed } from './witnessed';
 import { multiplexerNamed, openPane, typeIntoPane } from './multiplexer';
 import type { SessionToolDeps } from './read-tools';
 import { editorName } from './start-place';
@@ -91,6 +92,7 @@ export async function launched(
     repository: basename(start.repository),
     ...(typeof found === 'string' ? { session: found } : {}),
     ...(start.editor === undefined ? {} : { in: editorName(deps, start) }),
+    ...witnessed(delivery),
     ...startedAs(
       delivery,
       seen,

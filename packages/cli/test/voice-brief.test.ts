@@ -90,6 +90,8 @@ describe('how the voice speaks', () => {
     expect(prompt).toContain('Never say the same thing on screen and out loud');
     expect(prompt).toContain('"Noted: memo is Memnox."');
     expect(prompt).toContain('ask one question at a time');
+    expect(prompt).toContain('The screen is the witness');
+    expect(prompt).toContain('say it did not go in, never that it was sent');
     expect(prompt).toContain('unless you called the same tool again in this reply');
     expect(prompt).toContain(
       '"the kids status" and "the guest status" are the git status',

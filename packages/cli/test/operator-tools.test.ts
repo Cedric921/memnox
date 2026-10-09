@@ -11,6 +11,7 @@ import {
   renderNotes,
   SpokenInstructions,
   HOLD_ANSWER,
+  MEMNOX_HOME,
   Milestones,
   NodeGit,
   NodeWorktree,
@@ -138,11 +139,11 @@ async function stamp(path: string, moment: string): Promise<void> {
 }
 
 describe('what the operator is offered', () => {
-  it("reads, and writes nothing but a proposal, a pause, a watch, the person's answer to their agent's question, their words typed into an agent's app, an app they named stopped or closed, a word they were misheard saying, what they told it about themselves, a folder to open, or a request to show or start what the person said yes to", () => {
+  it("reads, and writes nothing but a proposal, a pause, a watch, the person's answer to their agent's question, their words typed into an agent's app, an app they named stopped or closed, a word they were misheard saying, what they told it about themselves, its own screenshots forgotten, a folder to open, or a request to show or start what the person said yes to", () => {
     for (const tool of OPERATOR_TOOLS) {
       if (tool.annotations.readOnlyHint) continue;
       expect(tool.name).toMatch(
-        /^(propose_|show$|pause_session$|send_instruction$|type_in_app$|control_app$|answer_question$|watch_for$|walk_through$|start_session$|show_agents$|memnox_command$|traces$|remember_word$|forget_word$|remember_about_me$|forget_about_me$|open_folder$)/,
+        /^(propose_|show$|pause_session$|send_instruction$|type_in_app$|control_app$|answer_question$|watch_for$|walk_through$|start_session$|show_agents$|memnox_command$|traces$|remember_word$|forget_word$|remember_about_me$|forget_about_me$|forget_screen$|open_folder$)/,
       );
     }
   });
@@ -1022,10 +1023,13 @@ describe('telling an agent what the person said', () => {
       outline: 'button Merge',
     };
     const seeing: SessionToolDeps = { ...base, seen: async () => sight };
-    expect(await callOperatorTool(seeing, SEAMS, 'look', {})).toMatchObject({
-      seen: true,
-      ...sight,
-    });
+    // The words and the outline go to the brain; the picture stays on the Mac unless how it looks matters.
+    const read = await callOperatorTool(seeing, SEAMS, 'look', {});
+    expect(read).toMatchObject({ seen: true, app: 'Safari', outline: 'button Merge' });
+    expect(read).not.toHaveProperty('image');
+    expect(
+      await callOperatorTool(seeing, SEAMS, 'look', { visual: 'true' }),
+    ).toMatchObject({ image: '/tmp/s.png' });
     const blind: SessionToolDeps = { ...base, seen: async () => null };
     expect(await callOperatorTool(blind, SEAMS, 'look', {})).toMatchObject({
       seen: false,
@@ -1039,6 +1043,27 @@ describe('telling an agent what the person said', () => {
       seen: true,
       said: expect.stringContaining('Screen Recording'),
     });
+  });
+
+  it('says what changed on screen since it last looked, and forgets every capture when asked', async () => {
+    const base = await depsAt();
+    let text = 'Tests: 3 passed\nBuild ok';
+    const deps: SessionToolDeps = {
+      ...base,
+      seen: async () => ({ app: 'Terminal', image: '/tmp/t.png', text }),
+    };
+    expect(await callOperatorTool(deps, SEAMS, 'look', {})).not.toHaveProperty('changed');
+    text = 'Tests: 2 passed, 1 failed\nBuild ok';
+    expect(await callOperatorTool(deps, SEAMS, 'look', {})).toMatchObject({
+      changed: { appeared: ['Tests: 2 passed, 1 failed'], gone: ['Tests: 3 passed'] },
+    });
+    const captures = join(deps.home, MEMNOX_HOME, 'proof');
+    await mkdir(captures, { recursive: true });
+    await writeFile(join(captures, 'dsp_1-after.png'), 'png');
+    expect(await callOperatorTool(deps, SEAMS, 'forget_screen', {})).toMatchObject({
+      forgotten: true,
+    });
+    expect(existsSync(captures)).toBe(false);
   });
 
   it('refuses a proposal said yes to after it went stale', async () => {

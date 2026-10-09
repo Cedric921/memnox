@@ -6,6 +6,7 @@ import { liveHost } from './live-host';
 import { sessionMarks } from './session-marks';
 import { closePane, paneOn, type Pane } from './multiplexer';
 import type { SessionToolDeps } from './read-tools';
+import { witnessed } from './witnessed';
 import type { SessionScope } from './session-scope';
 import { processAlive } from './sessions-tool';
 import { CLOSES_CLEANLY, FINDS_ITS_TAB } from './session-tools.constants';
@@ -90,10 +91,13 @@ async function closedThroughMac(
     at: deps.now().toISOString(),
   });
   const delivery = deps.delivered === undefined ? null : await deps.delivered(request.id);
-  const why = delivery?.reason === undefined ? {} : { why: delivery.reason };
+  const why = {
+    ...(delivery?.reason === undefined ? {} : { why: delivery.reason }),
+    ...witnessed(delivery),
+  };
   if (delivery !== null && wentIn(delivery.outcome)) {
     await closedNow(deps, sessionId);
-    return { closed: true, said: CLOSED };
+    return { closed: true, ...why, said: CLOSED };
   }
   if (ended) {
     await closedNow(deps, sessionId);

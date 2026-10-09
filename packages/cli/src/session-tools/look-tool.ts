@@ -1,17 +1,20 @@
+import { rm } from 'node:fs/promises';
+import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { DISPLAY, DisplayRequests, type Sight } from '@memnox/core';
+import { DISPLAY, DisplayRequests, MEMNOX_HOME, type Sight } from '@memnox/core';
 import { textArg, type SessionToolDeps, type ToolArgs } from './read-tools';
 import type { ToolDefinition } from './session-tools';
 
 /**
- * Looking at the person's screen: the brain asks, the Mac captures one window and reads its
- * controls, and the brain reads the capture itself. The Mac never decides from words when to look.
+ * Looking at the person's screen: the brain asks, the Mac captures one window, reads its words and
+ * its controls itself, and hands on the words. The picture leaves the Mac only when the brain needs
+ * to see how something looks. The Mac never decides from words when to look.
  */
 
 export const LOOK_TOOL: ToolDefinition = {
   name: 'look',
   description:
-    'See what is on the person\'s screen right now: the window in front, or the app they named. It returns a screenshot by its path, which you read as an image, and an outline of the window\'s buttons, fields and text. Use it when they ask what is on their screen, about what they are looking at, or to check something they point at with "this" or "here". It only looks and changes nothing.',
+    'See what is on the person\'s screen right now: the window in front, or the app they named. It returns the words on it, read on their Mac, an outline of its buttons and fields, and what changed since you last looked at that app. Use it when they ask what is on their screen, what they are looking at, to read an error, what changed, or to check something they point at with "this" or "here", and before you say something you did is on screen. Pass visual "true" only when they ask how something looks, its layout, colours or a picture, since only then does the screenshot itself leave their Mac for you to read. It only looks and changes nothing.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -19,6 +22,10 @@ export const LOOK_TOOL: ToolDefinition = {
         type: 'string',
         description:
           'the app to look at by its name, such as Safari; the window in front when left out',
+      },
+      visual: {
+        type: 'string',
+        description: '"true" only when how it looks matters, which sends the screenshot',
       },
     },
   },
@@ -49,11 +56,70 @@ export async function lookTool(deps: SessionToolDeps, args: ToolArgs): Promise<u
     request.id,
   );
   if (sight === null) return { seen: false, said: NOT_SEEN };
+  const visual = textArg(args, 'visual') === SAID_TRUE;
+  const { image, ...read } = sight;
   return {
     seen: true,
-    ...sight,
-    ...(sight.image === undefined ? { said: OUTLINE_ONLY } : {}),
+    ...read,
+    ...(visual && image !== undefined ? { image } : {}),
+    ...changedSince(deps.home, sight),
+    ...(image === undefined ? { said: OUTLINE_ONLY } : {}),
   };
+}
+
+/** How a tool argument says yes. */
+const SAID_TRUE = 'true';
+
+/** Enough lines to say what changed, never the whole window again. */
+const MOST_CHANGED_LINES = 20;
+
+/** The words last seen in each app, kept for this conversation only, so "what changed" has a before. */
+const LAST_SEEN = new Map<string, string>();
+
+/** The lines that came and went since this app was last looked at, or nothing the first time. */
+function changedSince(home: string, sight: Sight): Record<string, unknown> {
+  if (sight.text === undefined) return {};
+  const key = `${home}\0${sight.app}`;
+  const before = LAST_SEEN.get(key);
+  LAST_SEEN.set(key, sight.text);
+  if (before === undefined) return {};
+  const was = new Set(lines(before));
+  const now = new Set(lines(sight.text));
+  return {
+    changed: {
+      appeared: [...now].filter((line) => !was.has(line)).slice(-MOST_CHANGED_LINES),
+      gone: [...was].filter((line) => !now.has(line)).slice(-MOST_CHANGED_LINES),
+    },
+  };
+}
+
+function lines(text: string): string[] {
+  return text
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line !== '');
+}
+
+/** Where the Mac keeps what it looked at and what an action left behind, a day at most. */
+const SCREEN_FOLDERS = ['sight', 'proof'] as const;
+
+export const FORGET_SCREEN_TOOL: ToolDefinition = {
+  name: 'forget_screen',
+  description:
+    'Delete every screenshot Memnox kept of their screen, what you looked at and the evidence of what was done, when they ask you to forget a screenshot or what was on their screen. Say in a few words that it is gone.',
+  inputSchema: { type: 'object', properties: {} },
+  // Deletes only Memnox's own captures in the person's home, and nothing an agent can do changes.
+  annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
+};
+
+export async function forgetScreenTool(deps: SessionToolDeps): Promise<unknown> {
+  await Promise.all(
+    SCREEN_FOLDERS.map((folder) =>
+      rm(join(deps.home, MEMNOX_HOME, folder), { recursive: true, force: true }),
+    ),
+  );
+  LAST_SEEN.clear();
+  return { forgotten: true };
 }
 
 /** What the Mac saw for a LOOK, or null when it said nothing in time. */

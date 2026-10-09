@@ -34,6 +34,19 @@ export interface Sight {
   image?: string;
   /** Roles, titles and values from the window's accessibility tree, one control per line. */
   outline?: string;
+  /** The words in the capture, read on the Mac, so the screen is read without the picture leaving it. */
+  text?: string;
+}
+
+/**
+ * What the screen showed around an action: the target's window just before and just after, by their
+ * paths on the Mac, and the words read off the after one there, so what is said about it has a witness.
+ */
+export interface Witness {
+  app: string;
+  before?: string;
+  after?: string;
+  text?: string;
 }
 
 /** Typed in either way: sent, whether or not it was read back. */

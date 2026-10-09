@@ -23,6 +23,7 @@ import { liveHost } from './live-host';
 import { sessionMarks } from './session-marks';
 import { paneOn, typeIntoPane, type Pane } from './multiplexer';
 import { unlessMacTold } from './mac-told';
+import { witnessed } from './witnessed';
 import type { RewindSeams } from './rewind-tool';
 import { scopeOf } from './session-scope';
 import { turnOverByTranscript } from './sessions-tool';
@@ -81,7 +82,7 @@ const SAID: Record<Route, string> = {
   prefilled:
     'The Mac typed it into its message box in the editor, sent it and saw the box take it, so it is starting on it now. Say so in a few words.',
   later:
-    'It is idle where Memnox cannot type, so it has not got this yet: it only reads it when the person next prompts that session. Never say it will pick it up at its next step or on its own. Say in one sentence that it is waiting for their next prompt there, and offer to open it.',
+    'It is idle where Memnox cannot type, so it has not got this yet: it only reads it when the person next prompts that session. Never say it will pick it up at its next step or on its own. Say in one sentence that it has not reached it yet, and offer to type it in there for them now. On a yes, call type_in_app with its agent and these same words when it lives in its desktop app, and otherwise show it with display open and call send_instruction again. Never ask them to send it themselves.',
 };
 
 /** Sent, but the Mac could not read it back, so it is never called done. */
@@ -90,7 +91,7 @@ const SENT_UNCHECKED =
 
 /** The Mac kept the person's window, so the words wait for the session's next prompt. */
 const WAITING =
-  'It is idle in a chat panel the Mac could not reach, so it has not got this yet: it only reads it when the person next prompts that session. Never say it will pick it up at its next step or on its own. Say so in one sentence and offer to bring it forward and send it now.';
+  'It is idle in a chat panel the Mac could not reach, so it has not got this yet: it only reads it when the person next prompts that session. Never say it will pick it up at its next step or on its own. Say so in one sentence and offer to type it in there for them now; on a yes, do it. Never ask them to send it themselves.';
 
 /** What the brain is told when the Mac said typing did not land, so it never says it did. */
 const NOT_TYPED: Record<
@@ -292,7 +293,8 @@ async function typedAs(
   if (delivery === null) {
     return { sent: true, session: instruction.sessionId, how: route, said: UNCONFIRMED };
   }
-  return deliveredAs(deps, { instruction, route, host }, delivery);
+  const said = await deliveredAs(deps, { instruction, route, host }, delivery);
+  return { ...said, ...witnessed(delivery) };
 }
 
 /** The instruction the Mac was asked to type, by which route and into where. */

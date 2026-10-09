@@ -5,7 +5,7 @@
 import type { DecisionEffect } from '../constants/decision.constants';
 import type { RunTally } from '../session/notices';
 import type { TurnTests } from '../session/turn-tests';
-import type { DeliveryProof, Sight } from './delivery';
+import type { DeliveryProof, Sight, Witness } from './delivery';
 import type { DisplayKind, DisplayVia } from './display';
 import type {
   ExtensionEventFields,
@@ -140,6 +140,8 @@ export interface DaemonRequest extends ExtensionRequestFields {
   told?: boolean;
   /** On SEEN: what was on screen when the brain asked to look. */
   sight?: Sight;
+  /** On delivered: the target's window just before and just after acting, with the words read off it. */
+  evidence?: Witness;
 }
 
 /** One agent as the voice's settings show it: there or not, whether it answered, and whether it is the one. */

@@ -9,7 +9,7 @@ import type {
   DisplayVia,
   WalkPage,
 } from '../daemon/protocol';
-import type { Delivery, DeliveryProof, Sight } from '../daemon/delivery';
+import type { Delivery, DeliveryProof, Sight, Witness } from '../daemon/delivery';
 import { DISPLAY } from '../daemon/protocol';
 import { shortDigest } from '../domain/digest';
 import { JsonRecordDir } from '../store/json-records';
@@ -88,6 +88,8 @@ export interface DisplayDelivery {
   proof?: DeliveryProof;
   /** The Mac already said out loud what the person has to do, so nothing more is said about it. */
   told?: boolean;
+  /** The target's window either side of acting, and the words read off it after, as the Mac saw them. */
+  evidence?: Witness;
 }
 
 export interface DisplayInput {

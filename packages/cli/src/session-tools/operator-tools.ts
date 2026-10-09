@@ -26,7 +26,7 @@ import { watchForTool } from './watch-tool';
 import { historyTool } from './history-tool';
 import { sessionTool } from './session-tool';
 import { showTool } from './show-tool';
-import { LOOK_TOOL, lookTool } from './look-tool';
+import { FORGET_SCREEN_TOOL, forgetScreenTool, LOOK_TOOL, lookTool } from './look-tool';
 import { sessionsTool } from './sessions-tool';
 import {
   decisionsTool,
@@ -310,6 +310,7 @@ export const OPERATOR_TOOLS: readonly ToolDefinition[] = [
   ...PROFILE_TOOLS,
   ...FOLDER_TOOLS,
   LOOK_TOOL,
+  FORGET_SCREEN_TOOL,
   {
     name: 'answer_question',
     description:
@@ -451,6 +452,7 @@ const OPERATOR_CALLS: Record<string, OperatorCall> = {
   folders: (deps, _seams, args) => foldersTool(deps, args),
   open_folder: (deps, _seams, args) => openFolderTool(deps, args),
   look: (deps, _seams, args) => lookTool(deps, args),
+  forget_screen: (deps) => forgetScreenTool(deps),
 };
 
 export async function callOperatorTool(
