@@ -81,6 +81,12 @@ describe('how the voice speaks', () => {
     expect(prompt).toContain('You never approve a held call yourself');
     expect(prompt).toContain('The same failure three times running is a loop');
     expect(prompt).not.toContain('exact counts');
+    expect(prompt).toContain('never two run together');
+    expect(prompt).toContain('Never grade what they said');
+    expect(prompt).toContain('unless you called the same tool again in this reply');
+    expect(prompt).toContain(
+      '"the kids status" and "the guest status" are the git status',
+    );
     expect(prompt).toContain('never "I blocked it"');
     expect(prompt).toContain(
       '"The action was blocked before it ran. Your safeguards remain in place."',
