@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
 import {
@@ -55,10 +55,11 @@ export async function typeInAppTool(
   deps: SessionToolDeps,
   args: ToolArgs,
 ): Promise<unknown> {
-  const agent = textArg(args, 'agent') ?? 'claude-code';
-  if (!isStartableAgent(agent)) return { typed: false, said: ONLY_APPS };
   const message = textArg(args, 'message');
   if (message === undefined) return { typed: false, said: NEEDS_MESSAGE };
+  const named = textArg(args, 'app');
+  const agent = textArg(args, 'agent') ?? (named === undefined ? 'claude-code' : named);
+  if (!isStartableAgent(agent)) return typeInNamedApp(deps, named ?? agent, message);
   const resolve = deps.resolveApp ?? resolveInstalledApp;
   const appPath = resolve(agent);
   if (appPath === null) return { typed: false, ...noApp(agent, resolve) };
@@ -128,6 +129,70 @@ function openedAs(
   };
 }
 
+/**
+ * Any other app the person named, found among what is installed, typed into the same way: the Mac
+ * brings it forward and types into its message box, and says so when it finds none.
+ */
+async function typeInNamedApp(
+  deps: SessionToolDeps,
+  name: string,
+  message: string,
+): Promise<unknown> {
+  const appPath = (deps.findApp ?? installedAppNamed)(name);
+  if (appPath === null) return { typed: false, said: noSuchApp(name) };
+  const shownName = basename(appPath).replace(/\.app$/, '');
+  const delivery = await shown(deps, {
+    sessionId: `app_${shownName.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
+    agent: shownName,
+    name: shownName,
+    appPath,
+    links: [],
+    typed: message.split(/\r?\n/).join(' ').trim().slice(0, MOST_MESSAGE_CHARS),
+    at: deps.now().toISOString(),
+  });
+  const result = openedAs(delivery, true);
+  return { app: shownName, typed: result['started'], ...result };
+}
+
+/** Where apps are installed, the person's own folder after the shared one. */
+const APP_FOLDERS = [
+  '/Applications',
+  join(homedir(), 'Applications'),
+  '/Applications/Utilities',
+];
+
+/** An installed app by the name somebody says, spaces and case aside, the exact name first. */
+export function installedAppNamed(
+  name: string,
+  folders: readonly string[] = APP_FOLDERS,
+): string | null {
+  const wanted = spoken(name);
+  if (wanted === '') return null;
+  const apps = folders.flatMap((folder) => {
+    try {
+      return readdirSync(folder)
+        .filter((entry) => entry.endsWith('.app'))
+        .map((entry) => join(folder, entry));
+    } catch {
+      return [];
+    }
+  });
+  const named = (path: string): string => spoken(basename(path).replace(/\.app$/, ''));
+  return (
+    apps.find((path) => named(path) === wanted) ??
+    apps.find((path) => named(path).startsWith(wanted)) ??
+    null
+  );
+}
+
+function spoken(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+function noSuchApp(name: string): string {
+  return `No app called ${name} is installed on this Mac, so nothing was typed. Say so in a sentence and ask which app they meant.`;
+}
+
 /** What to say when the agent has no desktop app on this Mac, with the agents that do. */
 export function noApp(
   agent: StartableAgent,
@@ -151,9 +216,6 @@ export function resolveInstalledApp(agent: StartableAgent): string | null {
   return found === undefined ? null : bundleOf(found);
 }
 
-const ONLY_APPS = `Only the ${Object.values(DESKTOP_APPS)
-  .map((app) => app.name)
-  .join(', ')} apps can be typed into.`;
 const NEEDS_MESSAGE = 'Pass message: what to type, in their words.';
 const APP_TYPED =
   'The app is open and the Mac typed their words into its message box and sent them, so it is answering now. Say so in a few words, like "Sent to Claude." Never say it is done.';

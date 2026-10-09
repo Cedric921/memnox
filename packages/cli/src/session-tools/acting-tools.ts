@@ -157,7 +157,7 @@ export const ACTING_TOOLS: readonly ToolDefinition[] = [
   {
     name: 'type_in_app',
     description:
-      'Type a message into the chat the person has open in an agent\'s desktop app, Claude desktop, the Codex app, Cursor or Hermes, and send it, the way they would type it, so they watch it go in. Use it for "type in Claude desktop and ask it to discuss Memnox", "ask the Codex app to run the tests" or "in this chat, tell it to continue". For a new chat in the app on a repository, use propose_start with app "true" instead.',
+      'Type a message into the chat the person has open in an agent\'s desktop app, Claude desktop, the Codex app, Cursor or Hermes, or any other app on this Mac they name, such as Windsurf, Zed, ChatGPT, Perplexity or Warp, and send it, the way they would type it, so they watch it go in. Use it for "type in Claude desktop and ask it to discuss Memnox", "ask the Codex app to run the tests", "in Windsurf, ask Cascade to fix the build" or "in this chat, tell it to continue". For a new chat in the app on a repository, use propose_start with app "true" instead.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -165,6 +165,11 @@ export const ACTING_TOOLS: readonly ToolDefinition[] = [
           type: 'string',
           description:
             'claude-code for Claude desktop, codex for the Codex or ChatGPT app, cursor or hermes; claude-code when left out',
+        },
+        app: {
+          type: 'string',
+          description:
+            'any other app by the name they said, such as Windsurf or Perplexity, when it is none of those four; leave agent out then',
         },
         message: {
           type: 'string',
