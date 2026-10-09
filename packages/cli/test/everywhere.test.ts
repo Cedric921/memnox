@@ -52,7 +52,7 @@ async function depsAt(over: Partial<SessionToolDeps> = {}): Promise<SessionToolD
     resolveEditor: (editor) =>
       editor === 'vscode' ? '/Applications/Visual Studio Code.app' : null,
     delivered: async () => ({ outcome: 'typed', at: NOW.toISOString() }),
-    startSeen: async () => true,
+    startSeen: async () => 'ses_started',
     ...over,
   };
 }

@@ -13,7 +13,12 @@ const NOW = new Date('2026-10-09T12:00:00.000Z');
 describe('typing into any app the person names', () => {
   it('finds it by the name they said, spaces and case aside', async () => {
     const folder = await mkdtemp(join(tmpdir(), 'memnox-apps-'));
-    for (const app of ['Windsurf.app', 'Visual Studio Code.app', 'Zed Preview.app']) {
+    for (const app of [
+      'Windsurf.app',
+      'Visual Studio Code.app',
+      'Zed Preview.app',
+      'iTerm.app',
+    ]) {
       await mkdir(join(folder, app));
     }
     expect(installedAppNamed('windsurf', [folder])).toBe(join(folder, 'Windsurf.app'));
@@ -21,6 +26,7 @@ describe('typing into any app the person names', () => {
       join(folder, 'Visual Studio Code.app'),
     );
     expect(installedAppNamed('Zed', [folder])).toBe(join(folder, 'Zed Preview.app'));
+    expect(installedAppNamed('iTerm2', [folder])).toBe(join(folder, 'iTerm.app'));
     expect(installedAppNamed('Perplexity', [folder])).toBeNull();
   });
 

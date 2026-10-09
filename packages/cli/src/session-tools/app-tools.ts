@@ -250,12 +250,17 @@ export function installedAppNamed(
     }
   });
   const named = (path: string): string => spoken(basename(path, APP_BUNDLE_SUFFIX));
+  // People add the version an app had, as iTerm2 for iTerm.app, so a name with it taken off counts too.
+  const unversioned = wanted.replace(TRAILING_VERSION, '');
   return (
     apps.find((path) => named(path) === wanted) ??
+    apps.find((path) => named(path) === unversioned) ??
     apps.find((path) => named(path).startsWith(wanted)) ??
     null
   );
 }
+
+const TRAILING_VERSION = /\d+$/;
 
 function spoken(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]/g, '');

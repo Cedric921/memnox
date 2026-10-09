@@ -103,7 +103,7 @@ export const ACTING_TOOLS: readonly ToolDefinition[] = [
   },
   proposeTool(
     'propose_start',
-    'Start a new agent session the person asked for, like "start Claude in memnox cloud on the failing test", "open Claude Code in VS Code and ask it to check the changes" or "open Codex desktop and ask it to review my changes". Nothing starts: it returns an id and the words to read back. Pass task in their words, and repository as they named it.',
+    'Start a new agent session the person asked for, like "start Claude in memnox cloud on the failing test", "open Claude Code in VS Code and ask it to check the changes" or "open Codex desktop and ask it to review my changes". Nothing starts: it returns an id and the words to read back. Pass task in their words, and repository as they named it. Leave task out when they only asked to open or start a session, so it opens waiting for them: never make one up.',
     {
       agent: {
         type: 'string',

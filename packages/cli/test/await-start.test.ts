@@ -18,7 +18,7 @@ describe('waiting for a started agent to show itself', () => {
       cwd: `${REPOSITORY}/packages/cli`,
       seenAt: '2026-10-09T10:00:03.000Z',
     });
-    expect(await awaitSessionStart(home, REPOSITORY, SINCE, 50)).toBe(true);
+    expect(await awaitSessionStart(home, REPOSITORY, SINCE, 50)).toBe('ses_new');
   });
 
   it('never takes one that was already running, or one in a folder beside it', async () => {
@@ -38,6 +38,6 @@ describe('waiting for a started agent to show itself', () => {
       cwd: `${REPOSITORY}-legacy`,
       seenAt: '2026-10-09T10:00:03.000Z',
     });
-    expect(await awaitSessionStart(home, REPOSITORY, SINCE, 50)).toBe(false);
+    expect(await awaitSessionStart(home, REPOSITORY, SINCE, 50)).toBeNull();
   });
 });

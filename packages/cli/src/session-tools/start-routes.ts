@@ -73,14 +73,23 @@ export async function launched(
   moment: string,
 ): Promise<Record<string, unknown>> {
   const handed = delivery === null || wentIn(delivery.outcome);
-  if (handed) await noteFocus(deps, start, 'started');
   // Typed is not running: a missing command or a shell prompt left waiting looks the same to the Mac.
-  const seen =
+  const found =
     handed && deps.startSeen !== undefined
       ? await deps.startSeen(start.repository, moment)
-      : null;
+      : undefined;
+  // The session itself once it showed up, so "there" and "that session" mean it from the next words on.
+  if (handed) {
+    await noteFocus(
+      deps,
+      { ...start, ...(typeof found === 'string' ? { sessionId: found } : {}) },
+      'started',
+    );
+  }
+  const seen = found === undefined ? null : found !== null;
   return {
     repository: basename(start.repository),
+    ...(typeof found === 'string' ? { session: found } : {}),
     ...(start.editor === undefined ? {} : { in: editorName(deps, start) }),
     ...startedAs(
       delivery,

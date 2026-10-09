@@ -367,7 +367,7 @@ describe('starting a session out loud', () => {
       delivered: async () => ({ outcome: 'typed', at: NOW.toISOString() }),
       startSeen: async (repository) => {
         asked.push(basename(repository));
-        return seen;
+        return seen ? 'ses_started' : null;
       },
     });
     const start = async (deps: SessionToolDeps): Promise<unknown> => {
@@ -382,8 +382,14 @@ describe('starting a session out loud', () => {
     expect(unseen).toMatchObject({ started: true, confirmed: false });
     expect(unseen.said).toContain('has not come up yet');
     expect(unseen.said).toContain('never say it is starting');
-    const seen = (await start(startAs(true))) as { said: string; confirmed?: boolean };
+    const seen = (await start(startAs(true))) as {
+      said: string;
+      confirmed?: boolean;
+      session?: string;
+    };
     expect(seen.confirmed).toBeUndefined();
+    // Named, so "there" and "that session" mean the one that just started.
+    expect(seen.session).toBe('ses_started');
     expect(seen.said).toContain('the agent is starting on the task');
     expect(asked).toEqual(['memnox-runtime', 'memnox-runtime']);
   });

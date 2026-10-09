@@ -116,6 +116,20 @@ describe('the line that starts a session', () => {
     ).toBe(`cd '/r' && memnox run -- hermes chat -q 'review my changes'`);
   });
 
+  it('opens the agent waiting for its first prompt when nobody gave it a task', () => {
+    expect(
+      startCommand({
+        id: 'stt_4',
+        agent: 'hermes',
+        command: 'hermes',
+        repository: '/r',
+        task: '',
+        proposedAt: SET_AT,
+        expiresAt: SET_AT,
+      }),
+    ).toBe(`cd '/r' && memnox run -- hermes`);
+  });
+
   it('hands the agent its brief through memnox run when the work came from the workspace', () => {
     expect(
       startCommand({

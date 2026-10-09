@@ -122,9 +122,11 @@ export function startCommand(start: SessionStart): string {
     : shellQuoted(start.command);
   const hold = start.holdCredentials === true ? ' --hold-credentials' : '';
   const brief = start.brief === undefined ? '' : ` --brief ${shellQuoted(start.brief)}`;
+  const run = `cd ${shellQuoted(start.repository)} && memnox run${hold}${brief} -- ${command}`;
+  // Nothing to do yet starts the agent waiting for its first prompt, never on a made-up task.
+  if (task === '') return run;
   const flag = TASK_FLAG[start.agent];
-  const agent = flag === undefined ? command : `${command} ${flag}`;
-  return `cd ${shellQuoted(start.repository)} && memnox run${hold}${brief} -- ${agent} ${shellQuoted(task)}`;
+  return `${run}${flag === undefined ? '' : ` ${flag}`} ${shellQuoted(task)}`;
 }
 
 /** A command name a shell reads as one word as it is, which a path with a space in it is not. */

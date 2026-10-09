@@ -51,9 +51,8 @@ export async function proposeStartTool(
   const command = resolve(agent);
   if (command === null)
     return { proposed: false, ...(inApp ? noApp : notInstalled)(agent, resolve) };
-  // An app may be opened with nothing to ask it yet; a terminal agent always starts on something.
-  const task = textArg(args, 'task') ?? (inApp ? '' : undefined);
-  if (task === undefined) return { proposed: false, said: NEEDS_TASK };
+  // Asked for only a session, it starts waiting for them rather than on a task nobody gave it.
+  const task = textArg(args, 'task') ?? '';
   const known = await knownRepositories(deps);
   const { text, brief, found } = await withBrief(deps, args, task, MOST_TASK_CHARS);
   const chosen = await repositoryFor(deps, textArg(args, 'repository'), known, brief);
@@ -275,7 +274,6 @@ function runnable(path: string): boolean {
 }
 
 const ONLY_KNOWN_AGENTS = `Only ${Object.keys(STARTABLE_AGENT).join(' or ')} can be started by voice.`;
-const NEEDS_TASK = 'Pass task: what the new session should do, in their words.';
 const NO_SUCH_REPOSITORY =
   'No repository on this Mac goes by that name. Offer the closest from known, by name.';
 const READ_BACK =

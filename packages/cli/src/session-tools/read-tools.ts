@@ -56,7 +56,7 @@ export interface SessionToolDeps {
   /** How the Mac says an instruction it typed landed, or null when it never said; absent where nobody types. */
   delivered?: (requestId: string, waitMs?: number) => Promise<DisplayDelivery | null>;
   /** Whether a session began in that repository since then, from its own start hook; absent where nothing can tell. */
-  startSeen?: (repository: string, since: string) => Promise<boolean>;
+  startSeen?: (repository: string, since: string) => Promise<string | null>;
   /** Where an app the person named by voice is installed, or null; absent means the folders apps are kept in. */
   findApp?: (name: string) => string | null;
   /** Ends an agent's process as closing its terminal would; absent means signalling it for real. */
