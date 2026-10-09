@@ -296,6 +296,16 @@ describe('how an instruction reaches a session waiting on the person', () => {
     ).toBe('later');
   });
 
+  it('hands any other terminal app to the Mac, and leaves a session with no app to its pane', () => {
+    expect(waitingRoute({ ...host, app: 'Ghostty', tty: 'ttys021' }, agentInFront)).toBe(
+      'typed',
+    );
+    expect(waitingRoute({ ...host, tty: 'ttys021' }, agentInFront)).toBe('later');
+    expect(waitingRoute({ ...host, app: 'Ghostty', tty: 'ttys021' }, () => false)).toBe(
+      'later',
+    );
+  });
+
   it("types into an editor's agent panel even when its process inherited a terminal", () => {
     expect(
       waitingRoute(

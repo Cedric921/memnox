@@ -20,6 +20,7 @@ import { noteFocus } from './focus';
 import { textArg, type SessionToolDeps, type ToolArgs } from './read-tools';
 import { changesTool } from './changes-tool';
 import { liveHost } from './live-host';
+import { paneOn, typeIntoPane, type Pane } from './multiplexer';
 import { unlessMacTold } from './mac-told';
 import type { RewindSeams } from './rewind-tool';
 import { scopeOf } from './session-scope';
@@ -68,7 +69,8 @@ const OPENCLAW_SAID =
   'OpenClaw cannot be handed work from here yet. Say that you can see what it does and what it asked, but not type to it, and offer to tell it in its own chat instead.';
 
 const EDITORS = /code|cursor|windsurf/i;
-const TERMINALS = /iterm|terminal/i;
+/** Apps the Mac finds the session's own tab in, so they are never looked for among multiplexer panes. */
+const TYPES_ITSELF = /iterm|terminal|code|cursor|windsurf/i;
 
 const SAID: Record<Route, string> = {
   queued:
@@ -197,6 +199,15 @@ export async function sendInstructionTool(
   // Where it runs now, since a tab recorded when it began may since be closed or someone else's.
   const host = recorded === null ? null : liveHost(recorded);
   const route = await routeFor(deps, instruction.sessionId, host, inForeground);
+  // A tmux or WezTerm pane is typed into through its own command line, whatever app shows it.
+  const pane =
+    route !== ROUTE.QUEUED &&
+    host?.tty !== undefined &&
+    !TYPES_ITSELF.test(host.app ?? host.appPath ?? '') &&
+    inForeground(host.tty)
+      ? paneOn(host.tty, deps.panes)
+      : null;
+  if (pane !== null) return typedInPane(deps, instruction, pane);
   if (route === ROUTE.QUEUED || route === ROUTE.LATER) {
     await store.queue(instruction, moment);
     return { sent: true, session: instruction.sessionId, how: route, said: SAID[route] };
@@ -242,6 +253,28 @@ function saidAgain(sessionId: string, failed: FailedTyping): Record<string, unkn
     ...(failed.why === undefined ? {} : { why: failed.why }),
     said: `${NOT_TYPED.failed} It failed this way a moment ago, so it was not tried again.`,
   };
+}
+
+/** Typed into its pane and sent, and called landed only when the pane shows the words. */
+async function typedInPane(
+  deps: SessionToolDeps,
+  instruction: SpokenInstruction,
+  pane: Pane,
+): Promise<Record<string, unknown>> {
+  const typed = await typeIntoPane(pane, instruction.message, deps.panes);
+  const sent = { session: instruction.sessionId, how: ROUTE.TYPED };
+  if (!typed.sent) {
+    return {
+      ...sent,
+      sent: false,
+      how: DELIVERY.FAILED,
+      why: `${pane.multiplexer} would not take the words for its pane`,
+      said: NOT_TYPED.failed,
+    };
+  }
+  return typed.proof === undefined
+    ? { ...sent, sent: true, said: SENT_UNCHECKED }
+    : { ...sent, sent: true, proof: typed.proof, said: SAID.typed };
 }
 
 /** Asks the Mac to type it, then says only what the Mac reported, so a failure is never called sent. */
@@ -379,8 +412,8 @@ export function waitingRoute(
   if (host === null) return ROUTE.LATER;
   const app = host.app ?? host.appPath ?? '';
   if (host.panel === true) return EDITORS.test(app) ? ROUTE.PREFILLED : ROUTE.LATER;
-  const reachable = TERMINALS.test(app) || EDITORS.test(app);
-  if (host.tty !== undefined && reachable && inForeground(host.tty)) return ROUTE.TYPED;
+  // Any other terminal app too: the Mac types there only when one tab is open, and otherwise says where to paste.
+  if (host.tty !== undefined && app !== '' && inForeground(host.tty)) return ROUTE.TYPED;
   return EDITORS.test(app) && host.tty === undefined ? ROUTE.PREFILLED : ROUTE.LATER;
 }
 

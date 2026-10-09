@@ -31,6 +31,7 @@ import type { CommandRun } from './voice-commands';
 import { policySetInForce } from '../policy-path';
 import { readLocalDecisions } from '../sync/local-decisions';
 import { scopeOf, type SessionScope } from './session-scope';
+import type { PaneSeams } from './multiplexer';
 
 /** What the tools read the machine through, injected so a test never reads the real one. */
 export interface SessionToolDeps {
@@ -56,6 +57,10 @@ export interface SessionToolDeps {
   delivered?: (requestId: string, waitMs?: number) => Promise<DisplayDelivery | null>;
   /** Whether a session began in that repository since then, from its own start hook; absent where nothing can tell. */
   startSeen?: (repository: string, since: string) => Promise<boolean>;
+  /** Where an app the person named by voice is installed, or null; absent means the folders apps are kept in. */
+  findApp?: (name: string) => string | null;
+  /** How tmux and WezTerm are asked about their panes and typed into; absent means the programs themselves. */
+  panes?: PaneSeams;
   /** What the Mac saw for a LOOK, or null when it said nothing in time; absent means waiting on the file. */
   seen?: (requestId: string) => Promise<Sight | null>;
   /** Where an agent's command is, from the person's own shell or where it is installed, or null. */
