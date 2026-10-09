@@ -17,30 +17,52 @@ import { CLI_VERSION } from '../defaults';
 /** What the Mac opens a link to, and what an uninstall names. */
 export const TERMINALS_EXTENSION = 'memnox.memnox-terminals';
 
-/** Each editor by the CLI inside its own bundle, since none of them is on PATH by default, and where it keeps extensions. */
+/** Each editor by its app bundle and the CLI inside it, since none of them is on PATH by default, and where it keeps extensions. */
 const EDITORS: readonly Editor[] = [
   {
     name: 'VS Code',
-    cli: '/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code',
+    app: 'Visual Studio Code.app',
+    bin: 'Contents/Resources/app/bin/code',
     extensions: '.vscode/extensions',
   },
   {
     name: 'Cursor',
-    cli: '/Applications/Cursor.app/Contents/Resources/app/bin/cursor',
+    app: 'Cursor.app',
+    bin: 'Contents/Resources/app/bin/cursor',
     extensions: '.cursor/extensions',
   },
   {
     name: 'Windsurf',
-    cli: '/Applications/Windsurf.app/Contents/Resources/app/bin/windsurf',
+    app: 'Windsurf.app',
+    bin: 'Contents/Resources/app/bin/windsurf',
     extensions: '.windsurf/extensions',
   },
 ];
 
+/** Where an app is installed: for everyone, or under the person's own home when they could not install it for everyone. */
+const APP_FOLDERS = ['/Applications', 'Applications'] as const;
+
 interface Editor {
   name: string;
-  cli: string;
+  app: string;
+  bin: string;
   /** Under the home folder, holding one folder per installed extension and version. */
   extensions: string;
+}
+
+/** An editor found on this Mac, with the path to its CLI. */
+interface InstalledEditor extends Editor {
+  cli: string;
+}
+
+/** The editors installed here, each with the CLI in whichever applications folder holds it. */
+function installedEditors(home: string, seams: TerminalsSeams): InstalledEditor[] {
+  return EDITORS.flatMap((each) => {
+    const cli = APP_FOLDERS.map((folder) =>
+      join(folder.startsWith('/') ? folder : join(home, folder), each.app, each.bin),
+    ).find((path) => seams.exists(path));
+    return cli === undefined ? [] : [{ ...each, cli }];
+  });
 }
 
 const EDITOR_TIMEOUT_MS = 60_000;
@@ -72,7 +94,7 @@ export async function runVscodeTerminals(
 ): Promise<void> {
   const { flow } = context;
   flow.open(reverting ? 'memnox protect --revert-vscode' : 'memnox protect --vscode');
-  const editors = EDITORS.filter((each) => seams.exists(each.cli));
+  const editors = installedEditors(home, seams);
   if (editors.length === 0) {
     flow.close('No VS Code, Cursor or Windsurf in /Applications, so nothing changed.');
     return;
@@ -97,7 +119,7 @@ export async function refreshVscodeTerminals(
   if (script === null) return;
   const shipped = await readFile(script, 'utf8').catch(() => null);
   if (shipped === null) return;
-  const here = EDITORS.filter((each) => seams.exists(each.cli));
+  const here = installedEditors(home, seams);
   const held = await Promise.all(
     here.map((each) => holdsShipped(join(home, each.extensions), shipped)),
   );
@@ -179,7 +201,7 @@ function render(
 }
 
 async function installInto(
-  editors: readonly Editor[],
+  editors: readonly InstalledEditor[],
   home: string,
   seams: TerminalsSeams,
 ): Promise<EditorOutcome[]> {
@@ -227,7 +249,7 @@ async function forgetRemovedCopies(folder: string): Promise<void> {
 }
 
 async function uninstallFrom(
-  editor: Editor,
+  editor: InstalledEditor,
   seams: TerminalsSeams,
 ): Promise<EditorOutcome> {
   const ran = await seams.run(editor.cli, ['--uninstall-extension', TERMINALS_EXTENSION]);

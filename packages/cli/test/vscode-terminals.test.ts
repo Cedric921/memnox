@@ -69,6 +69,23 @@ describe('the extension that shows a session its own VS Code terminal', () => {
     );
   });
 
+  it("finds an editor installed under the person's own Applications folder", async () => {
+    const home = await mkdtemp(join(tmpdir(), 'memnox-vscode-'));
+    const own = join(
+      home,
+      'Applications/Visual Studio Code.app/Contents/Resources/app/bin/code',
+    );
+    const calls: string[][] = [];
+    const seams = await seamsFor(calls);
+    await runVscodeTerminals(new CliContext(new RecordedOutput()), home, false, {
+      ...seams,
+      exists: (path) => path === own,
+    });
+    expect(
+      calls.some((each) => each[0] === own && each[1] === '--install-extension'),
+    ).toBe(true);
+  });
+
   it('puts itself in as the daemon starts only where the copy there is not the one it ships', async () => {
     const home = await mkdtemp(join(tmpdir(), 'memnox-vscode-'));
     const calls: string[][] = [];
