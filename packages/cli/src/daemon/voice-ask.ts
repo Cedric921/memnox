@@ -13,6 +13,7 @@ import {
   askContext,
   foldersContext,
   heardWordsContext,
+  profileContext,
   lookingAtContext,
   openSessionContext,
   windowContext,
@@ -25,6 +26,7 @@ import {
 import { BRAIN_CHUNK } from '../operator/brain';
 import { folderUses } from '../operator/folders';
 import { readHeardWords } from '../operator/heard-words';
+import { noteOffered, readProfile } from '../operator/profile';
 import type { BrainTurns } from './brain-turns';
 import {
   lastAnswered,
@@ -282,19 +284,25 @@ export class VoiceAsk {
       new AgentQuestions(this.deps.home).open(moment).catch(() => []),
       this.openView(),
     ]);
-    const [heardWords, folders, held] = await Promise.all([
+    const [heardWords, folders, held, profile] = await Promise.all([
       readHeardWords(this.deps.home).catch(() => []),
       folderUses(this.deps.home, Date.parse(moment)).catch(() => []),
       new WaitingFeed(this.deps.home)
         .current(moment)
         .then((events) => events.filter((each) => each.kind === DAEMON_EVENT.HELD))
         .catch(() => []),
+      readProfile(this.deps.home).catch(() => ({ facts: [], offeredAt: moment })),
     ]);
+    const offered = profile.offeredAt !== undefined;
+    // The invitation goes out in one turn only, so it is marked the moment it is put in front of the brain.
+    if (profile.facts.length === 0 && !offered)
+      await noteOffered(this.deps.home, moment).catch(() => undefined);
     const spoke = exchanges.filter((each) => each.unasked !== true).at(-1)?.at;
     const context = [
       momentContext(new Date(moment), spoke),
       lookingAtContext(this.lookingAt),
       windowContext(this.lookingAtWindow),
+      profileContext(profile.facts, offered),
       heardWordsContext(heardWords),
       foldersContext(folders),
       recallContext(exchanges, waiting),

@@ -42,6 +42,7 @@ import type { ToolCatalogue } from './session-server';
 import { ACTING_TOOLS } from './acting-tools';
 import { FOLDER_TOOLS, foldersTool, openFolderTool } from './folder-tools';
 import { forgetWordTool, HEARD_WORD_TOOLS, rememberWordTool } from './heard-words-tools';
+import { forgetAboutMeTool, PROFILE_TOOLS, rememberAboutMeTool } from './profile-tools';
 import { AGENT_ARG, proposeTool, SAID_ARG } from './operator-args';
 import { readTool, SESSION_ARG, type ToolDefinition } from './session-tools';
 import { TOOL_ARG } from './session-tools.constants';
@@ -306,6 +307,7 @@ export const OPERATOR_TOOLS: readonly ToolDefinition[] = [
   },
   ...ACTING_TOOLS,
   ...HEARD_WORD_TOOLS,
+  ...PROFILE_TOOLS,
   ...FOLDER_TOOLS,
   LOOK_TOOL,
   {
@@ -444,6 +446,8 @@ const OPERATOR_CALLS: Record<string, OperatorCall> = {
   propose_rule: (deps, _seams, args) => proposeRuleTool(deps, args),
   remember_word: (deps, _seams, args) => rememberWordTool(deps, args),
   forget_word: (deps, _seams, args) => forgetWordTool(deps, args),
+  remember_about_me: (deps, _seams, args) => rememberAboutMeTool(deps, args),
+  forget_about_me: (deps, _seams, args) => forgetAboutMeTool(deps, args),
   folders: (deps, _seams, args) => foldersTool(deps, args),
   open_folder: (deps, _seams, args) => openFolderTool(deps, args),
   look: (deps, _seams, args) => lookTool(deps, args),
