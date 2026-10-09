@@ -20,6 +20,7 @@ import { noteFocus } from './focus';
 import { textArg, type SessionToolDeps, type ToolArgs } from './read-tools';
 import { changesTool } from './changes-tool';
 import { liveHost } from './live-host';
+import { unlessMacTold } from './mac-told';
 import type { RewindSeams } from './rewind-tool';
 import { scopeOf } from './session-scope';
 import { turnOverByTranscript } from './sessions-tool';
@@ -308,7 +309,9 @@ function notTyped(
       ...why,
     });
   }
-  const said = isNotTyped(delivery.outcome) ? NOT_TYPED[delivery.outcome] : UNCONFIRMED;
+  const said = isNotTyped(delivery.outcome)
+    ? unlessMacTold(delivery, NOT_TYPED[delivery.outcome])
+    : UNCONFIRMED;
   return { sent: false, session: sessionId, how: delivery.outcome, ...why, said };
 }
 

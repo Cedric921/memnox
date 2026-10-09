@@ -20,6 +20,7 @@ import {
   WorkBriefs,
 } from '@memnox/core';
 import { noApp, openAppStart, resolveInstalledApp } from './app-tools';
+import { unlessMacTold } from './mac-told';
 import { mainCheckoutOf } from './main-checkout';
 import { keepSurface } from './start-surface';
 import { editorName, PLACE, placeFor, surfaceOf } from './start-place';
@@ -226,7 +227,7 @@ function startedAs(
   return {
     started: false,
     ...(delivery.reason === undefined ? {} : { why: delivery.reason }),
-    said: NOT_STARTED,
+    said: unlessMacTold(delivery, NOT_STARTED),
   };
 }
 

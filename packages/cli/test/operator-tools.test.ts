@@ -879,6 +879,28 @@ describe('telling an agent what the person said', () => {
     expect(await new DisplayRequests(deps.home).open(NOW.toISOString())).toEqual([]);
   });
 
+  it('says nothing over the Mac when it already told them what to do', async () => {
+    const base = await waitingInEditor();
+    const deps: SessionToolDeps = {
+      ...base,
+      delivered: async (requestId) => {
+        await new DisplayRequests(base.home).deliver(requestId, {
+          outcome: 'failed',
+          at: NOW.toISOString(),
+          reason: 'the editor runs the older Memnox extension',
+          told: true,
+        });
+        return new DisplayRequests(base.home).deliveryOf(requestId);
+      },
+    };
+    const answer = (await callOperatorTool(deps, SEAMS, 'send_instruction', {
+      instruction: await proposed(deps),
+    })) as { sent: boolean; said: string };
+    expect(answer.sent).toBe(false);
+    expect(answer.said).toContain('already said out loud');
+    expect(answer.said).toContain('Write nothing at all this turn');
+  });
+
   it('answers a retry at once when the Mac said the same send would fail again', async () => {
     const base = await waitingInEditor();
     let typed = 0;

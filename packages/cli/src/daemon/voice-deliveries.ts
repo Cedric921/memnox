@@ -34,11 +34,13 @@ export async function deliveredAnswer(
       : outcome;
   const reason = request.reason === undefined ? {} : { reason: request.reason };
   const proof = request.proof === undefined ? {} : { proof: request.proof };
+  const told = request.told === true ? { told: true } : {};
   const kept = await keep(home, request.subject, {
     outcome: answer,
     at,
     ...reason,
     ...proof,
+    ...told,
   });
   return { id: request.id, ok: true, outcome: kept ? 'kept' : 'nobody waiting' };
 }

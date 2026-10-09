@@ -79,6 +79,8 @@ export interface DisplayDelivery {
   reason?: string;
   /** What the Mac read back after acting, which only a verified delivery must carry. */
   proof?: DeliveryProof;
+  /** The Mac already said out loud what the person has to do, so nothing more is said about it. */
+  told?: boolean;
 }
 
 export interface DisplayInput {

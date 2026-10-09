@@ -14,6 +14,7 @@ import {
   type SessionStart,
   type StartableAgent,
 } from '@memnox/core';
+import { unlessMacTold } from './mac-told';
 import { textArg, type SessionToolDeps, type ToolArgs } from './read-tools';
 
 /**
@@ -123,7 +124,7 @@ function openedAs(
   return {
     started: false,
     ...(delivery.reason === undefined ? {} : { why: delivery.reason }),
-    said: NOT_OPENED,
+    said: unlessMacTold(delivery, NOT_OPENED),
   };
 }
 

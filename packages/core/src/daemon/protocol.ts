@@ -136,6 +136,8 @@ export interface DaemonRequest extends ExtensionRequestFields {
   voiceAgent?: string;
   /** On DELIVERED: what the Mac read back after acting, which a verified outcome must carry. */
   proof?: DeliveryProof;
+  /** On DELIVERED: the Mac already said out loud what the person has to do, so the brain adds nothing. */
+  told?: boolean;
   /** On SEEN: what was on screen when the brain asked to look. */
   sight?: Sight;
 }
