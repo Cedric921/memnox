@@ -301,7 +301,7 @@ export function builtVersion(script: string): string {
   return `${CLI_VERSION}-${digest}`;
 }
 
-/** What VS Code reads as the extension's package.json: it wakes only to answer a link. */
+/** What VS Code reads as the extension's package.json: it runs in every window, quiet until a request names one of its terminals. */
 function manifest(version: string): Record<string, unknown> {
   return {
     name: 'memnox-terminals',
@@ -312,7 +312,8 @@ function manifest(version: string): Record<string, unknown> {
     version,
     license: 'Apache-2.0',
     engines: { vscode: '^1.74.0' },
-    activationEvents: ['onUri'],
+    // Every window, once it has started, so the one holding a session's terminal is watching when words arrive for it.
+    activationEvents: ['onUri', 'onStartupFinished'],
     main: './dist/extension.js',
   };
 }
