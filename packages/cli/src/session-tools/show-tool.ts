@@ -23,6 +23,7 @@ import type { RewindSeams } from './rewind-tool';
 import { liveHost } from './live-host';
 import { resolveInstalledApp } from './app-tools';
 import { scopeOf, type SessionScope } from './session-scope';
+import { stopSession } from './stop-tool';
 
 /**
  * Shows the person a session: its own window brought forward, or a card with its summary in
@@ -40,6 +41,7 @@ const DISPLAYS: Readonly<Record<string, DisplayKind>> = {
   watch: DISPLAY.OPEN,
   card: DISPLAY.CARD,
   close: DISPLAY.CLOSE,
+  stop: DISPLAY.INTERRUPT,
 };
 
 /** How the brain asks for every session at once, which names no session. */
@@ -62,7 +64,7 @@ export async function showTool(
   if (display === null) {
     return {
       shown: false,
-      said: `display is "open", "watch", "card", "close", "dismiss" or "all", not "${asked}".`,
+      said: `display is "open", "watch", "card", "stop", "close", "dismiss" or "all", not "${asked}".`,
     };
   }
   const scope = await withEvents(deps.home, (store) =>
@@ -71,6 +73,7 @@ export async function showTool(
   if (scope.sessionId === null) return { ...scope, shown: false };
   if (display === DISPLAY.CLOSE)
     return closeSession(deps, scope, scope.sessionId, textArg(args, 'now') === 'true');
+  if (display === DISPLAY.INTERRUPT) return stopSession(deps, scope, scope.sessionId);
   return putUp(deps, seams, { scope, sessionId: scope.sessionId, display, args });
 }
 
@@ -178,7 +181,7 @@ function closedAs(delivery: DisplayDelivery | null): Record<string, unknown> {
 }
 
 const MID_TURN =
-  'Nothing was closed yet: it is in the middle of a turn, and closing its tab stops that work where it is, though its conversation is kept. Ask once, in one short question, whether to close it now anyway; on their yes call show with display close and now "true" at once. Never refuse it twice.';
+  'Nothing was closed yet: it is in the middle of a turn, and closing its tab ends the agent there, though its conversation is kept. Ask once, in one short question, whether to stop it first and keep the tab, which is show with display stop, or close it now anyway, which is show with display close and now "true"; do which they say at once. Never refuse it twice.';
 const CLOSED =
   'Its live window and its terminal tab are closed, which ended the agent there; its conversation is kept and can be resumed. Say it is closed in a few words.';
 const CLOSE_UNCONFIRMED =

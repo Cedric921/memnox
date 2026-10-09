@@ -28,6 +28,7 @@ export function doneText(event: DaemonEvent, agentName: string, outcome: string)
     return `Brought ${agentName} forward`;
   }
   if (event.display === DISPLAY.CLOSE) return `Closed ${agentName}`;
+  if (event.display === DISPLAY.INTERRUPT) return `Stopped ${agentName}`;
   if (event.display === DISPLAY.FOLDER) return 'Opened the folder on your Mac';
   if (event.display === DISPLAY.LOOK) return 'Looked at your screen';
   if (event.display === DISPLAY.DISMISS) return 'Cleared your screen';
@@ -40,6 +41,7 @@ export function macRationale(event: DaemonEvent, agentName: string): string {
     return `Type into ${agentName} on your Mac: ${event.summary}`;
   }
   if (event.display === DISPLAY.CLOSE) return `Close ${agentName} on your Mac`;
+  if (event.display === DISPLAY.INTERRUPT) return `Stop ${agentName} on your Mac`;
   if (event.display === DISPLAY.FOLDER) return `Open ${event.summary} on your Mac`;
   return `On your Mac: ${event.title ?? event.summary}`;
 }

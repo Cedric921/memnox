@@ -36,7 +36,7 @@ export function waitingRequest(
   record: unknown,
   tty: string,
   moment: string,
-  display: 'type' | 'close',
+  display: 'type' | 'close' | 'interrupt',
 ): { request: Record<string, unknown> } | { why: string } {
   if (record === null || typeof record !== 'object') {
     return { why: 'its request is gone' };

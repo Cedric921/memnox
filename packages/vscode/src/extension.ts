@@ -25,6 +25,7 @@ import {
  * the agent there, reading the words from the request rather than the link, since any page can
  * open a link and a link that carried words would be a way into the agent. `/launch?request=dsp_...`
  * starts an agent the person said yes to in a new terminal here, on the same terms.
+ * `/close` and `/interrupt` close or press Escape in a session's terminal, on the same terms.
  */
 
 const PS_TIMEOUT_MS = 2_000;
@@ -54,6 +55,7 @@ export function activate(context: vscode.ExtensionContext): void {
         if (uri.path === '/terminal') await showTerminal(uri.query);
         if (uri.path === '/type') await typeInstruction(uri.query);
         if (uri.path === '/close') await closeTerminal(uri.query);
+        if (uri.path === '/interrupt') await interruptTerminal(uri.query);
         if (uri.path === '/launch') await launchAgent(uri.query);
       },
     }),
@@ -169,6 +171,44 @@ async function closeTerminal(query: string): Promise<void> {
       return;
     }
     terminal.dispose();
+    await deliver(path, record, 'typed');
+  } finally {
+    typing.delete(link.request);
+  }
+}
+
+/** What an agent in a terminal reads as the person pressing Escape, which stops its turn where it is. */
+const ESCAPE = String.fromCharCode(27);
+
+/**
+ * Presses Escape in the integrated terminal a session runs in, only for a stop Memnox asked for
+ * by voice moments ago, so a link opened by any page can interrupt nothing.
+ */
+async function interruptTerminal(query: string): Promise<void> {
+  const link = typeLinkOf(query);
+  if (link === null || typing.has(link.request)) return;
+  typing.add(link.request);
+  try {
+    const path = join(DISPLAYS, `${link.request}.json`);
+    const record = await readJson(path);
+    const waiting = waitingRequest(
+      record,
+      link.tty,
+      new Date().toISOString(),
+      'interrupt',
+    );
+    if ('why' in waiting) {
+      if (waiting.why !== 'it was already answered' && record !== null) {
+        await deliver(path, record, 'failed', waiting.why);
+      }
+      return;
+    }
+    const terminal = await terminalAt(link.tty);
+    if (terminal === undefined) {
+      await deliver(path, record, 'failed', 'no integrated terminal holds its device');
+      return;
+    }
+    terminal.sendText(ESCAPE, false);
     await deliver(path, record, 'typed');
   } finally {
     typing.delete(link.request);

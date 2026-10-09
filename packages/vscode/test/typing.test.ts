@@ -101,6 +101,21 @@ describe('typing an instruction into an integrated terminal', () => {
       why: 'the link named a different terminal',
     });
   });
+
+  it('presses Escape only where Memnox asked to stop, never for a close or a typing link', () => {
+    const stopping = { ...waiting, display: 'interrupt', text: undefined };
+    expect(waitingRequest(stopping, 'ttys013', NOW, 'interrupt')).toHaveProperty(
+      'request',
+    );
+    expect(
+      waitingRequest({ ...stopping, display: 'close' }, 'ttys013', NOW, 'interrupt'),
+    ).toEqual({
+      why: 'it is not a request to interrupt',
+    });
+    expect(waitingRequest(stopping, 'ttys013', NOW, 'close')).toEqual({
+      why: 'it is not a request to close',
+    });
+  });
 });
 
 describe('starting an agent in a new integrated terminal', () => {

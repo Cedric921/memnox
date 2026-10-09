@@ -24,6 +24,8 @@ export const DISPLAY = {
   SESSIONS: 'sessions',
   /** Close the live window on a session and its own terminal tab, which ends the agent there. */
   CLOSE: 'close',
+  /** Press Escape in the terminal a session runs in, which stops its turn where it is and keeps the tab. */
+  INTERRUPT: 'interrupt',
   /** Take every Memnox card and window off the screen, leaving every agent and its tab alone. */
   DISMISS: 'dismiss',
   /** A message from the person's connected mail, drafted for them to read; Send is a signed CONFIRM of `subject`. */

@@ -217,7 +217,7 @@ export const OPERATOR_TOOLS: readonly ToolDefinition[] = [
   {
     name: 'show',
     description:
-      'Show the person a session. display "open" brings the session itself forward: its own terminal tab, or its editor window and the terminal or conversation it runs in, so they can carry on there. display "watch" opens a live window in the middle of the screen showing what it is doing now and its conversation. display "card" puts a card in the top left corner of their screen with a title and a markdown summary of what happened, for them to read while you say the gist. display "all" puts every session up at once, one card each, and needs no session. display "close" closes its live window and its own terminal tab, in iTerm, Terminal or an editor, which ends the agent there; while a turn is in progress it refuses unless now is "true". display "dismiss" takes every Memnox card, live window and board off the screen at once, needs no session and ends nothing. Use open when they ask to open it, go to it, switch to it or take them to it; watch only when they ask to watch it live or see it as it happens; card when they ask for a summary, what a session did, or say yes, here or in front of me after you offered a summary; all when they ask to see all their sessions, every session or them all at once, which is never show_agents; close when they ask to close a session, its tab or its terminal, which is never pause_session; dismiss when they ask to close, clear or hide the popups, the cards, the windows or the screen, which never closes a session. Only close ends anything: a session mid turn only when they said to close it now after hearing that it ends the work in progress. Claude desktop, the Codex app and Hermes are apps, never a session to show: type into one with type_in_app.',
+      'Show the person a session. display "open" brings the session itself forward: its own terminal tab, or its editor window and the terminal or conversation it runs in, so they can carry on there. display "watch" opens a live window in the middle of the screen showing what it is doing now and its conversation. display "card" puts a card in the top left corner of their screen with a title and a markdown summary of what happened, for them to read while you say the gist. display "all" puts every session up at once, one card each, and needs no session. display "stop" presses Escape in the terminal it runs in, which stops what it is doing at once and keeps its tab and conversation. display "close" closes its live window and its own terminal tab, in iTerm, Terminal or an editor, which ends the agent there; while a turn is in progress it refuses unless now is "true". display "dismiss" takes every Memnox card, live window and board off the screen at once, needs no session and ends nothing. Use open when they ask to open it, go to it, switch to it or take them to it; watch only when they ask to watch it live or see it as it happens; card when they ask for a summary, what a session did, or say yes, here or in front of me after you offered a summary; all when they ask to see all their sessions, every session or them all at once, which is never show_agents; stop when they ask to stop, interrupt, cancel or halt an agent or what it is doing now, like "stop it", "stop Claude" or "cancel that", which is never close and never pause_session; close when they ask to close a session, its tab or its terminal, which is never pause_session; dismiss when they ask to close, clear or hide the popups, the cards, the windows or the screen, which never closes a session. Only close ends anything: a session mid turn only when they said to close it now after hearing that it ends the work in progress. Claude desktop, the Codex app and Hermes are apps, never a session to show: type into one with type_in_app.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -225,7 +225,8 @@ export const OPERATOR_TOOLS: readonly ToolDefinition[] = [
         session: SESSION_ARG,
         display: {
           type: 'string',
-          description: 'open, watch, card, close, dismiss or all; card when left out',
+          description:
+            'open, watch, card, stop, close, dismiss or all; card when left out',
         },
         now: {
           type: 'string',
@@ -249,7 +250,7 @@ export const OPERATOR_TOOLS: readonly ToolDefinition[] = [
   {
     name: 'pause_session',
     description:
-      'Pause a session the person asked to stop or hold: its next action waits until they resume it. It only ever holds an agent back, so it happens at once. Pass what they said. Closing a window or tab is show with display close, never this. Never pause the session marked notAnAgent.',
+      'Pause a session the person asked to pause or hold: its next action waits until they resume it. It only ever holds an agent back, so it happens at once. Pass what they said. Stopping what it is doing now is show with display stop, and closing a window or tab is show with display close, never this. Never pause the session marked notAnAgent.',
     inputSchema: {
       type: 'object',
       properties: { agent: AGENT_ARG, session: SESSION_ARG, said: SAID_ARG },
