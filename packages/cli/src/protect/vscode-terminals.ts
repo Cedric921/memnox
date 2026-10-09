@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { copyFile, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
@@ -250,27 +251,43 @@ async function packageExtension(
   await rm(staging, { recursive: true, force: true });
   await mkdir(join(staging, 'extension', 'dist'), { recursive: true });
   await copyFile(script, join(staging, 'extension', 'dist', 'extension.js'));
+  const version = builtVersion(await readFile(script, 'utf8'));
   await writeFile(
     join(staging, 'extension', 'package.json'),
-    `${JSON.stringify(manifest(), null, 2)}\n`,
+    `${JSON.stringify(manifest(version), null, 2)}\n`,
   );
-  await writeFile(join(staging, 'extension.vsixmanifest'), vsixManifest());
+  await writeFile(join(staging, 'extension.vsixmanifest'), vsixManifest(version));
   await writeFile(join(staging, '[Content_Types].xml'), CONTENT_TYPES);
-  const vsix = join(root, `memnox-terminals-${CLI_VERSION}.vsix`);
+  const vsix = join(root, `memnox-terminals-${version}.vsix`);
   await rm(vsix, { force: true });
   const zipped = await seams.run('/usr/bin/zip', ['-r', '-X', '-q', vsix, '.'], staging);
   return zipped.ok ? vsix : { why: `zip failed: ${lastLine(zipped.output)}` };
 }
 
+/** How much of the script's digest names a build, enough that two builds never share a folder. */
+const BUILD_DIGEST_CHARS = 8;
+
+/**
+ * The CLI version with the script's own digest, so every build installs into a folder of its own:
+ * reinstalling the same version lands in the folder the editor just marked removed, and is never loaded.
+ */
+export function builtVersion(script: string): string {
+  const digest = createHash('sha256')
+    .update(script)
+    .digest('hex')
+    .slice(0, BUILD_DIGEST_CHARS);
+  return `${CLI_VERSION}-${digest}`;
+}
+
 /** What VS Code reads as the extension's package.json: it wakes only to answer a link. */
-function manifest(): Record<string, unknown> {
+function manifest(version: string): Record<string, unknown> {
   return {
     name: 'memnox-terminals',
     displayName: 'Memnox terminals',
     description:
       'Lets the Memnox voice bring forward the terminal a session runs in, and type a confirmed instruction into it.',
     publisher: 'memnox',
-    version: CLI_VERSION,
+    version,
     license: 'Apache-2.0',
     engines: { vscode: '^1.74.0' },
     activationEvents: ['onUri'],
@@ -278,11 +295,11 @@ function manifest(): Record<string, unknown> {
   };
 }
 
-function vsixManifest(): string {
+function vsixManifest(version: string): string {
   return `<?xml version="1.0" encoding="utf-8"?>
 <PackageManifest Version="2.0.0" xmlns="http://schemas.microsoft.com/developer/vsx-schema/2011">
   <Metadata>
-    <Identity Language="en-US" Id="memnox-terminals" Version="${CLI_VERSION}" Publisher="memnox" />
+    <Identity Language="en-US" Id="memnox-terminals" Version="${version}" Publisher="memnox" />
     <DisplayName>Memnox terminals</DisplayName>
     <Description xml:space="preserve">Lets the Memnox voice bring forward the terminal a session runs in, and type a confirmed instruction into it.</Description>
     <Properties>

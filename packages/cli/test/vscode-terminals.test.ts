@@ -6,7 +6,9 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { CliContext } from '../src/cli-context';
 import { RecordedOutput } from '../src/cli-output';
+import { CLI_VERSION } from '../src/defaults';
 import {
+  builtVersion,
   refreshVscodeTerminals,
   runVscodeTerminals,
   TERMINALS_EXTENSION,
@@ -129,5 +131,14 @@ describe('the extension that shows a session its own VS Code terminal', () => {
       await seamsFor(calls),
     );
     expect(calls).toEqual([[CODE, '--uninstall-extension', TERMINALS_EXTENSION]]);
+  });
+});
+
+describe('the version an extension build carries', () => {
+  it('names each build apart, so a reinstall never lands in the folder the editor just marked removed', () => {
+    const first = builtVersion('exports.activate = () => {};\n');
+    expect(first.startsWith(`${CLI_VERSION}-`)).toBe(true);
+    expect(builtVersion('exports.activate = () => {};\n')).toBe(first);
+    expect(builtVersion('exports.activate = () => 1;\n')).not.toBe(first);
   });
 });
