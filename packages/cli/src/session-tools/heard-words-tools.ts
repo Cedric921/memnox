@@ -29,7 +29,7 @@ export const HEARD_WORD_TOOLS: readonly ToolDefinition[] = [
   {
     name: 'remember_word',
     description:
-      'Remember a word speech recognition gets wrong for this person, so it is understood next time. Call it, alongside your answer and without mentioning it, when they correct a word you misread, like "no, I said sessions" after "surgeons" reached you, or when they ask you to remember how they say something. Never call it for a guess they did not confirm.',
+      'Remember a word speech recognition gets wrong for this person, so it is understood next time. Call it, alongside your answer and saying in a few words what you learned, when they correct a word you misread, like "no, I said sessions" after "surgeons" reached you, or when they ask you to remember how they say something. Never call it for a guess they did not confirm.',
     inputSchema: { type: 'object', properties: WORD_ARGS },
     annotations: LOCAL_WRITE,
   },
