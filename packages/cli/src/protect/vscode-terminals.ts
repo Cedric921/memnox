@@ -120,8 +120,9 @@ export async function refreshVscodeTerminals(
   const shipped = await readFile(script, 'utf8').catch(() => null);
   if (shipped === null) return;
   const here = installedEditors(home, seams);
+  const version = builtVersion(shipped);
   const held = await Promise.all(
-    here.map((each) => holdsShipped(join(home, each.extensions), shipped)),
+    here.map((each) => holdsBuild(join(home, each.extensions), version)),
   );
   const behind = here.filter((_each, index) => held[index] !== true);
   if (behind.length === 0) return;
@@ -137,18 +138,11 @@ export async function refreshVscodeTerminals(
 /** The file an editor lists the extension folders it uninstalled in, until it next restarts. */
 const OBSOLETE = '.obsolete';
 
-/** Whether any installed copy in this extensions folder is exactly the script this memnox ships. */
-async function holdsShipped(folder: string, shipped: string): Promise<boolean> {
+/** Whether this exact build sits in the extensions folder and the editor has not written it off. */
+async function holdsBuild(folder: string, version: string): Promise<boolean> {
+  const name = `${TERMINALS_EXTENSION}-${version}`;
   const names = await readdir(folder).catch(() => [] as string[]);
-  const removed = await obsolete(folder);
-  const copies = await Promise.all(
-    names
-      .filter((name) => name.startsWith(`${TERMINALS_EXTENSION}-`) && !removed.has(name))
-      .map((name) =>
-        readFile(join(folder, name, 'dist', 'extension.js'), 'utf8').catch(() => null),
-      ),
-  );
-  return copies.includes(shipped);
+  return names.includes(name) && !(await obsolete(folder)).has(name);
 }
 
 /**

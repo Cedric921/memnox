@@ -90,25 +90,16 @@ describe('the extension that shows a session its own VS Code terminal', () => {
     const home = await mkdtemp(join(tmpdir(), 'memnox-vscode-'));
     const calls: string[][] = [];
     const seams = await seamsFor(calls);
-    const installed = join(
-      home,
-      '.vscode',
-      'extensions',
-      `${TERMINALS_EXTENSION}-0.13.14`,
-      'dist',
-    );
-    await mkdir(installed, { recursive: true });
-    await writeFile(join(installed, 'extension.js'), 'an older build\n');
+    const extensions = join(home, '.vscode', 'extensions');
+    await mkdir(join(extensions, `${TERMINALS_EXTENSION}-0.13.14`), { recursive: true });
     const said: string[] = [];
     await refreshVscodeTerminals(home, (line) => said.push(line), seams);
     expect(installs(calls)).toHaveLength(1);
     expect(said).toEqual([expect.stringContaining('put into VS Code')]);
 
-    // The same script there now, as the editor unpacks it, so the next start changes nothing.
-    await writeFile(
-      join(installed, 'extension.js'),
-      await readFile(seams.script() ?? '', 'utf8'),
-    );
+    // This very build there now, as the editor unpacks it, so the next start changes nothing.
+    const build = builtVersion(await readFile(seams.script() ?? '', 'utf8'));
+    await mkdir(join(extensions, `${TERMINALS_EXTENSION}-${build}`), { recursive: true });
     calls.length = 0;
     await refreshVscodeTerminals(home, (line) => said.push(line), seams);
     expect(calls).toEqual([]);
