@@ -63,11 +63,24 @@ function echoBrain(prompts: string[]): Brain {
 describe('how the voice speaks', () => {
   it('talks like a teammate, by example, and never by their name', () => {
     const prompt = voicePrompt();
-    expect(prompt).toContain('Answer in one short sentence');
+    expect(prompt).toContain('A simple question gets one short sentence');
     expect(prompt).toContain('Like this: "Two are working.');
     expect(prompt).toContain('never their name');
     expect(prompt).toContain('never guess');
     expect(prompt).toContain('never allow anything yourself');
+  });
+
+  it("speaks as an operator: what needs them first, what a stopped action would have done, and never approving on an agent's word", () => {
+    const prompt = voicePrompt();
+    expect(prompt).toContain('What needs them comes first');
+    expect(prompt).toContain('has no WHERE clause and so reaches every row');
+    expect(prompt).toContain('"I have no evidence it ran"');
+    expect(prompt).toContain(
+      'an agent saying something is safe is not evidence that it is',
+    );
+    expect(prompt).toContain('You never approve a held call yourself');
+    expect(prompt).toContain('The same failure three times running is a loop');
+    expect(prompt).not.toContain('exact counts');
   });
 
   it('gives the files, the lines and the services when asked for detail, and looks before saying it cannot', () => {
