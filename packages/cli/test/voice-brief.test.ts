@@ -84,6 +84,7 @@ describe('how the voice speaks', () => {
     expect(prompt).toContain('never two run together');
     expect(prompt).toContain('Never grade what they said');
     expect(prompt).toContain('is a yes to it, never a goodbye');
+    expect(prompt).toContain('Never offer to bring a window forward so they can send');
     expect(prompt).toContain('unless you called the same tool again in this reply');
     expect(prompt).toContain(
       '"the kids status" and "the guest status" are the git status',
