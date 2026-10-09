@@ -1,8 +1,10 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, realpathSync } from 'node:fs';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import { platform, userInfo } from 'node:os';
 import { delimiter, dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { MEMNOX_HOME } from '@memnox/core';
 import { interceptorDirFor } from '@memnox/interceptors';
 import { describeError } from '../cli-errors';
@@ -79,11 +81,61 @@ export function serviceState(
  * stops working the moment the package manager replaces that link.
  */
 function resolveCommandParts(): { node: string; entry: string } {
-  const entry = process.argv[1] ?? '';
-  return {
-    node: process.execPath,
-    entry: entry === '' ? entry : realpathSync(entry),
-  };
+  const given = process.argv[1] ?? '';
+  const entry = given === '' ? given : realpathSync(given);
+  return { node: entry === '' ? process.execPath : nodeForDaemon(entry), entry };
+}
+
+/** Long enough for a node to start the CLI or open a database, short enough that a hung one is passed over. */
+const NODE_CHECK_MS = 10_000;
+/** Opens the daemon's database module in memory, which fails at once under a node it was not built for. */
+const OPENS_DATABASE =
+  "const Database = require(process.argv[1]); new Database(':memory:').close();";
+
+/**
+ * A node on this machine that really runs the daemon: the one installing first, then each on the PATH.
+ * Whatever ran the install is not always it, since an app such as Hermes puts its own node first on the
+ * PATH, and the daemon's database module only loads under a node it suits, or it dies at every start.
+ */
+function nodeForDaemon(entry: string): string {
+  const database = databaseModule();
+  const candidates = [process.execPath, ...nodesOnPath()];
+  return candidates.find((node) => runsDaemon(node, entry, database)) ?? process.execPath;
+}
+
+function nodesOnPath(): string[] {
+  const found = (process.env['PATH'] ?? '')
+    .split(delimiter)
+    .filter((dir) => dir !== '')
+    .map((dir) => join(dir, 'node'))
+    .filter((path) => existsSync(path))
+    .map((path) => realpathSync(path));
+  return [...new Set(found)];
+}
+
+/** Where the database module the daemon loads lives, found from the core package that depends on it. */
+function databaseModule(): string | null {
+  try {
+    const core = fileURLToPath(import.meta.resolve('@memnox/core'));
+    return createRequire(core).resolve('better-sqlite3');
+  } catch {
+    return null;
+  }
+}
+
+function runsDaemon(node: string, entry: string, database: string | null): boolean {
+  try {
+    execFileSync(node, [entry, '--version'], { stdio: 'ignore', timeout: NODE_CHECK_MS });
+    if (database !== null) {
+      execFileSync(node, ['-e', OPENS_DATABASE, database], {
+        stdio: 'ignore',
+        timeout: NODE_CHECK_MS,
+      });
+    }
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
