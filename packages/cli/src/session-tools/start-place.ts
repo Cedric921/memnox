@@ -17,6 +17,7 @@ import {
 } from './multiplexer';
 import { textArg, type SessionToolDeps, type ToolArgs } from './read-tools';
 import { lastSurface, START_SURFACE, type KeptSurface } from './start-surface';
+import { APP_BUNDLE_SUFFIX, SAID, TOOL_ARG } from './session-tools.constants';
 
 /**
  * Where a new session runs, which is part of what the person asked for: a terminal tab, the
@@ -66,19 +67,19 @@ export async function placeFor(
   const editorSaid = textArg(args, 'editor');
   // The Claude Code panel lives in an editor, the first one installed when they named none.
   if (
-    textArg(args, 'panel') === 'true' &&
-    (editorSaid === undefined || editorSaid === 'false')
+    textArg(args, TOOL_ARG.PANEL) === SAID.YES &&
+    (editorSaid === undefined || editorSaid === SAID.NO)
   )
     return inEditor(deps, null) ?? { kind: PLACE.NO_EDITOR };
-  if (editorSaid !== undefined && editorSaid !== 'false') {
-    const editor = editorSaid === 'true' ? null : editorNamed(editorSaid);
+  if (editorSaid !== undefined && editorSaid !== SAID.NO) {
+    const editor = editorSaid === SAID.YES ? null : editorNamed(editorSaid);
     return inEditor(deps, editor) ?? { kind: PLACE.NO_EDITOR };
   }
-  const terminalSaid = textArg(args, 'terminal');
+  const terminalSaid = textArg(args, TOOL_ARG.TERMINAL);
   if (terminalSaid !== undefined)
     return terminalNamed(deps, terminalSaid) ?? { kind: PLACE.NO_TERMINAL };
-  const said = textArg(args, 'app');
-  if (said !== undefined) return { kind: said === 'true' ? PLACE.APP : PLACE.TERMINAL };
+  const said = textArg(args, TOOL_ARG.APP);
+  if (said !== undefined) return { kind: said === SAID.YES ? PLACE.APP : PLACE.TERMINAL };
   const last = await lastSurface(deps.home, agent);
   if (
     last?.surface === START_SURFACE.PANE ||
@@ -151,6 +152,6 @@ function editorOf(deps: SessionToolDeps, start: SessionStart): EditorApp | null 
 export function editorName(deps: SessionToolDeps, start: SessionStart): string {
   const editor = editorOf(deps, start);
   return editor === null
-    ? basename(start.editor ?? '', '.app')
+    ? basename(start.editor ?? '', APP_BUNDLE_SUFFIX)
     : EDITOR_APPS[editor].name;
 }

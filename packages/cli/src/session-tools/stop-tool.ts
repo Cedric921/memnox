@@ -12,6 +12,7 @@ import { unlessMacTold } from './mac-told';
 import { paneOn, pressEscapeIn, type Pane } from './multiplexer';
 import type { SessionToolDeps } from './read-tools';
 import type { SessionScope } from './session-scope';
+import { FINDS_ITS_TAB } from './session-tools.constants';
 
 /**
  * Stopping an agent where it is, as a person does at the keyboard: Escape in the terminal it runs
@@ -30,7 +31,7 @@ export async function stopSession(
   if (tty === undefined && !inPanel)
     return { ...scope, stopped: false, said: NO_TERMINAL };
   const pane =
-    tty === undefined || DIRECT_APPS.test(live?.app ?? '')
+    tty === undefined || FINDS_ITS_TAB.test(live?.app ?? '')
       ? null
       : paneOn(tty, deps.panes);
   if (pane !== null) return stoppedInPane(deps, scope, sessionId, pane);
@@ -40,7 +41,7 @@ export async function stopSession(
     sessionId,
     marks,
     agent: scope.agent,
-    title: 'Stop',
+    title: STOP_TITLE,
     tty,
     at: deps.now().toISOString(),
   });
@@ -93,8 +94,8 @@ function stoppedAs(delivery: DisplayDelivery | null): Record<string, unknown> {
   };
 }
 
-/** Apps the Mac presses keys in itself, so their sessions are never looked for among panes. */
-const DIRECT_APPS = /iterm|terminal|code|cursor|windsurf/i;
+/** What the Mac's card is headed while it stops the session. */
+const STOP_TITLE = 'Stop';
 
 const STOPPED =
   'Escape was pressed in its terminal, which stops whatever it was doing there and leaves its tab and conversation as they are. Say it is stopped in a few words, and that it is waiting for what to do next.';

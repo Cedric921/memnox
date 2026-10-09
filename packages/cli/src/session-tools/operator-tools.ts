@@ -44,6 +44,7 @@ import { FOLDER_TOOLS, foldersTool, openFolderTool } from './folder-tools';
 import { forgetWordTool, HEARD_WORD_TOOLS, rememberWordTool } from './heard-words-tools';
 import { AGENT_ARG, proposeTool, SAID_ARG } from './operator-args';
 import { readTool, SESSION_ARG, type ToolDefinition } from './session-tools';
+import { TOOL_ARG } from './session-tools.constants';
 
 /**
  * The tools the voice's brain is given, and the one rule over them: it reads everything and
@@ -234,7 +235,7 @@ export const OPERATOR_TOOLS: readonly ToolDefinition[] = [
           description:
             'open, watch, card, stop, close, dismiss or all; card when left out',
         },
-        now: {
+        [TOOL_ARG.NOW]: {
           type: 'string',
           description:
             'for close: "true" only when they said to close it now although it is mid turn',

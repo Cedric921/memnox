@@ -29,6 +29,7 @@ import { turnOverByTranscript } from './sessions-tool';
 import { withBrief } from './work-tools';
 import { isHermesSession } from '../daemon/hermes-view';
 import { HERMES_SAID, resumeHermes, type ResumeHermes } from './hermes-instruct';
+import { FINDS_ITS_TAB } from './session-tools.constants';
 
 /**
  * Telling an agent what the person said out loud, read back first since a recognizer hears
@@ -70,8 +71,6 @@ const OPENCLAW_SAID =
   'OpenClaw cannot be handed work from here yet. Say that you can see what it does and what it asked, but not type to it, and offer to tell it in its own chat instead.';
 
 const EDITORS = /code|cursor|windsurf/i;
-/** Apps the Mac finds the session's own tab in, so they are never looked for among multiplexer panes. */
-const TYPES_ITSELF = /iterm|terminal|code|cursor|windsurf/i;
 
 const SAID: Record<Route, string> = {
   queued:
@@ -204,7 +203,7 @@ export async function sendInstructionTool(
   const pane =
     route !== ROUTE.QUEUED &&
     host?.tty !== undefined &&
-    !TYPES_ITSELF.test(host.app ?? host.appPath ?? '') &&
+    !FINDS_ITS_TAB.test(host.app ?? host.appPath ?? '') &&
     inForeground(host.tty)
       ? paneOn(host.tty, deps.panes)
       : null;

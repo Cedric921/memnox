@@ -36,8 +36,10 @@ export interface KeptSurface {
   terminal?: string;
 }
 
+/** Between a surface and where on it, as `editor:vscode` or `pane:tmux` keep it. */
+const SURFACE_SEPARATOR = ':';
 /** An editor is kept as `editor:vscode`, so a file written before editors still reads. */
-const EDITOR_PREFIX = `${START_SURFACE.EDITOR}:`;
+const EDITOR_PREFIX = `${START_SURFACE.EDITOR}${SURFACE_SEPARATOR}`;
 
 export async function lastSurface(
   home: string,
@@ -51,7 +53,9 @@ export async function lastSurface(
     return { surface };
   for (const kind of [START_SURFACE.PANE, START_SURFACE.TERMINAL_APP] as const) {
     const where =
-      surface?.startsWith(`${kind}:`) === true ? surface.slice(kind.length + 1) : '';
+      surface?.startsWith(`${kind}${SURFACE_SEPARATOR}`) === true
+        ? surface.slice(kind.length + SURFACE_SEPARATOR.length)
+        : '';
     if (where === '') continue;
     return kind === START_SURFACE.PANE
       ? { surface: kind, pane: where }
@@ -77,6 +81,7 @@ export async function keepSurface(
   const path = join(home, MEMNOX_HOME, SURFACE_FILE);
   const all = (await readJsonFile<Record<string, string>>(path)) ?? {};
   const where = kept.editor ?? kept.pane ?? kept.terminal;
-  const value = where === undefined ? kept.surface : `${kept.surface}:${where}`;
+  const value =
+    where === undefined ? kept.surface : `${kept.surface}${SURFACE_SEPARATOR}${where}`;
   await writeJsonFile(path, { ...all, [agent]: value });
 }

@@ -13,13 +13,23 @@ export const STARTS_DIR = 'starts';
 /** Long enough to hear it read back and say yes, short enough that a stale one never starts. */
 export const START_TTL_MS = 5 * 60 * 1_000;
 
+/** The agents by the id the ledger keys them on and every tool names them by. */
+export const AGENT_ID = {
+  CLAUDE_CODE: 'claude-code',
+  CODEX: 'codex',
+  CURSOR: 'cursor',
+  HERMES: 'hermes',
+} as const;
+
+export type AgentId = (typeof AGENT_ID)[keyof typeof AGENT_ID];
+
 /** The agents a voice may start, each with the one command that starts it; nothing else is ever typed. */
 export const STARTABLE_AGENT = {
-  'claude-code': 'claude',
-  codex: 'codex',
+  [AGENT_ID.CLAUDE_CODE]: 'claude',
+  [AGENT_ID.CODEX]: 'codex',
   /** Cursor's own terminal agent; the editor itself is reached through its desktop app instead. */
-  cursor: 'cursor-agent',
-  hermes: 'hermes',
+  [AGENT_ID.CURSOR]: 'cursor-agent',
+  [AGENT_ID.HERMES]: 'hermes',
 } as const;
 
 export type StartableAgent = keyof typeof STARTABLE_AGENT;

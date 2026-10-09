@@ -121,12 +121,26 @@ export function agentInFront(listing: string): boolean {
  * still seen going in, with a breath after punctuation, the way the Mac types elsewhere.
  */
 export function keyPausesMs(text: string, jitter: () => number = Math.random): number[] {
-  const base = Math.min(12, Math.max(1, 400 / Math.max(text.length, 1)));
+  const base = Math.min(
+    SLOWEST_KEY_MS,
+    Math.max(QUICKEST_KEY_MS, WHOLE_RUN_MS / Math.max(text.length, 1)),
+  );
   return [...text].map((character) => {
-    const breath = ',.?!;:'.includes(character) ? 15 : 0;
-    return Math.round(base * (0.7 + 0.6 * jitter()) + breath);
+    const breath = BREATH_MARKS.includes(character) ? BREATH_MS : 0;
+    return Math.round(base * (LEAST_JITTER + JITTER_SPAN * jitter()) + breath);
   });
 }
+
+/** The whole message aims to go in within this, each key between the quickest and slowest pace. */
+const WHOLE_RUN_MS = 400;
+const SLOWEST_KEY_MS = 12;
+const QUICKEST_KEY_MS = 1;
+/** A key strays up to this far either way from the pace, so it reads as typed rather than pasted. */
+const LEAST_JITTER = 0.7;
+const JITTER_SPAN = 0.6;
+/** The marks a person pauses after, and for how long. */
+const BREATH_MARKS = ',.?!;:';
+const BREATH_MS = 15;
 
 /** The request a file in Memnox's displays folder holds, or null for anything else written there. */
 export function requestOfFile(name: string | null): string | null {

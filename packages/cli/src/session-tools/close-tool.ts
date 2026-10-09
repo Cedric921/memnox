@@ -8,17 +8,13 @@ import { closePane, paneOn, type Pane } from './multiplexer';
 import type { SessionToolDeps } from './read-tools';
 import type { SessionScope } from './session-scope';
 import { processAlive } from './sessions-tool';
+import { CLOSES_CLEANLY, FINDS_ITS_TAB } from './session-tools.constants';
 
 /**
  * Closing a session wherever it runs. iTerm and an editor's terminal close the tab itself; a tmux
  * or WezTerm pane is closed through its own command line; anywhere else the agent is ended first,
  * as closing its tab would, and the tab left behind is tidied away where the Mac can find it.
  */
-
-/** Apps the Mac finds the session's own tab in, so their sessions are never looked for among panes. */
-const FINDS_ITS_TAB = /iterm|terminal|code|cursor|windsurf/i;
-/** Apps whose close takes the agent with it and never stops to ask, so nothing is ended first. */
-const CLOSES_CLEANLY = /iterm|code|cursor|windsurf/i;
 
 export async function closeSessionNow(
   deps: SessionToolDeps,
@@ -88,7 +84,7 @@ async function closedThroughMac(
     display: DISPLAY.CLOSE,
     sessionId,
     agent: scope.agent,
-    title: 'Session',
+    title: CLOSE_TITLE,
     marks,
     ...(tty === undefined ? {} : { tty }),
     at: deps.now().toISOString(),
@@ -112,6 +108,12 @@ async function closedNow(deps: SessionToolDeps, sessionId: string): Promise<void
   await new SessionHosts(deps.home).end(sessionId, deps.now().toISOString());
 }
 
+/** A hang up first, as closing its terminal sends, then a terminate for an agent that ignored it. */
+const END_SIGNALS = ['SIGHUP', 'SIGTERM'] as const;
+
+/** What the Mac's card is headed while it closes the session. */
+const CLOSE_TITLE = 'Session';
+
 /** Long enough for an agent to save its conversation and go after a hang up. */
 const EXIT_LOOKS = 15;
 const EXIT_POLL_MS = 200;
@@ -123,7 +125,7 @@ const EXIT_POLL_MS = 200;
 async function endAgent(pid: number): Promise<boolean> {
   if (!processAlive(pid)) return true;
   if (!isAgentProgram(commandOf(pid))) return false;
-  for (const signal of ['SIGHUP', 'SIGTERM'] as const) {
+  for (const signal of END_SIGNALS) {
     try {
       process.kill(pid, signal);
     } catch {

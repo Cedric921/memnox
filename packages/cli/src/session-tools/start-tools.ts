@@ -3,6 +3,7 @@ import { accessSync, constants, existsSync, readdirSync, type Dirent } from 'nod
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join } from 'node:path';
 import {
+  AGENT_ID,
   DESKTOP_APPS,
   DISPLAY,
   DISPLAY_TEXT_LIMIT,
@@ -25,6 +26,7 @@ import { keepSurface } from './start-surface';
 import { editorName, PLACE, placeFor, surfaceOf } from './start-place';
 import { textArg, type SessionToolDeps, type ToolArgs } from './read-tools';
 import { withBrief } from './work-tools';
+import { APP_BUNDLE_SUFFIX, SAID, TOOL_ARG } from './session-tools.constants';
 
 /**
  * Starting a new agent session out loud: "start Claude in memnox cloud on the failing test". It
@@ -39,7 +41,7 @@ export async function proposeStartTool(
   deps: SessionToolDeps,
   args: ToolArgs,
 ): Promise<unknown> {
-  const agent = textArg(args, 'agent') ?? 'claude-code';
+  const agent = textArg(args, TOOL_ARG.AGENT) ?? AGENT_ID.CLAUDE_CODE;
   if (!isStartableAgent(agent)) return { proposed: false, said: ONLY_KNOWN_AGENTS };
   const place = await placeFor(deps, args, agent);
   if (place.kind === PLACE.NO_EDITOR) return { proposed: false, said: NO_EDITOR };
@@ -62,7 +64,7 @@ export async function proposeStartTool(
     command,
     repository: chosen.path,
     task: text,
-    ...(textArg(args, 'hold_credentials') === 'true' ? { holdCredentials: true } : {}),
+    ...(textArg(args, TOOL_ARG.HOLD_CREDENTIALS) === SAID.YES ? HELD : {}),
     ...(brief === undefined ? {} : { brief }),
     ...(inApp ? { app: command } : {}),
     ...whereItStarts(place, agent, args),
@@ -75,6 +77,9 @@ export async function proposeStartTool(
   };
 }
 
+/** Started with its credentials kept away from it. */
+const HELD = { holdCredentials: true } as const;
+
 /** Where the start runs beyond a terminal tab: an editor or its Claude Code panel, a pane, or a terminal app. */
 function whereItStarts(
   place: Awaited<ReturnType<typeof placeFor>>,
@@ -83,7 +88,8 @@ function whereItStarts(
 ): Pick<SessionStart, 'editor' | 'panel' | 'pane' | 'terminal'> {
   if (place.kind === PLACE.EDITOR) {
     // Only Claude Code has a panel Memnox can start a conversation in.
-    const panel = agent === 'claude-code' && textArg(args, 'panel') === 'true';
+    const panel =
+      agent === AGENT_ID.CLAUDE_CODE && textArg(args, TOOL_ARG.PANEL) === SAID.YES;
     return { editor: place.path, ...(panel ? { panel } : {}) };
   }
   if (place.kind === PLACE.PANE) return { pane: place.multiplexer };
@@ -128,7 +134,7 @@ function readBackOf(
     ...(start.pane === undefined ? {} : { in: `a new ${start.pane} window` }),
     ...(start.terminal === undefined
       ? {}
-      : { in: `a new ${basename(start.terminal, '.app')} window` }),
+      : { in: `a new ${basename(start.terminal, APP_BUNDLE_SUFFIX)} window` }),
     ...(start.holdCredentials === true ? { holdsCredentials: true } : {}),
     said: READ_BACK,
   };

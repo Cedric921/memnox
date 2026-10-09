@@ -17,7 +17,7 @@ import {
 import { displayName, readNames } from '../agents/names';
 import { withEvents } from '../event-store';
 import {
-  DESKTOP_APP,
+  DESKTOP_APP_SPOKEN,
   desktopRoots,
   desktopSessions,
   type DesktopSession,
@@ -162,7 +162,7 @@ function desktopEvent(
     id: `${AGENT_ID_PREFIX}${session.agent}`,
     kind: session.agent,
   });
-  const app = session.app === DESKTOP_APP.CODEX ? 'the Codex app' : 'Claude desktop';
+  const app = DESKTOP_APP_SPOKEN[session.app];
   const where = session.cwd === undefined ? app : `${app}, in ${basename(session.cwd)}`;
   return {
     kind: DAEMON_EVENT.NOTICE,

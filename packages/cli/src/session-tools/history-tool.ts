@@ -61,6 +61,9 @@ const MOST_REFUSALS_NAMED = 3;
 /** What was asked before any transcript line, when the agent keeps no transcript Memnox can read. */
 const UNRECORDED = 'what it was asked is not in a transcript Memnox can read';
 
+/** Sorts after every timestamp, so the last turn runs to the end of the record. */
+const AFTER_EVERY_MOMENT = String.fromCharCode(0xffff);
+
 /** Each turn of the session, oldest first, with the ledger's rows set in the turn they happened in. */
 export function turnsOf(
   lines: readonly ConversationLine[],
@@ -74,7 +77,7 @@ export function turnsOf(
       : [{ at: rows[0]?.at ?? '', who: SPEAKER.PERSON, text: firstAsked ?? UNRECORDED }];
   return starts.map((ask, index) => {
     const from = index === 0 ? '' : ask.at;
-    const to = starts[index + 1]?.at ?? '￿';
+    const to = starts[index + 1]?.at ?? AFTER_EVERY_MOMENT;
     const said = lines.filter((line) => line.at >= ask.at && line.at < to);
     const done = rows.filter((row) => row.at >= from && row.at < to);
     const answer = [...said].reverse().find((line) => line.who === SPEAKER.AGENT);
@@ -238,20 +241,27 @@ function spanOf(
   };
 }
 
+/** How the brain is told a session ended, in words it can say back. */
+const ENDING = {
+  CLOSED: 'closed',
+  GONE: 'its process is gone',
+  OPEN: 'no, it is still open',
+} as const;
+
 /** How it ended, from the hook that closed it or its process being gone, or that it is still open. */
 function endingOf(
   host: { endedAt?: string; pid: number } | null,
   lastAt: string | undefined,
 ): Record<string, string> {
-  if (host?.endedAt !== undefined) return { ended: 'closed', endedAt: host.endedAt };
+  if (host?.endedAt !== undefined) return { ended: ENDING.CLOSED, endedAt: host.endedAt };
   if (host !== null && !processAlive(host.pid))
     return {
-      ended: 'its process is gone',
+      ended: ENDING.GONE,
       ...(lastAt === undefined ? {} : { lastActiveAt: lastAt }),
     };
   if (host === null) return lastAt === undefined ? {} : { lastActiveAt: lastAt };
   return {
-    ended: 'no, it is still open',
+    ended: ENDING.OPEN,
     ...(lastAt === undefined ? {} : { lastActiveAt: lastAt }),
   };
 }

@@ -1,5 +1,6 @@
 import { AGENT_ARG, proposeTool, SAID_ARG } from './operator-args';
 import { readTool, SESSION_ARG, type ToolDefinition } from './session-tools';
+import { APP_ACTION, TOOL_ARG } from './session-tools.constants';
 
 /**
  * The tools that act on the person's behalf beyond reading: running memnox commands, tracing,
@@ -114,12 +115,12 @@ export const ACTING_TOOLS: readonly ToolDefinition[] = [
         description:
           '"true" to open a new chat in the agent\'s own desktop app on the repository and type the task into it, when they say app, desktop, or the app by name such as Claude desktop, Codex app, ChatGPT, or Cursor when Cursor itself is the agent; "false" for a new terminal tab; left out, it goes where they last had this agent, the app, an editor or a terminal. An agent named in an editor, like Claude Code in VS Code, is editor, never app. With app "true", task may be left out to only open the app',
       },
-      panel: {
+      [TOOL_ARG.PANEL]: {
         type: 'string',
         description:
           '"true" to start Claude Code in its panel inside the editor as a new conversation, when they ask for the Claude panel, the Claude extension or the chat in the editor rather than a terminal; pass editor too when they named one',
       },
-      terminal: {
+      [TOOL_ARG.TERMINAL]: {
         type: 'string',
         description:
           'the terminal to start it in, as they named it, such as "tmux", "WezTerm", "Ghostty", "Warp", "kitty" or "iTerm", when they ask for one: a new window opens there on the repository and the agent starts in it; leave it out otherwise',
@@ -181,7 +182,7 @@ export const ACTING_TOOLS: readonly ToolDefinition[] = [
           description:
             'any other app by the name they said, such as Windsurf or Perplexity, when it is none of those four; leave agent out then',
         },
-        new_chat: {
+        [TOOL_ARG.NEW_CHAT]: {
           type: 'string',
           description:
             '"true" to start a new chat in the app first, when they ask for a new chat or conversation there, rather than typing into the one open',
@@ -203,7 +204,10 @@ export const ACTING_TOOLS: readonly ToolDefinition[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        action: { type: 'string', description: 'stop or close' },
+        [TOOL_ARG.ACTION]: {
+          type: 'string',
+          description: `${APP_ACTION.STOP} or ${APP_ACTION.CLOSE}`,
+        },
         agent: {
           type: 'string',
           description: 'claude-code, codex, cursor or hermes for their own apps',

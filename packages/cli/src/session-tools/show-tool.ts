@@ -27,6 +27,12 @@ import { closeSessionNow } from './close-tool';
 import { liveHost } from './live-host';
 import { sessionMarks } from './session-marks';
 import { paneOn, showPane } from './multiplexer';
+import {
+  APP_SESSION_PREFIX,
+  FINDS_ITS_TAB,
+  SAID,
+  TOOL_ARG,
+} from './session-tools.constants';
 
 /**
  * Shows the person a session: its own window brought forward, or a card with its summary in
@@ -75,7 +81,12 @@ export async function showTool(
   );
   if (scope.sessionId === null) return { ...scope, shown: false };
   if (display === DISPLAY.CLOSE)
-    return closeSession(deps, scope, scope.sessionId, textArg(args, 'now') === 'true');
+    return closeSession(
+      deps,
+      scope,
+      scope.sessionId,
+      textArg(args, TOOL_ARG.NOW) === SAID.YES,
+    );
   if (display === DISPLAY.INTERRUPT) return stopSession(deps, scope, scope.sessionId);
   return putUp(deps, seams, { scope, sessionId: scope.sessionId, display, args });
 }
@@ -130,8 +141,7 @@ async function putUp(
 function paneShownIn(deps: SessionToolDeps, host: SessionHost | null): ShownIn | null {
   const live = host === null ? null : liveHost(host);
   const app = live?.app ?? live?.appPath ?? '';
-  if (live?.tty === undefined || /iterm|terminal|code|cursor|windsurf/i.test(app))
-    return null;
+  if (live?.tty === undefined || FINDS_ITS_TAB.test(app)) return null;
   const pane = paneOn(live.tty, deps.panes);
   return pane === null ? null : showPane(pane, deps.panes);
 }
@@ -259,15 +269,12 @@ async function aboutSession(
 
 /** Where the desktop app behind an `app_` session is installed, or null for any other session. */
 function desktopAppOf(deps: SessionToolDeps, sessionId: string): string | null {
-  const agent = sessionId.startsWith(APP_SESSION)
-    ? sessionId.slice(APP_SESSION.length)
+  const agent = sessionId.startsWith(APP_SESSION_PREFIX)
+    ? sessionId.slice(APP_SESSION_PREFIX.length)
     : '';
   if (!isStartableAgent(agent)) return null;
   return (deps.resolveApp ?? resolveInstalledApp)(agent);
 }
-
-/** How a session typed into an agent's desktop app is named, as type_in_app names it. */
-const APP_SESSION = 'app_';
 
 /** Where the session runs, and the checkout to open for it. */
 async function whereItRuns(

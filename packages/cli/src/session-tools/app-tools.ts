@@ -7,6 +7,7 @@ import {
   DELIVERY,
   wentIn,
   DESKTOP_APPS,
+  AGENT_ID,
   DISPLAY,
   DISPLAY_VIA,
   DisplayRequests,
@@ -17,6 +18,14 @@ import {
 } from '@memnox/core';
 import { unlessMacTold } from './mac-told';
 import { textArg, type SessionToolDeps, type ToolArgs } from './read-tools';
+import {
+  APP_ACTION,
+  APP_BUNDLE_SUFFIX,
+  APP_SESSION_PREFIX,
+  appSessionId,
+  SAID,
+  TOOL_ARG,
+} from './session-tools.constants';
 
 /**
  * The agents' own desktop apps, Claude, Codex, Cursor and Hermes: opened on a repository with a
@@ -58,9 +67,10 @@ export async function typeInAppTool(
 ): Promise<unknown> {
   const message = textArg(args, 'message');
   if (message === undefined) return { typed: false, said: NEEDS_MESSAGE };
-  const named = textArg(args, 'app');
-  const agent = textArg(args, 'agent') ?? (named === undefined ? 'claude-code' : named);
-  const newChat = textArg(args, 'new_chat') === 'true';
+  const named = textArg(args, TOOL_ARG.APP);
+  const agent =
+    textArg(args, TOOL_ARG.AGENT) ?? (named === undefined ? AGENT_ID.CLAUDE_CODE : named);
+  const newChat = textArg(args, TOOL_ARG.NEW_CHAT) === SAID.YES;
   if (!isStartableAgent(agent))
     return typeInNamedApp(deps, named ?? agent, message, newChat);
   const resolve = deps.resolveApp ?? resolveInstalledApp;
@@ -68,7 +78,7 @@ export async function typeInAppTool(
   if (appPath === null) return { typed: false, ...noApp(agent, resolve) };
   const moment = deps.now().toISOString();
   const delivery = await shown(deps, {
-    sessionId: `app_${agent}`,
+    sessionId: `${APP_SESSION_PREFIX}${agent}`,
     agent,
     name: DESKTOP_APPS[agent].name,
     appPath,
@@ -124,17 +134,19 @@ export async function controlAppTool(
   deps: SessionToolDeps,
   args: ToolArgs,
 ): Promise<unknown> {
-  const action = textArg(args, 'action');
-  if (action !== 'stop' && action !== 'close') return { done: false, said: NEEDS_ACTION };
-  const named = textArg(args, 'app') ?? textArg(args, 'agent') ?? 'claude-code';
+  const action = textArg(args, TOOL_ARG.ACTION);
+  if (action !== APP_ACTION.STOP && action !== APP_ACTION.CLOSE)
+    return { done: false, said: NEEDS_ACTION };
+  const named =
+    textArg(args, TOOL_ARG.APP) ?? textArg(args, TOOL_ARG.AGENT) ?? AGENT_ID.CLAUDE_CODE;
   const appPath = isStartableAgent(named)
     ? (deps.resolveApp ?? resolveInstalledApp)(named)
     : (deps.findApp ?? installedAppNamed)(named);
   if (appPath === null) return { done: false, said: noSuchApp(named) };
-  const name = basename(appPath).replace(/\.app$/, '');
+  const name = basename(appPath, APP_BUNDLE_SUFFIX);
   const request = await new DisplayRequests(deps.home).request({
-    display: action === 'stop' ? DISPLAY.INTERRUPT : DISPLAY.CLOSE,
-    sessionId: `app_${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
+    display: action === APP_ACTION.STOP ? DISPLAY.INTERRUPT : DISPLAY.CLOSE,
+    sessionId: appSessionId(name),
     agent: name,
     title: name,
     appPath,
@@ -143,7 +155,11 @@ export async function controlAppTool(
   const delivery = deps.delivered === undefined ? null : await deps.delivered(request.id);
   if (delivery === null) return { app: name, done: false, said: CONTROL_UNCONFIRMED };
   if (wentIn(delivery.outcome))
-    return { app: name, done: true, said: action === 'stop' ? APP_STOPPED : APP_CLOSED };
+    return {
+      app: name,
+      done: true,
+      said: action === APP_ACTION.STOP ? APP_STOPPED : APP_CLOSED,
+    };
   return {
     app: name,
     done: false,
@@ -195,9 +211,9 @@ async function typeInNamedApp(
 ): Promise<unknown> {
   const appPath = (deps.findApp ?? installedAppNamed)(name);
   if (appPath === null) return { typed: false, said: noSuchApp(name) };
-  const shownName = basename(appPath).replace(/\.app$/, '');
+  const shownName = basename(appPath, APP_BUNDLE_SUFFIX);
   const delivery = await shown(deps, {
-    sessionId: `app_${shownName.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
+    sessionId: appSessionId(shownName),
     agent: shownName,
     name: shownName,
     appPath,
@@ -227,13 +243,13 @@ export function installedAppNamed(
   const apps = folders.flatMap((folder) => {
     try {
       return readdirSync(folder)
-        .filter((entry) => entry.endsWith('.app'))
+        .filter((entry) => entry.endsWith(APP_BUNDLE_SUFFIX))
         .map((entry) => join(folder, entry));
     } catch {
       return [];
     }
   });
-  const named = (path: string): string => spoken(basename(path).replace(/\.app$/, ''));
+  const named = (path: string): string => spoken(basename(path, APP_BUNDLE_SUFFIX));
   return (
     apps.find((path) => named(path) === wanted) ??
     apps.find((path) => named(path).startsWith(wanted)) ??

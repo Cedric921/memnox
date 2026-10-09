@@ -20,7 +20,11 @@ import {
 } from '@memnox/core';
 import { readTurnOver, sessionTranscript } from '../daemon/transcript';
 import { withEvents } from '../event-store';
-import { DESKTOP_APP, desktopRoots, desktopSessions } from '../daemon/desktop-sessions';
+import {
+  DESKTOP_APP_SPOKEN,
+  desktopRoots,
+  desktopSessions,
+} from '../daemon/desktop-sessions';
 import { repositoriesOf } from './changes-tool';
 import { hostedIds } from './session-aliases';
 import { textArg, type SessionToolDeps, type ToolArgs } from './read-tools';
@@ -173,7 +177,7 @@ function desktopRows(
           handedBack: !each.working,
         }),
         turn: each.working ? TURN.IN_PROGRESS : TURN.HANDED_BACK,
-        runningIn: each.app === DESKTOP_APP.CODEX ? 'the Codex app' : 'Claude desktop',
+        runningIn: DESKTOP_APP_SPOKEN[each.app],
         desktop: true,
       };
     });
