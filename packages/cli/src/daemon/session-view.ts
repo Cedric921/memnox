@@ -28,6 +28,11 @@ import type { RewindSeams } from '../session-tools/rewind-tool';
 import { SESSION_STATE, sessionsTool } from '../session-tools/sessions-tool';
 import { excerptOf, type ChangedFile } from '../session-tools/show-tool';
 import { readConversation, readLastAnswer, sessionTranscript } from './transcript';
+import {
+  desktopConversation,
+  desktopRoots,
+  desktopSessionById,
+} from './desktop-sessions';
 import { conversationOf } from './waiting-feed';
 import { idsOf } from '../session-tools/session-aliases';
 import {
@@ -70,6 +75,9 @@ interface SessionRow {
     working: { type?: string; lastTool?: string }[];
   };
 }
+
+/** As many lines as a Claude Code transcript shows in the live window. */
+const MOST_DESKTOP_LINES = 14;
 
 export class SessionViews {
   private readonly files = new Map<string, { at: number; code: Code }>();
@@ -156,6 +164,11 @@ export class SessionViews {
   private async conversation(
     sessionId: string,
   ): Promise<{ conversation?: ConversationLine[] }> {
+    const desktop = desktopSessionById(desktopRoots(this.home), sessionId);
+    if (desktop !== null) {
+      const lines = desktopConversation(desktop).slice(-MOST_DESKTOP_LINES);
+      return lines.length === 0 ? {} : { conversation: lines };
+    }
     const path = await sessionTranscript(this.home, sessionId, this.transcripts);
     if (path === null) return {};
     const lines = readConversation(path);

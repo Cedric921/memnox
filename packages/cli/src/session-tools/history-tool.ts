@@ -12,6 +12,12 @@ import {
   type SessionHost,
   type SessionTask,
 } from '@memnox/core';
+import {
+  codexConversation,
+  desktopConversation,
+  desktopRoots,
+  desktopSessionById,
+} from '../daemon/desktop-sessions';
 import { readWholeConversation, sessionTranscript } from '../daemon/transcript';
 import { withEvents } from '../event-store';
 import { noteFocus } from './focus';
@@ -137,7 +143,11 @@ export async function historyTool(
   );
   if (scope.sessionId === null) return { ...scope, found: false };
   const record = await recordOf(deps.home, scope.sessionId);
-  const turns = turnsOf(record.lines, record.rows, record.task?.statement);
+  const turns = turnsOf(
+    record.lines,
+    record.rows,
+    record.task?.statement ?? record.title,
+  );
   if (turns.length === 0 && record.rows.length === 0) return { ...scope, found: false };
   await noteFocus(deps, scope, 'asked about');
   return { ...scope, found: true, ...accountOf(record, turns) };
@@ -149,9 +159,21 @@ interface SessionRecord {
   host: SessionHost | null;
   task: SessionTask | null;
   lines: ConversationLine[];
+  /** A desktop session's own title, which stands where a task would. */
+  title?: string;
 }
 
 async function recordOf(home: string, sessionId: string): Promise<SessionRecord> {
+  const desktop = desktopSessionById(desktopRoots(home), sessionId);
+  if (desktop !== null) {
+    return {
+      rows: [],
+      host: null,
+      task: null,
+      lines: desktopConversation(desktop),
+      ...(desktop.title === undefined ? {} : { title: desktop.title }),
+    };
+  }
   const [rows, host, task, path] = await Promise.all([
     withEvents(home, (store) => store.query({ sessionId, limit: LEDGER_SESSION_LIMIT })),
     new SessionHosts(home).read(sessionId),
@@ -162,7 +184,11 @@ async function recordOf(home: string, sessionId: string): Promise<SessionRecord>
     rows: [...rows].sort((a, b) => a.at.localeCompare(b.at)),
     host,
     task,
-    lines: path === null ? [] : readWholeConversation(path),
+    // Codex in a terminal keeps its own log under the same id, which says what it answered.
+    lines:
+      path === null
+        ? codexConversation(desktopRoots(home).codex, host?.agentSession ?? sessionId)
+        : readWholeConversation(path),
   };
 }
 

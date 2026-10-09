@@ -78,6 +78,7 @@ function everyLineIn(raw: string): ConversationLine[] {
   for (const text of raw.split('\n')) {
     const entry = parsed(text);
     if (entry === null || entry.isSidechain === true || entry.isMeta === true) continue;
+    if (typeof entry.parent_tool_use_id === 'string') continue;
     lines.push(...linesOf(entry));
   }
   return lines;
@@ -218,6 +219,10 @@ function firstLine(command: string): string {
 interface Entry {
   type?: unknown;
   timestamp?: unknown;
+  /** Claude desktop's agent sessions stamp their log here instead. */
+  _audit_timestamp?: unknown;
+  /** A helper's turn inside Claude desktop's agent sessions, which is not the conversation. */
+  parent_tool_use_id?: unknown;
   isSidechain?: unknown;
   isMeta?: unknown;
   isApiErrorMessage?: unknown;
@@ -225,7 +230,8 @@ interface Entry {
 }
 
 function linesOf(entry: Entry): ConversationLine[] {
-  const at = typeof entry.timestamp === 'string' ? entry.timestamp : '';
+  const stamp = entry.timestamp ?? entry._audit_timestamp;
+  const at = typeof stamp === 'string' ? stamp : '';
   const content = entry.message?.content;
   if (entry.type === 'user') {
     const said = typeof content === 'string' ? content : textBlocks(content).join('\n');

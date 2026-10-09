@@ -16,6 +16,12 @@ import {
 } from '@memnox/core';
 import { displayName, readNames } from '../agents/names';
 import { withEvents } from '../event-store';
+import {
+  DESKTOP_APP,
+  desktopRoots,
+  desktopSessions,
+  type DesktopSession,
+} from './desktop-sessions';
 import { isOperatorAgent, processAlive } from '../session-tools/sessions-tool';
 
 /**
@@ -35,6 +41,8 @@ const NODE_SEAMS: LifeSeams = { alive: processAlive };
 
 export class SessionLives {
   private readonly lives = new Map<string, Life>();
+  /** Desktop sessions by whether each was mid turn when last looked at. */
+  private readonly desktop = new Map<string, boolean>();
 
   constructor(
     private readonly home: string,
@@ -62,9 +70,33 @@ export class SessionLives {
         changed.push({ host, kind: await this.howItEnded(host) });
       }
     }
-    return Promise.all(
+    const told = await Promise.all(
       changed.map(({ host, kind }) => this.eventFor(host, kind, moment)),
     );
+    return [...told, ...(await this.desktopChanges(moment))];
+  }
+
+  /**
+   * A session begun in the Codex app or Claude desktop, and a turn there that ended, which no
+   * hook reports, read from what the apps keep each time the daemon looks.
+   */
+  private async desktopChanges(moment: string): Promise<DaemonEvent[]> {
+    const names = await readNames(this.home);
+    const events: DaemonEvent[] = [];
+    for (const session of desktopSessions(desktopRoots(this.home), this.started)) {
+      const was = this.desktop.get(session.id);
+      this.desktop.set(session.id, session.working);
+      const kind =
+        was === undefined
+          ? session.startedAt >= this.started
+            ? NOTICE_KIND.STARTED
+            : null
+          : was && !session.working
+            ? NOTICE_KIND.FINISHED
+            : null;
+      if (kind !== null) events.push(desktopEvent(session, kind, names, moment));
+    }
+    return events;
   }
 
   /** Gone mid turn when no hook said it closed and it was still working; closed otherwise. */
@@ -118,6 +150,35 @@ export class SessionLives {
       ...(place === undefined ? {} : { place }),
     };
   }
+}
+
+function desktopEvent(
+  session: DesktopSession,
+  kind: NoticeKind,
+  names: Awaited<ReturnType<typeof readNames>>,
+  moment: string,
+): DaemonEvent {
+  const agentName = displayName(names, {
+    id: `${AGENT_ID_PREFIX}${session.agent}`,
+    kind: session.agent,
+  });
+  const app = session.app === DESKTOP_APP.CODEX ? 'the Codex app' : 'Claude desktop';
+  const where = session.cwd === undefined ? app : `${app}, in ${basename(session.cwd)}`;
+  return {
+    kind: DAEMON_EVENT.NOTICE,
+    subject: noticeSubject(kind, session.id, moment),
+    agent: session.agent,
+    agentName,
+    summary:
+      kind === NOTICE_KIND.STARTED
+        ? `${agentName} started a session in ${where}.`
+        : `${agentName} in ${where} finished a turn and is waiting on you.`,
+    at: moment,
+    notice: kind,
+    sessionId: session.id,
+    ...(session.title === undefined ? {} : { task: session.title }),
+    ...(session.cwd === undefined ? {} : { place: basename(session.cwd) }),
+  };
 }
 
 interface Facts {

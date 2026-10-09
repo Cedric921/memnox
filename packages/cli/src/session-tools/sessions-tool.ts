@@ -20,6 +20,7 @@ import {
 } from '@memnox/core';
 import { readTurnOver, sessionTranscript } from '../daemon/transcript';
 import { withEvents } from '../event-store';
+import { DESKTOP_APP, desktopRoots, desktopSessions } from '../daemon/desktop-sessions';
 import { repositoriesOf } from './changes-tool';
 import { hostedIds } from './session-aliases';
 import { textArg, type SessionToolDeps, type ToolArgs } from './read-tools';
@@ -136,6 +137,7 @@ export async function sessionsTool(
     const one = { sessionId, events: rowsOf, waiting, moment };
     rows.push(await describe(deps, turn === undefined ? one : { ...one, turn }));
   }
+  rows.push(...desktopRows(deps, since.toISOString(), agent));
   // Work happening now first, so "which one is working" reads off the top.
   return rows.sort(
     (a, b) =>
@@ -143,6 +145,38 @@ export async function sessionsTool(
         Number(a.state === SESSION_STATE.WORKING) ||
       b.lastActive.localeCompare(a.lastActive),
   );
+}
+
+/** Sessions in the Codex app and Claude desktop, which no hook reports, read from what the apps keep. */
+function desktopRows(
+  deps: SessionToolDeps,
+  since: string,
+  agent: string | undefined,
+): ({ lastActive: string; state: SessionState } & Record<string, unknown>)[] {
+  return desktopSessions(desktopRoots(deps.home), since)
+    .filter((each) => agent === undefined || each.agent === agent)
+    .map((each) => {
+      const quietMs = deps.now().getTime() - Date.parse(each.lastActiveAt);
+      return {
+        session: each.id,
+        agent: each.agent,
+        ...(each.title === undefined ? {} : { task: each.title }),
+        repositories: each.cwd === undefined ? [] : [each.cwd],
+        started: each.startedAt,
+        lastActive: each.lastActiveAt,
+        quietForMinutes: msToMinutes(quietMs),
+        state: stateOf({
+          closed: false,
+          paused: false,
+          quietMs,
+          busy: each.working,
+          handedBack: !each.working,
+        }),
+        turn: each.working ? TURN.IN_PROGRESS : TURN.HANDED_BACK,
+        runningIn: each.app === DESKTOP_APP.CODEX ? 'the Codex app' : 'Claude desktop',
+        desktop: true,
+      };
+    });
 }
 
 /** The agent's own conversation id and the session hosting it are one row, under the hosted id. */
