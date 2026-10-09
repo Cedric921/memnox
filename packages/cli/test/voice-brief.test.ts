@@ -91,6 +91,7 @@ describe('how the voice speaks', () => {
     expect(prompt).toContain('"Noted: memo is Memnox."');
     expect(prompt).toContain('ask one question at a time');
     expect(prompt).toContain('The screen is the witness');
+    expect(prompt).toContain('"just say hi" is the message "Hi"');
     expect(prompt).toContain('say it did not go in, never that it was sent');
     expect(prompt).toContain('unless you called the same tool again in this reply');
     expect(prompt).toContain(

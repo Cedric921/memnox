@@ -34,8 +34,8 @@ export const LOOK_TOOL: ToolDefinition = {
   annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
 };
 
-/** Long enough to capture a window and walk its controls. */
-const SIGHT_WAIT_MS = 8_000;
+/** Long enough to capture a window, walk its controls and read every word on it. */
+const SIGHT_WAIT_MS = 15_000;
 const SIGHT_POLL_MS = 150;
 
 const NOT_SEEN =
