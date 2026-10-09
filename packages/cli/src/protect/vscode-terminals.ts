@@ -111,6 +111,9 @@ export async function refreshVscodeTerminals(
   }
 }
 
+/** The file an editor lists the extension folders it uninstalled in, until it next restarts. */
+const OBSOLETE = '.obsolete';
+
 /** Whether any installed copy in this extensions folder is exactly the script this memnox ships. */
 async function holdsShipped(folder: string, shipped: string): Promise<boolean> {
   const names = await readdir(folder).catch(() => [] as string[]);
@@ -130,7 +133,7 @@ async function holdsShipped(folder: string, shipped: string): Promise<boolean> {
  * never loads, so a copy named there answers no link however exactly it matches.
  */
 async function obsolete(folder: string): Promise<Set<string>> {
-  const text = await readFile(join(folder, '.obsolete'), 'utf8').catch(() => null);
+  const text = await readFile(join(folder, OBSOLETE), 'utf8').catch(() => null);
   if (text === null) return new Set();
   try {
     const parsed: unknown = JSON.parse(text);
@@ -185,12 +188,41 @@ async function installInto(
   }
   return Promise.all(
     editors.map(async (each) => {
+      await forgetRemovedCopies(join(home, each.extensions));
       const ran = await seams.run(each.cli, ['--install-extension', packaged, '--force']);
-      return ran.ok
+      if (!ran.ok) return { editor: each.name, done: false, why: lastLine(ran.output) };
+      // An install the editor did not register answers no link, so only its own list is believed.
+      const listed = await seams.run(each.cli, ['--list-extensions']);
+      return listed.output.toLowerCase().includes(TERMINALS_EXTENSION)
         ? { editor: each.name, done: true }
-        : { editor: each.name, done: false, why: lastLine(ran.output) };
+        : { editor: each.name, done: false, why: NOT_REGISTERED };
     }),
   );
+}
+
+const NOT_REGISTERED =
+  'the editor took the package but does not list it, so reload its windows and run memnox protect --vscode again';
+
+/**
+ * A copy of this extension the editor marked removed, deleted with its mark, since an install of the
+ * same version lands in that folder and the editor goes on treating it as uninstalled.
+ */
+async function forgetRemovedCopies(folder: string): Promise<void> {
+  const removed = await obsolete(folder);
+  const ours = [...removed].filter((name) => name.startsWith(`${TERMINALS_EXTENSION}-`));
+  if (ours.length === 0) return;
+  for (const name of ours) await rm(join(folder, name), { recursive: true, force: true });
+  const path = join(folder, OBSOLETE);
+  const marks = await readFile(path, 'utf8').then(
+    (text): unknown => JSON.parse(text),
+    () => null,
+  );
+  if (typeof marks !== 'object' || marks === null) return;
+  // Only this extension's own marks are taken out; every other extension's stay as the editor left them.
+  const kept = Object.fromEntries(
+    Object.entries(marks).filter(([name]) => !ours.includes(name)),
+  );
+  await writeFile(path, JSON.stringify(kept));
 }
 
 async function uninstallFrom(

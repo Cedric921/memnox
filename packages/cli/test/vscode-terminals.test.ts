@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -23,6 +24,9 @@ async function seamsFor(calls: string[][]): Promise<TerminalsSeams> {
     script: () => script,
     run: (file, args, cwd) => {
       calls.push([file, ...args]);
+      // The editor lists what it installed, which is how an install is believed.
+      if (args[0] === '--list-extensions')
+        return Promise.resolve({ ok: true, output: `${TERMINALS_EXTENSION}\n` });
       if (file !== '/usr/bin/zip') return Promise.resolve({ ok: true, output: '' });
       return new Promise((resolve) =>
         execFile(file, [...args], { cwd }, (error, out) =>
@@ -31,6 +35,10 @@ async function seamsFor(calls: string[][]): Promise<TerminalsSeams> {
       );
     },
   };
+}
+
+function installs(calls: readonly string[][]): string[][] {
+  return calls.filter((each) => each[0] === CODE && each[1] === '--install-extension');
 }
 
 function listing(vsix: string): Promise<string> {
@@ -74,7 +82,7 @@ describe('the extension that shows a session its own VS Code terminal', () => {
     await writeFile(join(installed, 'extension.js'), 'an older build\n');
     const said: string[] = [];
     await refreshVscodeTerminals(home, (line) => said.push(line), seams);
-    expect(calls.filter((each) => each[0] === CODE)).toHaveLength(1);
+    expect(installs(calls)).toHaveLength(1);
     expect(said).toEqual([expect.stringContaining('put into VS Code')]);
 
     // The same script there now, as the editor unpacks it, so the next start changes nothing.
@@ -98,9 +106,17 @@ describe('the extension that shows a session its own VS Code terminal', () => {
       join(extensions, folder, 'dist', 'extension.js'),
       await readFile(seams.script() ?? '', 'utf8'),
     );
-    await writeFile(join(extensions, '.obsolete'), JSON.stringify({ [folder]: true }));
+    await writeFile(
+      join(extensions, '.obsolete'),
+      JSON.stringify({ [folder]: true, 'someone.else-1.0.0': true }),
+    );
     await refreshVscodeTerminals(home, () => undefined, seams);
-    expect(calls.filter((each) => each[0] === CODE)).toHaveLength(1);
+    expect(installs(calls)).toHaveLength(1);
+    // The removed copy goes with its mark, so the install is not made into a folder the editor wrote off.
+    expect(existsSync(join(extensions, folder))).toBe(false);
+    expect(JSON.parse(await readFile(join(extensions, '.obsolete'), 'utf8'))).toEqual({
+      'someone.else-1.0.0': true,
+    });
   });
 
   it('takes itself back out by its id', async () => {
