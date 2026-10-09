@@ -83,12 +83,12 @@ describe('typing an instruction into an integrated terminal', () => {
     expect(claimedElsewhere(waiting, 42)).toBe(false);
   });
 
-  it('types a few sentences in about three seconds, pausing after punctuation', () => {
+  it('types a few sentences in about half a second, pausing after punctuation', () => {
     const pauses = keyPausesMs('push it, then stop.', () => 0.5);
     expect(pauses).toHaveLength(19);
     expect(pauses[7]).toBeGreaterThan(pauses[6] ?? 0);
     const long = keyPausesMs('x'.repeat(300), () => 0.5);
-    expect(long.reduce((sum, each) => sum + each, 0)).toBeLessThanOrEqual(3_000);
+    expect(long.reduce((sum, each) => sum + each, 0)).toBeLessThanOrEqual(400);
   });
 
   it('closes only a terminal Memnox asked to close, never one a typing link names', () => {

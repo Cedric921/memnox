@@ -41,9 +41,9 @@ const PROGRAMS: Readonly<Record<MultiplexerName, readonly string[]>> = {
 };
 
 /** A beat before Return, since an agent reads text and Return arriving together as a paste. */
-const BEFORE_RETURN_MS = 250;
+const BEFORE_RETURN_MS = 150;
 /** Long enough for an agent to take the words and draw them in its conversation. */
-const BEFORE_READBACK_MS = 600;
+const BEFORE_READBACK_MS = 300;
 /** Enough of the start of the words to know them again, short enough that a wrapped line still holds it. */
 const READBACK_CHARS = 32;
 

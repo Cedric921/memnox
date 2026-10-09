@@ -117,13 +117,13 @@ export function agentInFront(listing: string): boolean {
 }
 
 /**
- * The pause after each key: quick enough that a few sentences go in within about three seconds,
- * slow enough to be watched, with a breath after punctuation, the way the Mac types elsewhere.
+ * The pause after each key: quick enough that a few sentences go in within about half a second,
+ * still seen going in, with a breath after punctuation, the way the Mac types elsewhere.
  */
 export function keyPausesMs(text: string, jitter: () => number = Math.random): number[] {
-  const base = Math.min(45, Math.max(10, 3000 / Math.max(text.length, 1)));
+  const base = Math.min(12, Math.max(1, 400 / Math.max(text.length, 1)));
   return [...text].map((character) => {
-    const breath = ',.?!;:'.includes(character) ? 60 : 0;
+    const breath = ',.?!;:'.includes(character) ? 15 : 0;
     return Math.round(base * (0.7 + 0.6 * jitter()) + breath);
   });
 }

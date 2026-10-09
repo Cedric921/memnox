@@ -34,7 +34,7 @@ const PS_TIMEOUT_MS = 2_000;
 const DISPLAYS = join(homedir(), '.memnox', 'displays');
 
 /** A beat before Return, since an agent reads text and Return arriving together as a paste. */
-const BEFORE_RETURN_MS = 250;
+const BEFORE_RETURN_MS = 150;
 
 /** Marks a request no terminal here holds, which is for the Mac to type elsewhere rather than an answer. */
 const NO_TERMINAL = 'noTerminal';

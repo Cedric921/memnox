@@ -441,7 +441,7 @@ async function showFor(
 
 /** Long enough for the comet, bringing the tab forward and typing a few sentences a key at a time. */
 const DELIVERY_WAIT_MS = 25_000;
-const DELIVERY_POLL_MS = 200;
+const DELIVERY_POLL_MS = 50;
 
 /** What the Mac said became of a typed instruction, or null when it said nothing in time. */
 export async function awaitDelivery(
