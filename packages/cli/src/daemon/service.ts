@@ -316,6 +316,8 @@ interface ServiceSeams {
   load?: (path: string) => string | null;
   linger?: () => string | null;
   unload?: () => string | null;
+  /** Whether the manager holds the daemon now, injected so a test never asks the real one. */
+  loaded?: () => boolean;
   /** Injected, so a test on a Mac installs what Windows would. */
   platform?: NodeJS.Platform;
 }
@@ -349,11 +351,13 @@ export async function installService(
   if (!state.supported) return { state };
   if (os === WINDOWS) return installWindowsTask(state, home, seams);
 
+  // A loaded daemon keeps running whatever it started on, so it is stopped first to come back on this build.
+  const stopped = (seams.loaded ?? isLabelLoaded)() ? (seams.unload ?? unload)() : null;
   await mkdir(dirname(state.path), { recursive: true });
   await writeFile(state.path, os === MACOS ? plistFor(home) : unitFor(home), {
     mode: SERVICE_FILE_MODE,
   });
-  const warning = (seams.load ?? load)(state.path);
+  const warning = stopped ?? (seams.load ?? load)(state.path);
   // A user unit stops with the last login otherwise, which on a server reached over SSH is the first logout.
   const linger = os === MACOS ? null : (seams.linger ?? keepAfterLogout)();
   return {

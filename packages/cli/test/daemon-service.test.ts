@@ -54,6 +54,31 @@ describe('having the machine start the daemon', () => {
     expect(result.linger).toBe('sudo loginctl enable-linger deploy');
   });
 
+  it('stops a daemon the manager already holds, so the install comes back on this build', async () => {
+    const dir = await home();
+    const order: string[] = [];
+    // The plist alone changes nothing: a running daemon stays on the code it started with until it is restarted.
+    const { state, warning } = await installService(dir, {
+      loaded: () => true,
+      unload: () => (order.push('unload'), null),
+      load: () => (order.push('load'), null),
+      linger: () => null,
+    });
+    if (!state.supported || platform() === 'win32') return;
+    expect(order).toEqual(['unload', 'load']);
+    expect(warning).toBeUndefined();
+
+    const untouched: string[] = [];
+    await installService(dir, {
+      loaded: () => false,
+      unload: () => (untouched.push('unload'), null),
+      load: () => (untouched.push('load'), null),
+      linger: () => null,
+    });
+    expect(untouched).toEqual(['load']);
+    await uninstallService(dir, { unload: () => null });
+  });
+
   it('removing one that was never installed is not an error', async () => {
     await expect(uninstallService(await home())).resolves.toBeDefined();
   });
