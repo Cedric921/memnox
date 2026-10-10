@@ -6,6 +6,7 @@ import type { RuleScope } from '../daemon/voice-cards';
 import type { Policy } from '../policy/policy';
 import { JsonRecordDir } from '../store/json-records';
 import type { HoldAnswer } from './hold';
+import type { WorkAccount } from '../daemon/work-cards';
 
 /**
  * A change something other than a person suggested, written down and never applied until a
@@ -29,6 +30,10 @@ export const PROPOSAL_KIND = {
   MAC: 'mac',
   /** An answer to a team's question, carried out by the device holding the person's sign in. */
   TEAM: 'team',
+  /** A tool run through the person's own account, so it speaks as them, once they sign for it. */
+  WORK: 'work',
+  /** An account a sign in reached, said once to be the person's own so it is matched from then on. */
+  ACCOUNT: 'account',
 } as const;
 
 export const PROPOSAL_ANSWER = {
@@ -61,6 +66,25 @@ export type ProposedChange =
       kind: typeof PROPOSAL_KIND.TEAM;
       callId: string;
       answer: HoldAnswer;
+      label: string;
+    }
+  | {
+      kind: typeof PROPOSAL_KIND.WORK;
+      toolkit: string;
+      tool: string;
+      /** The arguments as the exact JSON text the control plane is sent and the signature covers. */
+      argumentsText: string;
+      /** What it does, in the words the person heard read back. */
+      label: string;
+      /** Whose account it goes out as, which the run is refused under any other. */
+      account?: WorkAccount;
+      /** Who it goes to as their tool names them, since the tool itself takes an id nobody can read. */
+      toName?: string;
+    }
+  | {
+      kind: typeof PROPOSAL_KIND.ACCOUNT;
+      toolkit: string;
+      /** The account as the person heard it named: "moise10r on GitHub". */
       label: string;
     };
 

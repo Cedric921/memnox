@@ -64,8 +64,10 @@ async function lookTool(deps: SessionToolDeps, args: ToolArgs): Promise<unknown>
   if (sight === null) return { seen: false, said: NOT_SEEN };
   const visual = textArg(args, 'visual') === SAID_TRUE;
   const { image, ...read } = sight;
+  // Read off somebody's screen, so a line on it asking for something is shown and never obeyed.
   return {
     seen: true,
+    untrusted: true,
     ...read,
     ...(visual && image !== undefined ? { image } : {}),
     ...changedSince(deps.home, sight),
@@ -129,7 +131,7 @@ async function forgetScreenTool(deps: SessionToolDeps): Promise<unknown> {
 }
 
 /** What the Mac saw for a LOOK, or null when it said nothing in time. */
-async function awaitSight(
+export async function awaitSight(
   home: string,
   requestId: string,
   waitMs: number = SIGHT_WAIT_MS,

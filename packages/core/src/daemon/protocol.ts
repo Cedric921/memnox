@@ -468,31 +468,3 @@ export interface DaemonResponse extends ExtensionResponseFields {
 export function encode(message: DaemonRequest | DaemonResponse): string {
   return `${JSON.stringify(message)}\n`;
 }
-
-/** Null rather than a throw: a garbled line is a bad client, not a crash. */
-export function decodeRequest(line: string): DaemonRequest | null {
-  const message = parseMessage<DaemonRequest>(line);
-  if (message === null || typeof message.method !== 'string') return null;
-  // The id and method are checked; the rest is optional by the protocol's own shape.
-  return message as DaemonRequest;
-}
-
-export function decodeResponse(line: string): DaemonResponse | null {
-  const message = parseMessage<DaemonResponse>(line);
-  // Only the id is required; every other field of a response is optional.
-  return message === null ? null : (message as DaemonResponse);
-}
-
-/** An object carrying a numeric id, or null for anything else, including a line that is not JSON. */
-function parseMessage<T extends { id: number }>(line: string): Partial<T> | null {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(line);
-  } catch {
-    return null;
-  }
-  if (typeof parsed !== 'object' || parsed === null) return null;
-  // Narrowed field by field by the callers, starting with the id here.
-  const message = parsed as Partial<T>;
-  return typeof message.id === 'number' ? message : null;
-}

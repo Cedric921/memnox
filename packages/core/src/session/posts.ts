@@ -18,6 +18,8 @@ export const POST_HOURS = 12;
 export const POST_KIND = {
   /** Failures standing, so changes outside this machine now ask first. */
   STRUGGLING: 'struggling',
+  /** Stopped in its own terminal to ask its person something, such as a permission, until they answer there. */
+  ASKING: 'asking',
 } as const;
 
 export type PostKind = (typeof POST_KIND)[keyof typeof POST_KIND];

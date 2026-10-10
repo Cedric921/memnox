@@ -32,6 +32,12 @@ export const NOTICE_KIND = {
   CLOSED: 'closed',
   /** A session's process went away in the middle of a turn, so whatever it was doing stopped unfinished. */
   GONE: 'gone',
+  /** The person finished signing in to one of their tools, so what they asked for can carry on. */
+  SIGNED_IN: 'signed-in',
+  /** A sign in the person opened never finished, which a company's approval screen is the usual cause of. */
+  SIGN_IN_STALLED: 'sign-in-stalled',
+  /** An agent stopped in its own terminal to ask its person something, which the voice reads and answers there. */
+  ASKING: 'asking',
 } as const;
 
 export type NoticeKind = (typeof NOTICE_KIND)[keyof typeof NOTICE_KIND];

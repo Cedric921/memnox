@@ -60,7 +60,8 @@ const CONTEXT_REUSE_MS = 5_000;
 
 /** Said ahead of the next words when a reply was cut off after it had already done something. */
 export function actedNote(tools: readonly string[]): string {
-  return `[Memnox, not the person] Your last reply was cut off when they spoke, after you had already called ${tools.join(', ')}. That ran and is done: never call it again for the same request. Answer only what their new words add, and when they add nothing new, say in a few words that it is done.`;
+  // Told what to check rather than that it ran, since a call made while they were still speaking is held back and does nothing.
+  return `[Memnox, not the person] Your last reply was cut off when they spoke, after it reached for ${tools.join(', ')}. Read that call's own result in this conversation: when it says it was done, such as started or sent, never repeat it for the same request; when it says nothing was done, or there is no result, do it now. Never tell them something was already done unless a result said so, and anything new their words ask for, even something similar, is done at once.`;
 }
 /** A request this long already says what to do, so a hold on it is a misread and never waits on them. */
 const WHOLE_REQUEST_WORDS = 8;

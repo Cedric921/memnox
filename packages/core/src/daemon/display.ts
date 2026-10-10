@@ -34,6 +34,10 @@ export const DISPLAY = {
   FOLDER: 'folder',
   /** Look at the screen: the Mac captures the window in front, or the app named in the title, and answers with SEEN. */
   LOOK: 'look',
+  /** Press keys in the terminal a session runs in, the text naming them, to answer what its agent asks there. */
+  PRESS: 'press',
+  /** The icons of tools the person asked for and has not signed in to; each opens that tool's own sign in. */
+  SIGN_IN: 'signin',
 } as const;
 
 export type DisplayKind = (typeof DISPLAY)[keyof typeof DISPLAY];
@@ -49,3 +53,37 @@ export const DISPLAY_VIA = {
 } as const;
 
 export type DisplayVia = (typeof DISPLAY_VIA)[keyof typeof DISPLAY_VIA];
+
+/** The named keys a PRESS may carry, as the Mac maps each to the key itself. */
+export const TERMINAL_KEY = {
+  UP: 'up',
+  DOWN: 'down',
+  LEFT: 'left',
+  RIGHT: 'right',
+  ENTER: 'enter',
+  ESCAPE: 'escape',
+  TAB: 'tab',
+  SPACE: 'space',
+} as const;
+
+export type TerminalKey = (typeof TERMINAL_KEY)[keyof typeof TERMINAL_KEY];
+
+/** Enough to move down a list of choices and pick one, never a sentence typed a key at a time. */
+export const MOST_PRESSED_KEYS = 8;
+
+/** One letter or digit, which is how a numbered or lettered choice is picked. */
+const ONE_CHARACTER = /^[a-z0-9]$/;
+
+const NAMED_KEYS: readonly string[] = Object.values(TERMINAL_KEY);
+
+/** The keys named, in order, or null when any word is not a key, so only keys are ever pressed. */
+export function terminalKeys(said: string): string[] | null {
+  const keys = said
+    .toLowerCase()
+    .split(/[\s,]+/)
+    .filter((word) => word !== '');
+  if (keys.length === 0 || keys.length > MOST_PRESSED_KEYS) return null;
+  return keys.every((key) => NAMED_KEYS.includes(key) || ONE_CHARACTER.test(key))
+    ? keys
+    : null;
+}

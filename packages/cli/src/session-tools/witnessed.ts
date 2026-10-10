@@ -9,6 +9,7 @@ export function witnessed(delivery: DisplayDelivery | null): Record<string, unkn
   const evidence = delivery?.evidence;
   if (evidence === undefined) return {};
   return {
+    untrusted: true,
     screenAfter: {
       app: evidence.app,
       ...(evidence.text === undefined ? {} : { text: evidence.text }),

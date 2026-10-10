@@ -9,7 +9,7 @@ import {
   isNamedPipe,
   describePause,
   decodeRequest,
-  LineBuffer,
+  requestReader,
   SessionLimits,
   SessionPauses,
   ENFORCEMENT_MODE,
@@ -223,12 +223,15 @@ export class MemnoxDaemon {
   }
 
   private serve(socket: Socket): void {
-    const reader = new LineBuffer();
+    const reader = requestReader();
     socket.setEncoding('utf8');
     // Chained, so a connection that sends two lines gets two answers in the order it asked.
     let answered: Promise<void> = Promise.resolve();
     socket.on('data', (chunk: string) => {
-      for (const line of reader.push(chunk)) {
+      const lines = reader.push(chunk);
+      // Too long to be a request, so the connection ends rather than filling memory.
+      if (reader.overflowed) socket.destroy();
+      for (const line of lines) {
         answered = answered.then(() => this.respond(line, socket));
       }
     });

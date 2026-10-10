@@ -11,6 +11,7 @@ import type {
 } from '../daemon/protocol';
 import type { Delivery, DeliveryProof, Sight, Witness } from '../daemon/delivery';
 import { DISPLAY } from '../daemon/protocol';
+import type { ToolSignIn } from '../daemon/work-cards';
 import { shortDigest } from '../domain/digest';
 import { JsonRecordDir } from '../store/json-records';
 
@@ -76,6 +77,8 @@ export interface DisplayRequest {
   delivered?: DisplayDelivery;
   /** On LOOK, what the Mac saw, which also marks it answered. */
   seen?: Sight;
+  /** On SIGN_IN, the tools to show and the page each signs in on. */
+  signIn?: ToolSignIn[];
 }
 
 /** What the Mac said became of an instruction it was asked to type. */
@@ -111,6 +114,7 @@ export interface DisplayInput {
   via?: DisplayVia;
   shownIn?: ShownIn;
   marks?: string[];
+  signIn?: ToolSignIn[];
   at: string;
 }
 
@@ -178,6 +182,7 @@ export class DisplayRequests {
         ? {}
         : { trace: { ...input.trace, rows: input.trace.rows.slice(0, TRACE_ROWS) } }),
       ...whereItGoes(input),
+      ...(input.signIn === undefined ? {} : { signIn: input.signIn }),
       requestedAt: input.at,
       expiresAt: new Date(Date.parse(input.at) + DISPLAY_TTL_MS).toISOString(),
     };

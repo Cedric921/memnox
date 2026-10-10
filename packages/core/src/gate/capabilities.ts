@@ -107,6 +107,9 @@ export function proposalCapability(change: ProposedChange): RemoteCapability | n
   if (change.kind === PROPOSAL_KIND.RULES) return REMOTE_CAPABILITY.RULES;
   if (change.kind === PROPOSAL_KIND.REWIND) return REMOTE_CAPABILITY.REWIND;
   if (change.kind === PROPOSAL_KIND.MAC) return REMOTE_CAPABILITY.MAC;
+  // Saying something as the person is answering for them, so a phone allowed to answer may sign it.
+  if (change.kind === PROPOSAL_KIND.WORK || change.kind === PROPOSAL_KIND.ACCOUNT)
+    return REMOTE_CAPABILITY.ANSWER;
   return COMMAND_CAPABILITY[change.argv[0] ?? ''] ?? null;
 }
 

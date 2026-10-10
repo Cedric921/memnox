@@ -8,7 +8,7 @@ import {
   type WatchFor,
 } from '@memnox/core';
 import { withEvents } from '../event-store';
-import { noteFocus } from './focus';
+import { FOCUS_STARTED, noteFocus } from './focus';
 import { textArg, type SessionToolDeps, type ToolArgs } from './read-tools';
 import { scopeOf } from './session-scope';
 
@@ -62,7 +62,7 @@ const WAITING =
 /** The session the voice started a moment ago, which has no id until its agent first acts. */
 async function justStarted(deps: SessionToolDeps): Promise<VoiceFocus | null> {
   const focus = await new VoiceFocusStore(deps.home).read().catch(() => null);
-  if (focus?.why !== 'started' || focus.repository === undefined) return null;
+  if (focus?.why !== FOCUS_STARTED || focus.repository === undefined) return null;
   const age = Date.parse(deps.now().toISOString()) - Date.parse(focus.at);
   return age >= 0 && age < JUST_STARTED_MS ? focus : null;
 }
