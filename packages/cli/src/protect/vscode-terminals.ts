@@ -284,12 +284,14 @@ async function packageExtension(
 const BUILD_DIGEST_CHARS = 8;
 
 /**
- * The CLI version with the script's own digest, so every build installs into a folder of its own:
- * reinstalling the same version lands in the folder the editor just marked removed, and is never loaded.
+ * The CLI version with the digest of the script and the manifest around it, so every build installs into a
+ * folder of its own: reinstalling the same version lands in the folder the editor just marked removed, and
+ * a manifest change alone, such as the windows it starts in, was never installed while only the script counted.
  */
 export function builtVersion(script: string): string {
   const digest = createHash('sha256')
     .update(script)
+    .update(JSON.stringify(manifest('')))
     .digest('hex')
     .slice(0, BUILD_DIGEST_CHARS);
   return `${CLI_VERSION}-${digest}`;

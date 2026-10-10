@@ -34,9 +34,12 @@ const CODEX_HOOKS = join('.codex', 'hooks.json');
  * and its MCP calls are all ruled on, so no pattern syntax has to be guessed.
  */
 function codexEvents(): HookEvent[] {
-  return claudeEvents().map((each) =>
-    each.event === EDIT_HOOK_EVENT.PRE_TOOL_USE ? { event: each.event } : each,
-  );
+  // Notification is Claude Code's own event, which Codex does not raise.
+  return claudeEvents()
+    .filter((each) => each.event !== EDIT_HOOK_EVENT.NOTIFICATION)
+    .map((each) =>
+      each.event === EDIT_HOOK_EVENT.PRE_TOOL_USE ? { event: each.event } : each,
+    );
 }
 
 /** Cursor's user-level hooks, which apply in every repository it opens. */

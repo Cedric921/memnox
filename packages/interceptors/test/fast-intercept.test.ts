@@ -1,8 +1,16 @@
-import { mkdtemp } from 'node:fs/promises';
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { DECISION_EFFECT, INTERCEPT_PLAN, LocalGate, SessionPauses } from '@memnox/core';
+import {
+  configPathFor,
+  DECISION_EFFECT,
+  ENFORCEMENT_MODE,
+  INTERCEPT_PLAN,
+  LocalGate,
+  SessionPauses,
+  type EnforcementMode,
+} from '@memnox/core';
 
 import {
   commandEventFor,
@@ -27,8 +35,15 @@ function gate(effect: string, action: string): LocalGate {
   );
 }
 
-async function machine(): Promise<string> {
-  return mkdtemp(join(tmpdir(), 'memnox-fast-'));
+/** A machine past its first run, since one with no settings yet observes everything. */
+async function machine(
+  mode: EnforcementMode = ENFORCEMENT_MODE.ENFORCE,
+): Promise<string> {
+  const home = await mkdtemp(join(tmpdir(), 'memnox-fast-'));
+  const path = configPathFor(home);
+  await mkdir(join(path, '..'), { recursive: true });
+  await writeFile(path, `mode = "${mode}"\n`);
+  return home;
 }
 
 function scene(home: string, argv: string[], env: NodeJS.ProcessEnv = {}): FastScene {
@@ -96,6 +111,22 @@ describe('the daemon planning a command for the native wrapper', () => {
     expect(plan.exitCode).toBe(1);
     expect(plan.notes.join('\n')).toContain('Denied by Memnox: history is shared');
     expect(plan.row?.effect).toBe(DECISION_EFFECT.DENY);
+  });
+
+  it('runs what a rule denies in observe, with the verdict kept on the row', async () => {
+    const home = await machine(ENFORCEMENT_MODE.OBSERVE);
+    // A read, since a push or a delete goes to the Node interceptor whatever the mode.
+    const plan = await planIntercept(
+      scene(home, ['git', 'log']),
+      deps(home, gate(DECISION_EFFECT.DENY, 'git.log')),
+    );
+    expect(plan.kind).toBe(INTERCEPT_PLAN.RUN);
+    if (plan.kind !== INTERCEPT_PLAN.RUN) return;
+    expect(plan.notes).toEqual([]);
+    const row = commandEventFor(plan.pending.row);
+    expect(row.effect).toBe(DECISION_EFFECT.ALLOW);
+    expect(row.mode).toBe(ENFORCEMENT_MODE.OBSERVE);
+    expect(row.shadowEffect).toBe(DECISION_EFFECT.DENY);
   });
 
   it('refuses a paused session without a row, as the Node interceptor does', async () => {

@@ -79,6 +79,8 @@ export function claudeEvents(editMatcher: string = MATCHER): HookEvent[] {
     { event: EDIT_HOOK_EVENT.USER_PROMPT_SUBMIT },
     // Where the session is told its boundary once, as added context.
     { event: EDIT_HOOK_EVENT.SESSION_START },
+    // Where it stops to ask its person something, so the voice can put the question to them.
+    { event: EDIT_HOOK_EVENT.NOTIFICATION },
   ];
 }
 

@@ -2,7 +2,11 @@ import { accessSync, constants, statSync } from 'node:fs';
 import { basename, delimiter, join, win32 } from 'node:path';
 
 import {
+  AGENT_FROZEN_REASON,
+  applyEnforcementMode,
   DECISION_EFFECT,
+  DEFAULT_ENFORCEMENT_MODE,
+  ENFORCEMENT_MODE,
   alternativeFor,
   describeAlternative,
   describeHold,
@@ -16,7 +20,10 @@ import {
   resolveAction,
   UNNAMED_AGENT,
   UNNAMED_SESSION,
+  type ActionRequest,
   type BinaryVerdict,
+  type DecisionEffect,
+  type EnforcementMode,
   type EventRuleRef,
   type HoldService,
   type LocalGate,
@@ -62,10 +69,16 @@ export interface InterceptOutcome {
   rule?: EventRuleRef;
   /** Outside what the session declared it was for, which is what the breaker counts. */
   outOfScope?: boolean;
+  /** The machine's mode this was ruled under, so the row says why a deny was let through. */
+  mode?: EnforcementMode;
+  /** What enforce would have said, where the mode let the command run instead. */
+  shadowEffect?: DecisionEffect;
 }
 
 export interface InterceptDeps {
   gate?: LocalGate;
+  /** The machine's mode; absent is enforce, since a firewall that cannot read its mode fails closed. */
+  mode?: EnforcementMode;
   /** Read for a database host only; nothing else here looks at the environment. */
   env?: NodeJS.ProcessEnv;
   hold?: HoldService;
@@ -103,7 +116,10 @@ export async function ruleOnCommand(
   // The verb table first, so what `memnox scan`
   // promised about this CLI is what happens here.
   const verdict = verdictFor(binary, args, deps.env ?? {});
-  const base = baseOutcome(binary, args, verdict);
+  const base = {
+    ...baseOutcome(binary, args, verdict),
+    mode: deps.mode ?? DEFAULT_ENFORCEMENT_MODE,
+  };
   const gate = deps.gate;
   if (gate === undefined) return base;
 
@@ -117,18 +133,38 @@ export async function ruleOnCommand(
   if (decision.effect === DECISION_EFFECT.ALLOW) return observed(scoped, decision);
 
   const decided = { ...scoped, ...decidedBy(decision) };
+  // Observe stops nothing and asks nobody, as at the hook, so one mode means one thing at every seam.
+  const applied = softened(decision, deps.mode ?? DEFAULT_ENFORCEMENT_MODE);
+  if (applied.shadowEffect !== undefined) {
+    return { ...decided, shadowEffect: applied.shadowEffect };
+  }
+  return heldOrRefused({ binary, args, verdict, request, decision, decided, deps });
+}
+
+interface Ruled {
+  binary: string;
+  args: readonly string[];
+  verdict: BinaryVerdict;
+  request: ActionRequest;
+  decision: LocalVerdict;
+  decided: InterceptOutcome;
+  deps: InterceptDeps;
+}
+
+/** An ask goes to a person, and a deny names a way forward; nothing here runs in observe. */
+async function heldOrRefused(ruled: Ruled): Promise<InterceptOutcome> {
+  const { verdict, decision, decided, deps } = ruled;
   const evidence = evidenceLines(decision, deps);
   if (decision.effect === DECISION_EFFECT.ASK) {
-    const command = [binary, ...args];
     const held = await askPerson({
       verdict,
       reason: decision.reason,
       evidence,
-      command,
+      command: [ruled.binary, ...ruled.args],
       deps,
     });
     // A yes is learned, so the same new thing is not asked about twice.
-    if (held === null) gate.personAllowed(request);
+    if (held === null) deps.gate?.personAllowed(ruled.request);
     return held === null ? decided : { ...decided, ...held, allowed: false };
   }
   const message = [refusal(verdict, decision), ...evidence].join('\n');
@@ -161,6 +197,33 @@ function baseOutcome(
     argsDigest: digest(args.join(' ')),
     ...(verdict.target === undefined ? {} : { target: verdict.target }),
   };
+}
+
+/** A freeze is a person stopping this agent on purpose, so observe does not soften it. */
+function softened(
+  decision: LocalVerdict,
+  mode: EnforcementMode,
+): ReturnType<typeof applyEnforcementMode> {
+  if (decision.reason === AGENT_FROZEN_REASON) return { effect: decision.effect };
+  return applyEnforcementMode(decision.effect, mode);
+}
+
+/**
+ * The line advise prints before the command runs, and null in every other mode: observe
+ * says nothing, since a note the agent reads is a verdict it acts on.
+ */
+export function adviceLine(outcome: InterceptOutcome): string | null {
+  if (outcome.mode !== ENFORCEMENT_MODE.ADVISE || outcome.shadowEffect === undefined) {
+    return null;
+  }
+  const would =
+    outcome.shadowEffect === DECISION_EFFECT.DENY
+      ? 'would have refused'
+      : 'would have asked about';
+  const what = [outcome.action, outcome.target]
+    .filter((each) => each !== undefined)
+    .join(' ');
+  return `[memnox] advise: enforce ${would} ${what}: ${outcome.reason ?? 'a rule matched'}`;
 }
 
 /**

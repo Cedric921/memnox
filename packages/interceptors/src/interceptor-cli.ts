@@ -21,6 +21,7 @@ import {
   splitCommandLine,
   urlArgumentIn,
   withPathValue,
+  type EnforcementMode,
   type EventSink,
   type LocalGate,
   type Overlay,
@@ -35,6 +36,7 @@ import { reportToDaemon } from './daemon-client';
 import { readHookConfig } from './hook-config';
 import { loadHookGate } from './hook-gate-loader';
 import {
+  adviceLine,
   INTERCEPT_BINARY,
   invokedFor,
   isExecutableFile,
@@ -47,6 +49,7 @@ import { record, type Provenance } from './record';
 import { buildHold, log, pidSessionId } from './seam-runtime';
 import { ancestorsOf } from './process-ancestry';
 import { claimShellAction, shellAction, type ShellClaim } from './shell-action';
+import { readMachineMode } from './tool-hook';
 import { DEFAULT_AGENT_NAME } from './tool-hook.constants';
 import { spawnPlanFor } from './windows-exec';
 
@@ -64,6 +67,8 @@ const FORWARDED: readonly NodeJS.Signals[] = ['SIGINT', 'SIGQUIT'];
 interface RunContext {
   home: string;
   gate: LocalGate | null;
+  /** The machine's mode at arrival, the same one the hook reads, so both seams agree. */
+  mode: EnforcementMode;
   overlays: readonly Overlay[];
   /**
    * Read at arrival, so a verdict replays against the bundle and freeze in force then.
@@ -117,11 +122,13 @@ async function readRunContext(
   sessionId: string | undefined,
 ): Promise<RunContext> {
   const gate = await loadHookGate(await readHookConfig(process.env, home));
+  const mode = await readMachineMode(home);
   const overlays = await overlaysInForce(home);
   const provenance = await provenanceOf(home, overlays, new Date().toISOString());
   return {
     home,
     gate,
+    mode,
     overlays,
     provenance,
     sink: openLedger(home),
@@ -133,6 +140,7 @@ async function readRunContext(
 function ruleOn(command: Command, context: RunContext): Promise<InterceptOutcome> {
   return ruleOnCommand(command.binary, command.args, {
     ...(context.gate === null ? {} : { gate: context.gate }),
+    mode: context.mode,
     overlays: context.overlays,
     env: process.env,
     // Without a hold an `ask` rule denies instead of asking.
@@ -209,6 +217,8 @@ async function handAndRecord(
   if ('refused' in claim) return refuseAsClaimed(claim.refused, outcome, context);
 
   await keepBeforeDestroying(command, context);
+  const advice = adviceLine(outcome);
+  if (advice !== null) process.stderr.write(`${advice}\n`);
   // Held while the command runs, so another machine
   // waits on work being done rather than a window.
   const status = await hand(command, context.home);

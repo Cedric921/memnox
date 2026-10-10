@@ -24,6 +24,7 @@ import type { Checkout } from './git-branch';
 import { readHookConfig, type HookConfig } from './hook-config';
 import { loadHookGate, type SeamScene } from './hook-gate-loader';
 import {
+  adviceLine,
   invokedFor,
   realPath,
   resolveReal,
@@ -31,6 +32,7 @@ import {
   type InterceptOutcome,
 } from './interceptor';
 import { ancestorsOf } from './process-ancestry';
+import { readMachineMode } from './tool-hook';
 import { repositoryRootOf } from './seam-runtime';
 import type { RecordInput } from './record';
 import { shellAction } from './shell-action';
@@ -182,22 +184,18 @@ async function rule(
   const now = deps.now ?? ((): Date => new Date());
   const provenance = await provenanceOf(deps.home, overlays, now().toISOString());
   const started = now().getTime();
-  let asked = false;
-  // Asking needs the agent's terminal, which only the Node interceptor has.
-  const hold = new HoldService({
-    ask: async () => {
-      asked = true;
-      return null;
-    },
-  });
+  const terminal = noTerminal();
   const outcome = await ruleOnCommand(located.binary, located.args, {
     ...(gate === null ? {} : { gate }),
+    mode: await readMachineMode(deps.home),
     overlays,
     env,
-    hold,
+    hold: terminal.hold,
     ...(sessionId === undefined ? {} : { sessionId }),
   });
-  if (asked) return 'a rule asks a person';
+  if (terminal.asked()) return 'a rule asks a person';
+  const advice = adviceLine(outcome);
+  if (advice !== null) notes.push(advice);
   // Self protection resolves against the process directory, and this one is the daemon's.
   if (
     outcome.target !== undefined &&
@@ -207,6 +205,18 @@ async function rule(
   }
   const session = sessionId === undefined ? {} : { sessionId };
   return { outcome, notes, base: { ...provenance, outcome, ...session }, started };
+}
+
+/** Asking needs the agent's terminal, which only the Node interceptor has, so this only notes it. */
+function noTerminal(): { hold: HoldService; asked: () => boolean } {
+  let asked = false;
+  const hold = new HoldService({
+    ask: async () => {
+      asked = true;
+      return null;
+    },
+  });
+  return { hold, asked: () => asked };
 }
 
 async function gateIn(

@@ -36,6 +36,8 @@ export const EDIT_HOOK_EVENT = {
   USER_PROMPT_SUBMIT: 'UserPromptSubmit',
   /** A session began: the boundary is said once, as context. Codex and Gemini CLI share the name. */
   SESSION_START: 'SessionStart',
+  /** Claude Code stopped to ask its person something, a permission or a choice, in its own terminal. */
+  NOTIFICATION: 'Notification',
 } as const;
 
 /**
