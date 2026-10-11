@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest';
 import {
   ConfirmKeys,
   confirmationMessage,
+  DISPLAY,
   DisplayRequests,
   Milestones,
   NodeGit,
@@ -15,6 +16,7 @@ import {
   PROPOSAL_KIND,
   Proposals,
   Clashes,
+  RunTerminals,
   SessionHosts,
   SessionStarts,
   SessionTurns,
@@ -392,6 +394,87 @@ describe('starting a session out loud', () => {
     expect(seen.session).toBe('ses_started');
     expect(seen.said).toContain('the agent is starting on the task');
     expect(asked).toEqual(['memnox-runtime', 'memnox-runtime']);
+  });
+
+  it('starts in the folder they named over a repository they use whose name only sounds like it', async () => {
+    const deps: SessionToolDeps = { ...(await depsAt()), resolveCommand: () => 'claude' };
+    await workedOn(deps, 'bacco');
+    await mkdir(join(deps.home, 'Documents', 'babco'), { recursive: true });
+    expect(
+      await callOperatorTool(deps, SEAMS, 'propose_start', { repository: 'babco' }),
+    ).toMatchObject({ proposed: true, repository: 'babco' });
+
+    // With no such folder, the near name is only offered, read back rather than started on a guess.
+    const elsewhere: SessionToolDeps = {
+      ...(await depsAt()),
+      resolveCommand: () => 'claude',
+    };
+    await workedOn(elsewhere, 'bacco');
+    const near = (await callOperatorTool(elsewhere, SEAMS, 'propose_start', {
+      repository: 'babco',
+    })) as { repository?: string; repositoryFrom?: string };
+    expect(near.repository).toBe('bacco');
+    expect(near.repositoryFrom).toContain('the closest name');
+  });
+
+  it('reads the tab when the agent stops on a question before it starts, and answers it only there', async () => {
+    const base = await depsAt();
+    const repo = await workedOn(base, 'memnox-runtime');
+    const pressed: { text?: string; tty?: string }[] = [];
+    let up = false;
+    const deps: SessionToolDeps = {
+      ...base,
+      resolveCommand: () => 'claude',
+      delivered: async (id) => {
+        const request = await new DisplayRequests(base.home).read(id);
+        if (request?.display === DISPLAY.PRESS) {
+          pressed.push({ text: request.text, tty: request.tty });
+          up = true;
+        }
+        return { outcome: 'typed', at: NOW.toISOString() };
+      },
+      startSeen: async () => (up ? 'ses_run' : null),
+      seen: async () => ({
+        app: 'Terminal',
+        text: 'Do you trust this folder?\n❯ No, exit\n  Yes, I trust this folder',
+      }),
+    };
+    // The run noted its tab as it came up, before the agent's own hook could.
+    await new RunTerminals(base.home).note({
+      sessionId: 'ses_run',
+      agent: 'claude-code',
+      pid: process.pid,
+      tty: 'ttys009',
+      app: 'Terminal',
+      cwd: repo,
+      startedAt: NOW.toISOString(),
+    });
+    const proposed = (await callOperatorTool(deps, SEAMS, 'propose_start', {
+      repository: 'memnox runtime',
+      task: 'check the git history',
+    })) as { start: string };
+    const started = (await callOperatorTool(deps, SEAMS, 'start_session', {
+      start: proposed.start,
+    })) as { session?: string; screen?: string; said: string };
+    expect(started.session).toBe('ses_run');
+    expect(started.screen).toContain('Do you trust this folder?');
+    expect(started.said).toContain('answer_agent');
+
+    // Words are never typed this way, only keys.
+    expect(
+      await callOperatorTool(deps, SEAMS, 'answer_agent', {
+        session: 'ses_run',
+        keys: 'yes I trust it',
+      }),
+    ).toMatchObject({ answered: false });
+    expect(pressed).toEqual([]);
+
+    const answered = await callOperatorTool(deps, SEAMS, 'answer_agent', {
+      session: 'ses_run',
+      keys: 'down enter',
+    });
+    expect(answered).toMatchObject({ answered: true, session: 'ses_run' });
+    expect(pressed).toEqual([{ text: 'down enter', tty: 'ttys009' }]);
   });
 
   it('starts it without the tokens when they asked to keep them away from it', async () => {

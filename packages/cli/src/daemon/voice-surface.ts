@@ -53,7 +53,7 @@ import { mirrorFor } from './phone-turn';
 import { VoiceHold, voiceOnNotice } from '../remote/voice-hold';
 import { SessionViews } from './session-view';
 import { write, type Peer } from './socket-write';
-import { WaitingFeed } from './waiting-feed';
+import { askingIn, WaitingFeed } from './waiting-feed';
 import {
   locateAnswer,
   macSpansAnswer,
@@ -365,7 +365,7 @@ export class VoiceSurface {
     if (request.briefing === BRIEFING.NOTICE && isAgentQuestionId(request.subject ?? ''))
       return this.questionFor(request.subject ?? '', event?.agentName);
     if (request.briefing === BRIEFING.NOTICE && request.subject !== undefined) {
-      const notice = this.notices.recent(request.subject);
+      const notice = this.notices.recent(request.subject) ?? askingIn(event);
       return notice === null ? null : noticeBrief(notice, await this.howToAddress());
     }
     if (request.briefing === BRIEFING.HELD && request.subject !== undefined) {
@@ -444,11 +444,10 @@ export class VoiceSurface {
     await markListeningFor(this.deps.home, this.deps.now(), principal);
     // The Mac app is listening, so the first question should meet a brain that is already up.
     void this.turns?.warm();
-    for (const event of await this.feed.everything(this.deps.now())) {
-      told.add(event.subject);
-      if (principal === undefined || heardRemotely(event))
-        write(socket, { id, ok: true, event: this.hold.stamp(markNeedsMac(event)) });
-    }
+    const waiting = await this.feed.everything(this.deps.now());
+    waiting.forEach((event) => told.add(event.subject));
+    for (const event of await this.feed.told.firstHeard(waiting, principal !== undefined))
+      write(socket, { id, ok: true, event: this.hold.stamp(markNeedsMac(event)) });
     this.watchNotices();
     this.startFeed();
   }
@@ -485,6 +484,7 @@ export class VoiceSurface {
       const waiting = (await this.feed.everything(this.deps.now())).map(markNeedsMac);
       // A phone's shows go first, so the Mac app is never sent the raw one as well.
       const claimed = await this.router.claim(waiting, this.macPeers());
+      if (this.macPeers().length > 0) await this.feed.told.keep(waiting);
       sendWaiting(this.subscribers, waiting, {
         claimed,
         now: this.deps.now(),
