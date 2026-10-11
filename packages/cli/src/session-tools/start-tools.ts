@@ -161,8 +161,15 @@ async function repositoryFor(
   brief: string | undefined,
 ): Promise<ChosenRepository | null> {
   if (named !== undefined) {
-    const path = repositoryNamed(named, known);
-    return path === null ? folderFor(deps, named) : { path };
+    const path = repositoryNamed(named, known, false);
+    if (path !== null) return { path };
+    // A folder by the very name they said beats a repository whose name only sounds like it.
+    const folder = await folderFor(deps, named);
+    if (folder !== null && folder.from === undefined) return folder;
+    const near = repositoryNamed(named, known);
+    return near === null
+      ? folder
+      : { path: near, from: `${basename(near)}, the closest name` };
   }
   const ticket = brief === undefined ? null : await new WorkBriefs(deps.home).read(brief);
   const fromTicket = ticket?.sources
@@ -394,7 +401,11 @@ function repositoriesIn(folder: string): string[] {
  * "my locks runtime", which is how a recognizer hears it, is still memnox-runtime, because
  * runtime names only one of them.
  */
-export function repositoryNamed(said: string, known: readonly string[]): string | null {
+export function repositoryNamed(
+  said: string,
+  known: readonly string[],
+  nearNames = true,
+): string | null {
   const wanted = spoken(said);
   if (wanted === '') return null;
   const byName = known.map((each) => ({ path: each, name: spoken(basename(each)) }));
@@ -409,6 +420,7 @@ export function repositoryNamed(said: string, known: readonly string[]): string 
     .map((word) => byName.filter((each) => each.name.includes(word)))
     .find((matches) => matches.length === 1)?.[0];
   if (distinctive !== undefined) return distinctive.path;
+  if (!nearNames) return null;
   const closest = byName
     .map((each) => ({ ...each, likeness: likeness(wanted, each.name) }))
     .sort((a, b) => b.likeness - a.likeness)[0];

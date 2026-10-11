@@ -33,6 +33,7 @@ import {
 import { startBroker, type CredentialBroker } from './run/credential-broker';
 import { SESSION_GUARD_EXTENSIONS } from './run/sandbox';
 import { defaultStart, interceptorsIn, wiringRow } from './run/start';
+import { forgetRunTerminal, noteRunTerminal, ownTerminal } from './run/terminal';
 
 /**
  * Everything the child needs to be governed, set as environment rather than asked of the
@@ -123,6 +124,12 @@ async function runAgent(
   });
   const broker = options.holdCredentials === true ? await brokerFor(run, deps) : null;
   renderStart(context, run, deps, broker);
+  await noteRunTerminal(
+    run,
+    (deps.cwd ?? process.cwd)(),
+    (deps.terminalOf ?? ownTerminal)(),
+    nowOf(deps).toISOString(),
+  );
   await startAndRelease(context, run, deps, broker);
 }
 
@@ -253,6 +260,7 @@ async function startAndRelease(
     // In a `finally`, because an agent that crashed is the one whose paths must not stay held.
     const released = await releaseLeases(run.home, run.sessionId, deps);
     await endContainment(run);
+    await forgetRunTerminal(run);
     // The held values die with this process; closing removes the socket that served them.
     await broker?.close().catch(() => undefined);
     // Off the rail, because it closed when the agent took over the terminal.

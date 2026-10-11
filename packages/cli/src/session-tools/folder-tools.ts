@@ -98,10 +98,7 @@ export const FOLDER_CALLS: Readonly<Record<string, OperatorCall>> = {
   create_folder: (deps, _seams, args) => createFolderTool(deps, args),
 };
 
-async function createFolderTool(
-  deps: SessionToolDeps,
-  args: ToolArgs,
-): Promise<unknown> {
+async function createFolderTool(deps: SessionToolDeps, args: ToolArgs): Promise<unknown> {
   const made = await createFolder(
     deps.home,
     textArg(args, 'name') ?? '',

@@ -49,6 +49,7 @@ export * from './yaml-list';
 export * from './snapshot-changes';
 export * from './tool-pins';
 export * from './session-host';
+export * from './run-terminal';
 export * from './approval-posture';
 export * from './agent-host';
 export * from './node-host-inspector';

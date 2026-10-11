@@ -20,7 +20,7 @@ export function liveHost(host: SessionHost): SessionHost | null {
 }
 
 /** Signal zero asks whether the process exists without touching it. */
-function processAlive(pid: number): boolean {
+export function processAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
     return true;

@@ -33,6 +33,7 @@ import { keepSessionSummary } from './session-summary-row';
 import { answeredSessionStart, beforePause, replyInSession } from './in-session';
 import { log, readStdin } from './seam-runtime';
 import { noteSessionHost } from './session-host-note';
+import { clearTerminalQuestion, noteTerminalQuestion } from './terminal-question';
 import { sessionEventOf } from './session-events';
 import { answerToolCall, failedToolAnswer, type ToolAnswer } from './tool-hook';
 import { DEFAULT_AGENT_NAME, TOOL_POLICY_FLAG } from './tool-hook.constants';
@@ -64,8 +65,7 @@ async function main(): Promise<void> {
 
   const ended = endedSessionOf(payload);
   if (ended !== null) return releaseSession(ended, context);
-  // Stopped on purpose: no rule, lease or pause stands in the way until `memnox start`.
-  if (await protectionStopped(context.home)) return;
+  if (await nothingToRule(payload, context)) return;
   await noteSessionHost(payload, context);
   if (await answeredSessionStart(payload, context, process.env)) return;
   if (await answeredPicker(payload, context)) return;
@@ -308,6 +308,32 @@ async function answeredOutLoud(
   if (reply === null) return false;
   emit({ stdout: reply });
   return true;
+}
+
+/**
+ * Stopped on purpose, so no rule, lease or pause stands in the way until `memnox start`; or the
+ * agent asking its person something in its terminal, which is news for the voice and no tool call.
+ */
+async function nothingToRule(
+  payload: unknown,
+  context: EditHookContext,
+): Promise<boolean> {
+  return (await protectionStopped(context.home)) || askedInTerminal(payload, context);
+}
+
+/** A question the agent asks in its terminal is posted for the voice; any other hook means it was answered. */
+async function askedInTerminal(
+  payload: unknown,
+  context: EditHookContext,
+): Promise<boolean> {
+  try {
+    if (await noteTerminalQuestion(payload, context)) return true;
+    await clearTerminalQuestion(payload, context);
+  } catch (err) {
+    // The voice reading it out is a convenience: the agent's own prompt is still on screen.
+    log(`terminal question failed: ${String(err)}`);
+  }
+  return false;
 }
 
 /** A held question asked in the host's own picker is answered here, and nowhere else. */

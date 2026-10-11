@@ -28,6 +28,7 @@ import {
   MISSION_VAR,
   Missions,
   type Mission,
+  type SessionHost,
 } from '@memnox/core';
 import {
   DEFAULT_AGENT_NAME,
@@ -76,6 +77,8 @@ export interface RunDeps {
   /** Injected so a test says what is installed rather than reading the runner's home. */
   interceptorsIn?: (home: string) => readonly string[];
   cwd?: () => string;
+  /** Injected so a test states the tab it runs in rather than walking `ps` from the test runner. */
+  terminalOf?: () => Pick<SessionHost, 'app' | 'appPath' | 'tty'>;
   /** Injected so a test states the repository rather than asking git. */
   rootOf?: (cwd: string) => string | null;
   familiarity?: (home: string, root: string) => Familiarity | null;

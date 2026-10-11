@@ -39,7 +39,7 @@ export async function sessionTool(
       ? { now, said: NOW_DOING }
       : lastAnswer === null
         ? {}
-        : { lastAnswer, said: LAST_ANSWER }),
+        : { lastAnswer, untrusted: true, said: LAST_ANSWER }),
   };
 }
 
