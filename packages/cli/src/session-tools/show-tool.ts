@@ -13,11 +13,12 @@ import {
   type DisplayKind,
   type SessionHost,
   type ShownIn,
+  VoiceFocusStore,
 } from '@memnox/core';
 import { withEvents } from '../event-store';
 import { changesTool, repositoriesOf } from './changes-tool';
 import { mainCheckoutOf } from './main-checkout';
-import { noteFocus } from './focus';
+import { FOCUS_STARTED, noteFocus } from './focus';
 import { textArg, type SessionToolDeps, type ToolArgs } from './read-tools';
 import type { RewindSeams } from './rewind-tool';
 import { resolveInstalledApp } from './app-tools';
@@ -58,6 +59,9 @@ const ALL = 'all';
 
 /** How the brain clears its own cards and windows, which names no session and ends nothing. */
 const DISMISS = 'dismiss';
+
+/** A start's id or a display request's id, which the brain passes for a session it just started. */
+const NOT_A_SESSION = ['stt_', 'dsp_'] as const;
 
 /** What a card is headed when the brain gave it no title. */
 const DEFAULT_TITLE = 'Session';
@@ -284,7 +288,10 @@ async function whereItRuns(
   const host = await new SessionHosts(deps.home).read(sessionId);
   // Where it runs was never noted, so its repository is opened in the editor instead.
   const place =
-    host?.cwd ?? (host === null ? await folderOf(deps, sessionId) : undefined);
+    host?.cwd ??
+    (host === null
+      ? ((await folderOf(deps, sessionId)) ?? (await justStartedIn(deps, sessionId)))
+      : undefined);
   // The window the person already has open, never a worktree or subfolder that makes a new one.
   return place === undefined ? { host } : { host, openAt: mainCheckoutOf(place) };
 }
@@ -387,6 +394,19 @@ function shownAs(display: DisplayKind, app: string | undefined): Record<string, 
     ...(app === undefined ? {} : { runsIn: app }),
     said: LIVE,
   };
+}
+
+/**
+ * Where the session the voice just started was started, for an id that names the start or its
+ * window rather than a session: it has no host and no ledger rows yet, and is still somewhere.
+ */
+async function justStartedIn(
+  deps: SessionToolDeps,
+  sessionId: string,
+): Promise<string | undefined> {
+  if (!NOT_A_SESSION.some((prefix) => sessionId.startsWith(prefix))) return undefined;
+  const focus = await new VoiceFocusStore(deps.home).read().catch(() => null);
+  return focus?.why === FOCUS_STARTED ? focus.repository : undefined;
 }
 
 /** The first repository the session wrote in, from its own ledger rows. */

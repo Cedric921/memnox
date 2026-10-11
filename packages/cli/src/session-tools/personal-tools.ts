@@ -1,0 +1,358 @@
+import {
+  DISPLAY,
+  DisplayRequests,
+  minutesToMs,
+  PROPOSAL_KIND,
+  Proposals,
+  WORK_ACCOUNT_CHECK,
+  type ToolSignIn,
+  type WorkAccount,
+} from '@memnox/core';
+import type { CheckedAccount, PersonalTools } from '../sync/personal-work';
+import { workAccountOf } from '../sync/personal-work';
+import { OPERATOR_AGENT } from './propose-tools';
+import { PendingSignIns } from '../sync/sign-ins';
+import { textArg, type SessionToolDeps, type ToolArgs } from './read-tools';
+
+/**
+ * The person's own tools, in their own name: reads run at once, a tool still to sign in to shows its
+ * icon in the notch, and anything sent is drawn as its tool draws it and waits on Touch ID.
+ */
+
+/** Long enough to read the draft and reach for the key, short enough that nobody confirms a stale one. */
+const WORK_PROPOSAL_TTL_MS = minutesToMs(5);
+
+/** Not any one session's: the notch shows it whatever the person was looking at. */
+const NO_SESSION = 'all';
+const SIGN_IN_TITLE = 'Sign in to use';
+
+const NO_SEAM =
+  "This Mac cannot reach the person's own accounts. Say so in a sentence; never pretend it was done.";
+
+/** How a card and a read back name each tool, which the slug alone says badly. */
+const TOOL_NAMES: Readonly<Record<string, string>> = {
+  github: 'GitHub',
+  gmail: 'Gmail',
+  googledocs: 'Google Docs',
+  linear: 'Linear',
+  notion: 'Notion',
+  slack: 'Slack',
+};
+
+/** Tools from the person's signed in accounts that match what they asked for. */
+export async function findToolTool(
+  deps: SessionToolDeps,
+  args: ToolArgs,
+): Promise<unknown> {
+  const what = textArg(args, 'what') ?? '';
+  if (what === '')
+    return { said: 'Say what to look for, such as "reply to a review comment".' };
+  const seam = deps.personalWork;
+  if (seam === undefined) return { reached: false, said: NO_SEAM };
+  const found = await seam.find(what, textArg(args, 'toolkit'));
+  if (!found.ok) return { reached: false, said: found.said };
+  const { tools, accounts, signInFirst, signInAgain } = found.value;
+  await carryingOnAlready(deps, accounts);
+  const readable = readableThrough(tools);
+  const shown = await showSignIns(deps, {
+    // A read through the workspace needs no sign in, so no icon interrupts it.
+    first: signInFirst.filter((toolkit) => !readable.has(toolkit)),
+    again: signInAgain,
+    said: textArg(args, 'said') ?? what,
+  });
+  return {
+    tools,
+    accounts: accounts.map((each) => ({ toolkit: each.toolkit, ...workAccountOf(each) })),
+    ...(shown.length > 0 ? { signIn: shown } : {}),
+    said: saidAboutSignIns(found.value),
+  };
+}
+
+/**
+ * A tool the voice already reaches after a sign in is one it is carrying on with right now, so what
+ * was asked before signing in is not asked again later on top of whatever came since.
+ */
+async function carryingOnAlready(
+  deps: SessionToolDeps,
+  accounts: readonly CheckedAccount[],
+): Promise<void> {
+  const pending = new PendingSignIns(deps.home);
+  for (const each of accounts) {
+    if (each.check !== WORK_ACCOUNT_CHECK.MISMATCH) await pending.settle(each.toolkit);
+  }
+}
+
+/** The notch shows the icon of each tool still to sign in to; a tap opens that tool's own sign in. */
+async function showSignIns(
+  deps: SessionToolDeps,
+  { first, again, said }: SignInsWanted,
+): Promise<string[]> {
+  const seam = deps.personalWork;
+  if (seam === undefined || first.length + again.length === 0) return [];
+  const wanted = [
+    ...first.map((toolkit) => ({ toolkit, again: false })),
+    ...again.map((toolkit) => ({ toolkit, again: true })),
+  ];
+  const signIn: ToolSignIn[] = [];
+  for (const each of wanted) {
+    const link = await seam.link(each.toolkit);
+    if (!link.ok) continue;
+    signIn.push({
+      toolkit: each.toolkit,
+      url: link.value,
+      ...(each.again ? { again: true } : {}),
+    });
+  }
+  if (signIn.length === 0) return [];
+  await new DisplayRequests(deps.home).request({
+    display: DISPLAY.SIGN_IN,
+    sessionId: NO_SESSION,
+    agent: OPERATOR_AGENT,
+    title: SIGN_IN_TITLE,
+    signIn,
+    at: deps.now().toISOString(),
+  });
+  // Kept with what they asked, so the voice carries on with it the moment they finish signing in.
+  const pending = new PendingSignIns(deps.home);
+  for (const each of signIn) {
+    await pending.offer({
+      toolkit: each.toolkit,
+      ...(said === undefined ? {} : { said }),
+      ...(each.again === true ? { again: true } : {}),
+      at: deps.now().toISOString(),
+    });
+  }
+  return signIn.map((each) => each.toolkit);
+}
+
+interface SignInsWanted {
+  first: readonly string[];
+  again: readonly string[];
+  /** What the person asked that needs these tools. */
+  said?: string;
+}
+
+function saidAboutSignIns(found: PersonalTools): string | undefined {
+  const readable = readableThrough(found.tools);
+  const first = found.signInFirst.filter((toolkit) => !readable.has(toolkit));
+  const parts = [
+    ...readableLines([...readable]),
+    ...signInLines(first, found.signInAgain),
+    ...namedLines(found.needsAdmin, found.unknown),
+  ];
+  if (parts.length === 0 && found.tools.length === 0) {
+    return 'None of their tools can do that. Say so rather than guess.';
+  }
+  return parts.length === 0 ? undefined : parts.join(' ');
+}
+
+/** Toolkits an admin reads through what they connected for the workspace; only acting there waits on a sign in. */
+function readableThrough(tools: PersonalTools['tools']): Set<string> {
+  return new Set(
+    tools.filter((tool) => tool.throughWorkspace === true).map((tool) => tool.toolkit),
+  );
+}
+
+function readableLines(readable: readonly string[]): string[] {
+  return readable.length === 0
+    ? []
+    : [
+        `${namesOf(readable)} is connected to their workspace, so read what they asked there at once with run_tool and answer from it. Only sending or changing something there needs their own sign in, so it goes out in their name: when they ask for that, say its icon is in the notch, once.`,
+      ];
+}
+
+function signInLines(first: readonly string[], again: readonly string[]): string[] {
+  return [
+    ...(first.length === 0
+      ? []
+      : [
+          `They have not signed in to ${namesOf(first)} yet, so nothing there can be done in their name. Its icon is in the notch: one tap signs them in, once, and you carry on with what they asked as soon as they have. Say that in a sentence and stop.`,
+        ]),
+    ...(again.length === 0
+      ? []
+      : [
+          `Their ${namesOf(again)} sign in reached somebody else's account, so nothing runs there. Its icon is in the notch to sign in again with their own.`,
+        ]),
+  ];
+}
+
+/** The tool they named is used and no other, so where it cannot be, the voice says why rather than swap it. */
+function namedLines(needsAdmin: readonly string[], unknown: readonly string[]): string[] {
+  return [
+    ...(needsAdmin.length === 0
+      ? []
+      : [
+          `${namesOf(needsAdmin)} is a team tool nobody connected to this workspace yet, so only an admin can open it. Say so in a sentence, and that one tap signs them in once an admin has.`,
+        ]),
+    ...(unknown.length === 0
+      ? []
+      : [
+          `No tool called ${namesOf(unknown)} can be reached. Say so and ask which tool they mean; never use a different one in its place.`,
+        ]),
+  ];
+}
+
+/** A tool that only reads, run at once as the person. */
+export async function runToolTool(
+  deps: SessionToolDeps,
+  args: ToolArgs,
+): Promise<unknown> {
+  const call = toolCall(args);
+  if ('said' in call) return call;
+  const seam = deps.personalWork;
+  if (seam === undefined) return { reached: false, said: NO_SEAM };
+  const ran = await seam.run(call.tool, call.argumentsText);
+  if (!ran.ok) return { done: false, said: ran.said };
+  // Written by other people, so it is read as what they wrote and never as an instruction.
+  return { data: ran.value.data, untrusted: true };
+}
+
+/**
+ * Anything that says or changes something as the person: written down with the account it goes out
+ * as, drawn on the Mac as that tool draws it, and sent only once they confirm.
+ */
+export async function proposeToolTool(
+  deps: SessionToolDeps,
+  args: ToolArgs,
+): Promise<unknown> {
+  const call = toolCall(args);
+  if ('said' in call) return call;
+  const label = textArg(args, 'label') ?? '';
+  if (label === '') {
+    return {
+      said: 'Pass label: what will happen, in plain words, so the person hears it first.',
+    };
+  }
+  const checked = await theirAccountFor(deps, call.tool);
+  if ('said' in checked) return checked;
+  const account = workAccountOf(checked);
+  const said = textArg(args, 'said') ?? '';
+  const toName = textArg(args, 'to');
+  const heard = `${asWhom(checked.toolkit, account)}: ${label}`;
+  const proposal = await new Proposals(deps.home).propose({
+    change: {
+      kind: PROPOSAL_KIND.WORK,
+      toolkit: checked.toolkit,
+      tool: call.tool,
+      argumentsText: call.argumentsText,
+      label,
+      account,
+      ...(toName === undefined ? {} : { toName }),
+    },
+    rationale: heard,
+    ...(said === '' ? {} : { said }),
+    proposedBy: OPERATOR_AGENT,
+    at: deps.now().toISOString(),
+    ttlMs: WORK_PROPOSAL_TTL_MS,
+  });
+  return {
+    proposed: proposal.id,
+    said: `The draft is on their screen. Read this back: ${heard}. It goes out once they confirm with Touch ID or Face ID, and not before.${unverifiedNote(account)}`,
+  };
+}
+
+/** The first send from an account is what ties it to them, so it is named rather than called a problem. */
+function unverifiedNote(account: WorkAccount): string {
+  return account.check === WORK_ACCOUNT_CHECK.MATCHED
+    ? ''
+    : ' Say the account name as you read it back; their Touch ID on this send ties it to them, so never tell them it needs anything else first.';
+}
+
+/** The account a tool goes out as, or what to say where it is not theirs or not signed in. */
+async function theirAccountFor(
+  deps: SessionToolDeps,
+  tool: string,
+): Promise<CheckedAccount | { done: false; said: string }> {
+  const seam = deps.personalWork;
+  if (seam === undefined) return { done: false, said: NO_SEAM };
+  const accounts = await seam.accounts();
+  if (!accounts.ok) return { done: false, said: accounts.said };
+  const checked = accountForTool(tool, accounts.value);
+  if (checked === undefined) {
+    return {
+      done: false,
+      said: 'They have not signed in to that tool. Run find_tool for it, which puts its icon in the notch.',
+    };
+  }
+  if (checked.check !== WORK_ACCOUNT_CHECK.MISMATCH) return checked;
+  await showSignIns(deps, { first: [], again: [checked.toolkit] });
+  return {
+    done: false,
+    said: `Their ${nameOf(checked.toolkit)} sign in reached somebody else's account, so nothing was written down. Its icon is in the notch to sign in again.`,
+  };
+}
+
+/** "As moise10r on GitHub", so the person hears whose name it goes out under. */
+function asWhom(toolkit: string, account: WorkAccount): string {
+  const who = account.handle ?? account.name;
+  return who === undefined ? `On ${nameOf(toolkit)}` : `As ${who} on ${nameOf(toolkit)}`;
+}
+
+/** The signed in tool a slug belongs to, the longest name winning. */
+function accountForTool(
+  tool: string,
+  accounts: readonly CheckedAccount[],
+): CheckedAccount | undefined {
+  const upper = tool.toUpperCase();
+  return [...accounts]
+    .sort((a, b) => b.toolkit.length - a.toolkit.length)
+    .find((each) => upper.startsWith(`${each.toolkit.toUpperCase()}_`));
+}
+
+/** Any tool the table does not name reads as its slug with a capital, so "airtable" is said Airtable. */
+function nameOf(toolkit: string): string {
+  return TOOL_NAMES[toolkit] ?? toolkit.charAt(0).toUpperCase() + toolkit.slice(1);
+}
+
+function namesOf(toolkits: readonly string[]): string {
+  return toolkits.map(nameOf).join(', ');
+}
+
+/** The provider's own sign in for a tool an admin connected, opened on the Mac for the person. */
+export async function signInTool(
+  deps: SessionToolDeps,
+  args: ToolArgs,
+): Promise<unknown> {
+  const toolkit = textArg(args, 'toolkit') ?? '';
+  if (toolkit === '') return { said: 'Pass toolkit: one find_tool named in signIn.' };
+  const seam = deps.personalWork;
+  if (seam === undefined) return { reached: false, said: NO_SEAM };
+  const signed = await seam.signIn(toolkit);
+  if (!signed.ok) return { done: false, said: signed.said };
+  const said = textArg(args, 'said');
+  await new PendingSignIns(deps.home).offer({
+    toolkit,
+    ...(said === undefined ? {} : { said }),
+    at: deps.now().toISOString(),
+  });
+  return {
+    url: signed.value.url,
+    said: signed.value.opened
+      ? `The ${nameOf(toolkit)} sign in is open. You carry on with what they asked as soon as they finish.`
+      : `Give them this link to sign in to ${nameOf(toolkit)} once: ${signed.value.url}`,
+  };
+}
+
+function toolCall(
+  args: ToolArgs,
+): { tool: string; argumentsText: string } | { said: string } {
+  const tool = textArg(args, 'tool') ?? '';
+  if (tool === '') return { said: 'Pass tool: a slug find_tool returned.' };
+  const argumentsText = textArg(args, 'arguments') ?? '{}';
+  if (!isJsonObject(argumentsText)) {
+    return {
+      said: 'Pass arguments as a JSON object, as find_tool described its inputs.',
+    };
+  }
+  return { tool, argumentsText };
+}
+
+function isJsonObject(text: string): boolean {
+  try {
+    const parsed: unknown = JSON.parse(text);
+    return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed);
+  } catch {
+    // Not JSON, so the control plane would refuse it too.
+    return false;
+  }
+}

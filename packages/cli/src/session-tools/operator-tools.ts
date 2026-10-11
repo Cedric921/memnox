@@ -14,8 +14,9 @@ import { showAgentsTool } from './agents-tool';
 import { commandOutputTool, memnoxCommandTool } from './command-tool';
 import { tracesTool } from './traces-tool';
 import { aboutTool } from './about-tool';
-import { briefTool, memoryTool } from './memory-tools';
-import { sourcesTool } from './work-tools';
+import { briefTool, workspaceMemoryTool } from './memory-tools';
+import { PEOPLE_TOOL, peopleTool, sourcesTool } from './work-tools';
+import { PERSONAL_CALLS, PERSONAL_TOOLS } from './personal-catalogue';
 import { answerQuestionTool } from './question-tool';
 import { proposeRewindTool } from './rewind-proposal';
 import { pauseSessionTool, proposeResumeTool } from './session-actions';
@@ -27,8 +28,7 @@ import { historyTool } from './history-tool';
 import { sessionTool } from './session-tool';
 import { showTool } from './show-tool';
 import { FORGET_SCREEN_TOOL, LOOK_CALLS, LOOK_TOOL } from './look-tool';
-import type { OperatorCall } from './operator-call';
-import { heldInGuess } from './guess-hold';
+import { ANSWER_AGENT_CALLS, ANSWER_AGENT_TOOL } from './answer-agent-tool';
 import { sessionsTool } from './sessions-tool';
 import {
   decisionsTool,
@@ -40,6 +40,8 @@ import {
   type ToolArgs,
 } from './read-tools';
 import type { RewindSeams } from './rewind-tool';
+import type { OperatorCall } from './operator-call';
+import { heldInGuess } from './guess-hold';
 import type { ToolCatalogue } from './session-server';
 import { ACTING_TOOLS } from './acting-tools';
 import { FOLDER_CALLS, FOLDER_TOOLS } from './folder-tools';
@@ -168,6 +170,7 @@ export const OPERATOR_TOOLS: readonly ToolDefinition[] = [
       since: { type: 'string', description: 'an ISO date; nothing before it' },
     },
   ),
+  PEOPLE_TOOL,
   readTool(
     'brief',
     'Ask the workspace, live, about paths, services or a repository: the decisions that bear on them, who owns them, which agent holds them and what landed there lately. Falls back to what this Mac pulled when the cloud cannot be reached, and says so.',
@@ -311,8 +314,10 @@ export const OPERATOR_TOOLS: readonly ToolDefinition[] = [
   ...HEARD_WORD_TOOLS,
   ...PROFILE_TOOLS,
   ...FOLDER_TOOLS,
+  ...PERSONAL_TOOLS,
   LOOK_TOOL,
   FORGET_SCREEN_TOOL,
+  ANSWER_AGENT_TOOL,
   {
     name: 'answer_question',
     description:
@@ -388,6 +393,7 @@ function asAgent(deps: SessionToolDeps, args: ToolArgs): SessionToolDeps {
 }
 
 const OPERATOR_CALLS: Record<string, OperatorCall> = {
+  ...PERSONAL_CALLS,
   status: (deps) => statusTool(deps),
   // The Mac app sees the call in the stream and closes the orb; nothing here has anything to do.
   end_conversation: () => ({ ended: true }),
@@ -419,15 +425,9 @@ const OPERATOR_CALLS: Record<string, OperatorCall> = {
   memnox_command: (deps, _seams, args) => memnoxCommandTool(deps, args),
   traces: (deps, _seams, args) => tracesTool(deps, args),
   about: (_deps, _seams, args) => aboutTool(args),
-  memory: async (deps, _seams, args) => {
-    const [answer, name] = await Promise.all([
-      memoryTool(deps, args),
-      deps.workspaceName?.() ?? null,
-    ]);
-    // memoryTool always answers with an object; it is typed unknown only because tools answer anything.
-    return name === null ? answer : { workspace: name, ...(answer as object) };
-  },
+  memory: (deps, _seams, args) => workspaceMemoryTool(deps, args),
   sources: (deps, _seams, args) => sourcesTool(deps, args),
+  people: (deps, _seams, args) => peopleTool(deps, args),
   brief: (deps, _seams, args) => briefTool(deps, args),
   command_output: (deps, _seams, args) => commandOutputTool(deps, args),
   walk_through: (deps, seams, args) => walkThroughTool(asAgent(deps, args), seams, args),
@@ -445,6 +445,7 @@ const OPERATOR_CALLS: Record<string, OperatorCall> = {
   ...PROFILE_CALLS,
   ...FOLDER_CALLS,
   ...LOOK_CALLS,
+  ...ANSWER_AGENT_CALLS,
 };
 
 export async function callOperatorTool(

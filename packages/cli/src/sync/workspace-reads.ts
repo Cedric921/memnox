@@ -6,7 +6,8 @@ import {
   type WorkSource,
 } from '@memnox/core';
 
-import { callCloud, CloudUnreachable } from './client';
+import { callCloud, CloudUnreachable, sameControlPlane } from './client';
+import { readPerson } from './person';
 
 /**
  * What the workspace lets this machine read beyond its rules and settled facts: the messages and
@@ -20,6 +21,7 @@ const READ_TIMEOUT_MS = secondsToMs(5);
 const TOOL_SOURCES = 'memnox_sources';
 const TOOL_WORKSPACE = 'memnox_workspace';
 const TOOL_SOURCE = 'memnox_source';
+const TOOL_PEOPLE = 'memnox_people';
 
 /** One item read whole, as far as the workspace lets this machine. */
 export interface SourceRead {
@@ -80,6 +82,33 @@ export async function readWorkspaceName(home: string): Promise<string | null> {
   // Only the name is kept: the rest of that answer is the fleet, which nothing here needs.
   const name = answer?.['name'];
   return typeof name === 'string' && name.trim() !== '' ? name.trim() : null;
+}
+
+/**
+ * Whether the person signed in to one workspace and this Mac is enrolled in another, which leaves
+ * the voice reading an empty memory and none of the tools an admin connected, with no error anywhere.
+ */
+export async function personElsewhere(home: string): Promise<boolean> {
+  const [account, person] = await Promise.all([
+    readAccount(home).catch(() => null),
+    readPerson(home).catch(() => null),
+  ]);
+  if (account === null || person === null) return false;
+  return (
+    account.workspaceId !== person.workspaceId ||
+    !sameControlPlane(account.baseUrl, person.baseUrl)
+  );
+}
+
+/**
+ * Who in the workspace answers to a name, with the handles each has in the tools it connects, so a
+ * message finds the person meant; null where the workspace cannot be asked just now.
+ */
+export async function readPeople(
+  home: string,
+  name: string | undefined,
+): Promise<Record<string, unknown> | null> {
+  return callWorkspaceTool(home, TOOL_PEOPLE, name === undefined ? {} : { name });
 }
 
 /** One `tools/call`, answered as the object the tool wrote, or null for any failure at all. */

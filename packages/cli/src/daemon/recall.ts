@@ -2,11 +2,14 @@ import { basename, join } from 'node:path';
 import {
   agentShown,
   MEMNOX_HOME,
+  POST_KIND,
   Proposals,
   readJsonFile,
+  SessionPosts,
   SessionStarts,
   SpokenInstructions,
   writeJsonFile,
+  type SessionPost,
 } from '@memnox/core';
 
 /**
@@ -76,7 +79,7 @@ export async function waitingOnYes(
 ): Promise<string[]> {
   const fresh = <T extends { proposedAt: string }>(offers: T[]): T[] =>
     since === undefined ? offers : offers.filter((each) => each.proposedAt >= since);
-  const [starts, instructions, proposals] = await Promise.all([
+  const [starts, instructions, proposals, asking] = await Promise.all([
     new SessionStarts(home)
       .waiting(moment)
       .then(fresh)
@@ -86,6 +89,7 @@ export async function waitingOnYes(
       .then(fresh)
       .catch(() => []),
     new Proposals(home).open(moment).catch(() => []),
+    askingInTerminal(home, moment),
   ]);
   return [
     ...starts.map(
@@ -100,7 +104,18 @@ export async function waitingOnYes(
       (each) =>
         `${each.rationale}: waiting for their Touch ID on the Mac, proposal ${each.id}`,
     ),
+    // An agent's question in its terminal is answered by keys pressed there, never by sending it words.
+    ...asking.map(
+      (each) =>
+        `session ${each.sessionId} asks in its terminal: ${each.summary}: on their answer, look at it if you have not, then call answer_agent with session ${each.sessionId} and the keys for what they chose`,
+    ),
   ];
+}
+
+/** Questions agents are asking in their own terminals, still waiting on the person. */
+async function askingInTerminal(home: string, moment: string): Promise<SessionPost[]> {
+  const posts = await new SessionPosts(home).open(moment).catch(() => []);
+  return posts.filter((each) => each.kind === POST_KIND.ASKING);
 }
 
 /** The recall put ahead of the session list, or empty when there is nothing to carry over. */

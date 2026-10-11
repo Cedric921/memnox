@@ -15,7 +15,21 @@ import {
 
 import { readStatus } from '../commands/status.command';
 import { fetchBrief, refreshMemory } from '../sync/memory';
-import { readSource, readSources, readWorkspaceName } from '../sync/workspace-reads';
+import {
+  readSource,
+  personElsewhere,
+  readPeople,
+  readSources,
+  readWorkspaceName,
+} from '../sync/workspace-reads';
+import {
+  findPersonalTools,
+  personalAccounts,
+  runPersonalTool,
+  signInLink,
+  signInPersonal,
+  signOutOf,
+} from '../sync/personal-work';
 import type { SessionToolDeps } from './read-tools';
 import type { RewindSeams } from './rewind-tool';
 import { awaitSessionStart } from './await-start';
@@ -85,8 +99,18 @@ function depsFor(argv: readonly string[], env: NodeJS.ProcessEnv): SessionToolDe
     brief: (resources, repository) => fetchBrief(homedir(), resources, repository),
     refreshMemory: () => refreshMemory(homedir()),
     sources: (query) => readSources(homedir(), query),
+    people: (name) => readPeople(homedir(), name),
+    personElsewhere: () => personElsewhere(homedir()),
     source: (link) => readSource(homedir(), link),
     workspaceName: () => readWorkspaceName(homedir()),
+    personalWork: {
+      find: (what, toolkit) => findPersonalTools(homedir(), what, toolkit),
+      run: (tool, argumentsText) => runPersonalTool(homedir(), tool, argumentsText),
+      signIn: (toolkit) => signInPersonal(homedir(), toolkit),
+      link: (toolkit) => signInLink(homedir(), toolkit),
+      accounts: () => personalAccounts(homedir()),
+      signOut: (toolkit) => signOutOf(homedir(), toolkit),
+    },
     delivered: (requestId, waitMs) => awaitDelivery(homedir(), requestId, waitMs),
     startSeen: (repository, since) => awaitSessionStart(homedir(), repository, since),
   };

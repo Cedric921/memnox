@@ -21,6 +21,7 @@ import {
 } from '@memnox/core';
 
 import { textArg, type SessionToolDeps, type ToolArgs } from './read-tools';
+import { readTool, type ToolDefinition } from './session-tools';
 
 const NOT_REACHABLE =
   'The workspace could not be asked just now: this Mac is not connected, or the control plane did not answer. Say so in a sentence; never say there is nothing there.';
@@ -49,6 +50,27 @@ export async function sourcesTool(
       ? { said: 'Nothing in the connected systems matches. Say so rather than guess.' }
       : {}),
   };
+}
+
+export const PEOPLE_TOOL: ToolDefinition = readTool(
+  'people',
+  'Who is in the workspace: each person with their name, email and the handle or id they have in every tool the workspace connects, such as their Slack user id, and people seen in those tools who have no seat. Use it to find who they mean by a name before a message, a DM or a mention, like "send a message to Neko", and pass that id to the tool that sends. Matches part of a name, email or handle; leave name out to list everyone.',
+  {
+    name: {
+      type: 'string',
+      description: 'the name, email or handle as they said it, misheard words fixed',
+    },
+  },
+);
+
+/** Who in the workspace answers to a name, with their handles in each tool it connects. */
+export async function peopleTool(
+  deps: SessionToolDeps,
+  args: ToolArgs,
+): Promise<unknown> {
+  const read = (await deps.people?.(textArg(args, 'name'))) ?? null;
+  if (read === null) return { reached: false, said: NOT_REACHABLE };
+  return read;
 }
 
 /**

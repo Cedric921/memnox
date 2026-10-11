@@ -105,3 +105,30 @@ function factRow(fact: WorkspaceFact): Record<string, unknown> {
     settled: factOrigin(fact),
   };
 }
+
+/**
+ * Said wherever it explains an empty answer, since nothing else would ever tell them. Either side may be the
+ * stale one, so both are named with the step that moves each, rather than calling this Mac the wrong one.
+ */
+export function twoWorkspaces(machineWorkspace: string | null): string {
+  const here = machineWorkspace ?? 'the workspace this Mac is in';
+  return `This Mac is in ${here}, and their own sign in, which their accounts and tools go through, is in a different workspace. Say both plainly. When ${here} is theirs, running memnox team and approving it there moves their sign in to it; otherwise memnox login, approved in their own workspace, moves this Mac. Never say which one is wrong unless they told you.`;
+}
+
+/** The settled facts with the workspace's name, and a word when this Mac is enrolled in another one. */
+export async function workspaceMemoryTool(
+  deps: SessionToolDeps,
+  args: ToolArgs,
+): Promise<unknown> {
+  const [answer, name, elsewhere] = await Promise.all([
+    memoryTool(deps, args),
+    deps.workspaceName?.() ?? null,
+    deps.personElsewhere?.() ?? false,
+  ]);
+  // memoryTool always answers with an object; it is typed unknown only because tools answer anything.
+  return {
+    ...(name === null ? {} : { workspace: name }),
+    ...(answer as object),
+    ...(elsewhere ? { elsewhere: twoWorkspaces(name) } : {}),
+  };
+}

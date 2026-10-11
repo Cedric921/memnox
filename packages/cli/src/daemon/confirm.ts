@@ -31,6 +31,7 @@ import { machinePolicyPath } from '../protect/machine-rules';
 import { mergeRules, WRITTEN_POLICY_FILE } from '../protect/merge-rules';
 import { fileForScope, scopeAnswered, scopedRules } from '../protect/rule-scope';
 import { recordLocalDecisions } from '../sync/local-decisions';
+import { applyPersonal } from './confirm-work';
 import { FROM_NOW_ON, proposeFromNowOn } from './from-now-on';
 import { registerPolicyFile } from '../policy-registry';
 import { recordAnswer } from './record-answer';
@@ -246,7 +247,15 @@ async function apply(
   // The device answered the workspace itself, signed where it was a yes, so nothing is done here.
   if (change.kind === PROPOSAL_KIND.TEAM)
     return { ok: true, outcome: PROPOSAL_ANSWER.CONFIRMED };
-  return applyHeldAnswer(home, proposal, change, { at, by });
+  if (change.kind === PROPOSAL_KIND.ANSWER) {
+    return applyHeldAnswer(home, proposal, change, { at, by });
+  }
+  return (
+    (await applyPersonal(home, proposal)) ?? {
+      ok: false,
+      error: `${proposal.id} is nothing to apply`,
+    }
+  );
 }
 
 /**

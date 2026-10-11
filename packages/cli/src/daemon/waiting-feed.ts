@@ -19,6 +19,7 @@ import {
   describePause,
   LEDGER_SESSION_LIMIT,
   SessionPauses,
+  POST_KIND,
   SessionPosts,
   SessionTurns,
   type SessionPost,
@@ -29,12 +30,14 @@ import {
   type DisplayRequest,
   type PendingApproval,
   type SessionHost,
+  workDraftOf,
 } from '@memnox/core';
 import { ruleDraftOf } from '../protect/rule-scope';
 import { liveHost } from '../session-tools/live-host';
 import { processAlive } from '../session-tools/sessions-tool';
 import { displayName, readNames, type AgentNames } from '../agents/names';
 import { withEvents } from '../event-store';
+import { NewsTold } from './news-told';
 
 /**
  * What is waiting on a person, read from the files other processes write, since a held
@@ -44,6 +47,8 @@ export class WaitingFeed {
   private readonly pending: PendingApprovals;
   private readonly proposals: Proposals;
   private readonly displays: DisplayRequests;
+  /** The news the Mac app already heard, so reopening it never says it again. */
+  readonly told: NewsTold;
   /** A finished turn's summary by subject, since the feed is read every few seconds and the turn is over. */
   private readonly summaries = new Map<string, DaemonEvent>();
 
@@ -51,6 +56,7 @@ export class WaitingFeed {
     this.pending = new PendingApprovals(home);
     this.proposals = new Proposals(home);
     this.displays = new DisplayRequests(home);
+    this.told = new NewsTold(home);
   }
 
   /** What the app is told: everything waiting, then anything the person asked to see. */
@@ -81,6 +87,7 @@ export class WaitingFeed {
       ...(request.pages === undefined ? {} : { pages: request.pages }),
       ...(request.agents === undefined ? {} : { agents: request.agents }),
       ...(request.trace === undefined ? {} : { trace: request.trace }),
+      ...(request.signIn === undefined ? {} : { signIn: request.signIn }),
       ...appOf(request),
       ...(request.via === undefined ? {} : { via: request.via }),
       ...(host === null
@@ -288,11 +295,11 @@ export function conversationOf(host: Pick<SessionHost, 'sessionId' | 'agentSessi
     : {};
 }
 
-/** A struggling session, said as news: nothing is asked, but its reach just narrowed. */
+/** A struggling session or one asking in its terminal, said as news so the person hears it away from the screen. */
 function postEvent(post: SessionPost, agentName: string): DaemonEvent {
   return {
     kind: DAEMON_EVENT.NOTICE,
-    notice: NOTICE_KIND.STRUGGLING,
+    notice: post.kind === POST_KIND.ASKING ? NOTICE_KIND.ASKING : NOTICE_KIND.STRUGGLING,
     subject: post.id,
     agent: post.agent,
     agentName,
@@ -301,6 +308,11 @@ function postEvent(post: SessionPost, agentName: string): DaemonEvent {
     expiresAt: post.expiresAt,
     sessionId: post.sessionId,
   };
+}
+
+/** A question an agent asks in its terminal lives in this feed rather than the broadcast, so it is briefed from here. */
+export function askingIn(event: DaemonEvent | undefined): DaemonEvent | null {
+  return event !== undefined && event.notice === NOTICE_KIND.ASKING ? event : null;
 }
 
 /** The name the person gave the agent, or its product name made readable. */
@@ -331,13 +343,22 @@ function seenIn(live: SessionHost | null, request: DisplayRequest): SessionHost 
   return { ...rest, ...request.shownIn };
 }
 
-/** Where to show it when no session runs there yet: the folder, and the app an APP start opens. */
+/**
+ * Where to show it when no session runs there yet: the folder, the app an APP start opens, and the
+ * tab a run noted before its agent's first hook, which is where that agent asks its first question.
+ */
 function requestedHost(request: DisplayRequest): { host?: DisplayHost } {
-  if (request.cwd === undefined && request.appPath === undefined) return {};
+  if (
+    request.cwd === undefined &&
+    request.appPath === undefined &&
+    request.tty === undefined
+  )
+    return {};
   return {
     host: {
       ...(request.cwd === undefined ? {} : { cwd: request.cwd }),
       ...(request.appPath === undefined ? {} : { appPath: request.appPath }),
+      ...(request.tty === undefined ? {} : { tty: request.tty }),
     },
   };
 }
@@ -381,7 +402,36 @@ function proposalEvent(each: Proposal, inside: ReadonlySet<string>): DaemonEvent
     ...(rule === undefined ? {} : { rule }),
     ...(within ? { withinSession: true } : {}),
     ...teamAnswerOf(each),
+    ...workDraftFor(each),
   };
+}
+
+/** Something going out in the person's name, drawn on the Mac the way its tool draws it. */
+function workDraftFor(proposal: Proposal): Pick<DaemonEvent, 'work' | 'claim'> {
+  const change = proposal.change;
+  // Answered from the signed in pill in the notch, so the Mac never declines it as unasked.
+  if (change.kind === PROPOSAL_KIND.ACCOUNT)
+    return { claim: { toolkit: change.toolkit, label: change.label } };
+  if (change.kind !== PROPOSAL_KIND.WORK) return {};
+  const args = argumentsOf(change.argumentsText);
+  return {
+    work: workDraftOf(change.toolkit, change.tool, args, {
+      ...(change.account === undefined ? {} : { account: change.account }),
+      ...(change.toName === undefined ? {} : { toName: change.toName }),
+    }),
+  };
+}
+
+function argumentsOf(text: string): Record<string, unknown> {
+  try {
+    const parsed: unknown = JSON.parse(text);
+    return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>) // a plain object, checked above
+      : {};
+  } catch {
+    // Checked when it was proposed; a card with no fields still names the tool.
+    return {};
+  }
 }
 
 /** A team's question answered by voice, named on the proposal so the device that asked carries it out. */

@@ -28,6 +28,7 @@ import {
   type HoldRequest,
   writeWorkspaceMemory,
   type MemnoxEvent,
+  VoiceFocusStore,
 } from '@memnox/core';
 import {
   callOperatorTool,
@@ -35,6 +36,7 @@ import {
   OPERATOR_TOOLS,
 } from '../src/session-tools/operator-tools';
 import { WaitingFeed } from '../src/daemon/waiting-feed';
+import { FOCUS_STARTED } from '../src/session-tools/focus';
 import { registerPolicyFile } from '../src/policy-registry';
 import { machinePolicyPath } from '../src/protect/machine-rules';
 import { OPERATOR_AGENT } from '../src/session-tools/propose-tools';
@@ -139,11 +141,11 @@ async function stamp(path: string, moment: string): Promise<void> {
 }
 
 describe('what the operator is offered', () => {
-  it("reads, and writes nothing but a proposal, a pause, a watch, the person's answer to their agent's question, their words typed into an agent's app, an app they named stopped or closed, a word they were misheard saying, what they told it about themselves, its own screenshots forgotten, a folder to open or make, or a request to show or start what the person said yes to", () => {
+  it("reads, and writes nothing but a proposal, a pause, a watch, the person's answer to their agent's question in its picker or its terminal, their words typed into an agent's app, an app they named stopped or closed, a word they were misheard saying, what they told it about themselves, its own screenshots forgotten, a folder to open or make, or a request to show or start what the person said yes to", () => {
     for (const tool of OPERATOR_TOOLS) {
       if (tool.annotations.readOnlyHint) continue;
       expect(tool.name).toMatch(
-        /^(propose_|show$|pause_session$|send_instruction$|type_in_app$|control_app$|answer_question$|watch_for$|walk_through$|start_session$|show_agents$|memnox_command$|traces$|remember_word$|forget_word$|remember_about_me$|forget_about_me$|forget_screen$|open_folder$|create_folder$)/,
+        /^(propose_|show$|pause_session$|send_instruction$|type_in_app$|control_app$|answer_question$|answer_agent$|watch_for$|walk_through$|start_session$|show_agents$|memnox_command$|traces$|remember_word$|forget_word$|remember_about_me$|forget_about_me$|forget_screen$|open_folder$|create_folder$)/,
       );
     }
   });
@@ -1376,6 +1378,25 @@ describe('showing the person a session', () => {
     ).toMatchObject({ shown: true, display: 'focus' });
     const [shown] = await new WaitingFeed(deps.home).everything(NOW.toISOString());
     expect(shown?.host?.cwd).toContain('memnox-operator-repo-');
+  });
+
+  it('opens where a session was just started when asked by the id of its start', async () => {
+    const deps = await depsAt();
+    const repo = await mkdtemp(join(tmpdir(), 'memnox-operator-started-'));
+    git(repo, 'init', '-q');
+    await new VoiceFocusStore(deps.home).set({
+      repository: repo,
+      agent: 'claude-code',
+      why: FOCUS_STARTED,
+      at: NOW.toISOString(),
+    });
+    await callOperatorTool(deps, SEAMS, 'show', {
+      agent: 'claude-code',
+      session: 'stt_mv1mibrb_cff5efd1',
+      display: 'open',
+    });
+    const [shown] = await new WaitingFeed(deps.home).everything(NOW.toISOString());
+    expect(realpathSync(shown?.host?.cwd ?? '')).toBe(realpathSync(repo));
   });
 
   it('opens the main checkout, never the worktree an agent made for itself', async () => {

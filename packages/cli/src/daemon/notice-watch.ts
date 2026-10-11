@@ -43,6 +43,9 @@ import { readTestRuns, sessionTranscript } from './transcript';
 import { commandResults, type CommandResult } from '../session-tools/voice-commands';
 import { SessionLives } from './session-lifecycle';
 import { SessionViews } from './session-view';
+import { SignInWatcher } from './sign-in-watch';
+import { personalAccounts } from '../sync/personal-work';
+import { readWorkspaceName } from '../sync/workspace-reads';
 
 /**
  * Looks at the ledger for what is worth saying unasked, and keeps what it told for a while
@@ -66,6 +69,8 @@ export class NoticeWatcher {
   private readonly collided = new Set<string>();
   /** The newest clash told, so each held write is said once. */
   private clashSeen: string;
+  /** Sign ins the person was offered, told once each finishes so the voice carries on. */
+  private readonly signIns: SignInWatcher;
 
   constructor(
     private readonly home: string,
@@ -74,6 +79,7 @@ export class NoticeWatcher {
     this.watch = startWatch(started);
     this.clashSeen = started;
     this.lives = new SessionLives(home, started);
+    this.signIns = new SignInWatcher(home, () => personalAccounts(home));
   }
 
   /** New notices since the last look, as events ready to send. */
@@ -95,7 +101,8 @@ export class NoticeWatcher {
     const finished = await this.commandsEnded(moment);
     const met = [...(await this.collisions(moment)), ...(await this.clashes(moment))];
     const lived = await this.lives.look(moment);
-    const all = [...fresh, ...watched, ...finished, ...met, ...lived];
+    const signedIn = await this.signIns.look(moment);
+    const all = [...fresh, ...watched, ...finished, ...met, ...lived, ...signedIn];
     for (const event of all) this.told.set(event.subject, event);
     return all;
   }
@@ -162,13 +169,18 @@ export class NoticeWatcher {
       if (result.doneAt === undefined || result.doneAt < this.started) continue;
       if (this.ended.has(key)) continue;
       this.ended.add(key);
+      // Said by name, since "your workspace" after a login cannot tell them they joined the wrong one.
+      const workspace =
+        result.argv[0] === 'login' && result.exitCode === 0
+          ? await readWorkspaceName(this.home).catch(() => null)
+          : null;
       events.push({
         kind: DAEMON_EVENT.NOTICE,
         subject: `ntc_command_${shortDigest(key)}`,
         agent: 'memnox',
         agentName: 'Memnox',
         notice: result.exitCode === 0 ? NOTICE_KIND.ENDED : NOTICE_KIND.WATCHED,
-        summary: [commandEnding(result), stillRunning(still)]
+        summary: [commandEnding(result, workspace), stillRunning(still)]
           .filter((line) => line !== '')
           .join(' '),
         at: moment,
@@ -309,8 +321,8 @@ export class NoticeWatcher {
 }
 
 /** How a command that ran on its own ended, plainly, with the last thing it printed when it failed. */
-function commandEnding(result: CommandResult): string {
-  const what = commandWords(result);
+function commandEnding(result: CommandResult, workspace: string | null): string {
+  const what = commandWords(result, workspace);
   if (result.exitCode === 0) return `${what} is done; it worked.`;
   const lines = result.output.split('\n').filter((line) => line.trim() !== '');
   const last = lines[lines.length - 1]?.trim() ?? 'it stopped';
@@ -318,9 +330,11 @@ function commandEnding(result: CommandResult): string {
 }
 
 /** Login by its purpose, and an onboarding by the agents it names, so the brain says which. */
-function commandWords(result: CommandResult): string {
+function commandWords(result: CommandResult, workspace: string | null): string {
   if (result.argv[0] === 'login')
-    return 'Connecting this machine to the Memnox workspace';
+    return workspace === null
+      ? 'Connecting this machine to the Memnox workspace'
+      : `Connecting this machine to the workspace called ${workspace}`;
   if (result.argv[0] === 'agents' && result.argv[1] === 'onboard') {
     const agents = result.argv.slice(2).filter((each) => !each.startsWith('-'));
     return `Onboarding ${agents.length === 0 ? 'an agent' : agents.join(', ')}`;
@@ -331,7 +345,7 @@ function commandWords(result: CommandResult): string {
 /** What has not ended yet, so it is never counted as done. */
 function stillRunning(still: readonly CommandResult[]): string {
   if (still.length === 0) return '';
-  return `Still running, not done yet: ${still.map(commandWords).join('; ')}.`;
+  return `Still running, not done yet: ${still.map((each) => commandWords(each, null)).join('; ')}.`;
 }
 
 /** The notice's sentence, and for a finished turn what it came to, so "asked you nothing" is said with it. */

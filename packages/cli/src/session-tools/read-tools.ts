@@ -25,6 +25,12 @@ import {
   type Milestone,
 } from '@memnox/core';
 import type { SourceQuery, SourceRead, SourcesRead } from '../sync/workspace-reads';
+import type {
+  CheckedAccount,
+  PersonalAnswer,
+  PersonalRun,
+  PersonalTools,
+} from '../sync/personal-work';
 
 import { withEvents } from '../event-store';
 import type { CommandRun } from './voice-commands';
@@ -49,8 +55,28 @@ export interface SessionToolDeps {
   refreshMemory?: () => Promise<void>;
   /** Messages and tickets from the systems the workspace connects, or null where it cannot be asked. */
   sources?: (query: SourceQuery) => Promise<SourcesRead | null>;
+  /** Who in the workspace answers to a name, or everybody; null where it cannot be asked. */
+  people?: (name: string | undefined) => Promise<Record<string, unknown> | null>;
+  /** Whether this Mac is enrolled in another workspace than the one the person signed in to. */
+  personElsewhere?: () => Promise<boolean>;
   /** One item read whole by its link, or null where the workspace will not or cannot say. */
   source?: (link: string) => Promise<SourceRead | null>;
+  /** The person's own accounts in their own tools; absent where nothing can reach the workspace. */
+  personalWork?: {
+    find: (what: string, toolkit?: string) => Promise<PersonalAnswer<PersonalTools>>;
+    /** Unsigned, so the control plane runs only what reads. */
+    run: (tool: string, argumentsText: string) => Promise<PersonalAnswer<PersonalRun>>;
+    /** The page that signs the person in to one tool, opened by nobody. */
+    link: (toolkit: string) => Promise<PersonalAnswer<string>>;
+    /** Whose accounts their sign ins reached, each checked against them. */
+    accounts: () => Promise<PersonalAnswer<CheckedAccount[]>>;
+    /** Signs out of every sign in to one tool, answering how many were undone. */
+    signOut: (toolkit: string) => Promise<PersonalAnswer<number>>;
+    /** Opens the provider's one time sign in for a tool an admin connected. */
+    signIn: (
+      toolkit: string,
+    ) => Promise<PersonalAnswer<{ url: string; opened: boolean }>>;
+  };
   /** The workspace's own name, or null when it has none or cannot be asked. */
   workspaceName?: () => Promise<string | null>;
   /** How the Mac says an instruction it typed landed, or null when it never said; absent where nobody types. */

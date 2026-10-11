@@ -350,6 +350,8 @@ describe('a reply cut off after it acted', () => {
     );
     expect(turn.ended).toBe(false);
     expect(turn.acted).toEqual(['type_in_app']);
-    expect(actedNote(turn.acted)).toContain('already called type_in_app');
+    expect(actedNote(turn.acted)).toContain('reached for type_in_app');
+    // A call made while they were still speaking may have been held back, so its own result decides.
+    expect(actedNote(turn.acted)).toContain('when it says nothing was done');
   });
 });
