@@ -166,6 +166,52 @@ describe('a line whose only dollar is quoted code', () => {
   });
 });
 
+/* `mysql -e "DROP DATABASE prod"` was destructive while `mariadb -e` with the same
+   statement was a plain shell line, and redis took its command as argv so nothing read it. */
+describe('database clients that were invisible', () => {
+  // argv rather than a line, because a statement carries its own spaces.
+  const ruled = (words: string[]) => {
+    const [binary, ...args] = words;
+    return resolveAction(binary ?? '', args);
+  };
+
+  it.each([
+    [['mariadb', '-e', 'DROP DATABASE prod'], 'mariadb.drop'],
+    [['mycli', '-e', 'DROP DATABASE prod'], 'mycli.drop'],
+    [['pgcli', '-c', 'DROP TABLE users'], 'pgcli.drop'],
+    [['redis-cli', 'FLUSHALL'], 'redis-cli.flushall'],
+    [['redis-cli', 'flushall'], 'redis-cli.flushall'],
+    [['redis-cli', 'FlushDb'], 'redis-cli.flushdb'],
+    [['redis-cli', 'DEL', 'session:1'], 'redis-cli.del'],
+    [['redis-cli', 'UNLINK', 'session:1'], 'redis-cli.unlink'],
+  ])('%j is destructive', (argv, action) => {
+    const resolved = ruled(argv as string[]);
+    expect(resolved.action).toBe(action);
+    expect(resolved.class).toBe(TOOL_CLASS.DESTRUCTIVE);
+  });
+
+  it.each([
+    [
+      ['redis-cli', 'CONFIG', 'SET', 'appendonly', 'no'],
+      'redis-cli.config-set',
+      TOOL_CLASS.WRITE,
+    ],
+    [['redis-cli', 'SET', 'k', 'v'], 'redis-cli.set', TOOL_CLASS.WRITE],
+    [['redis-cli', 'GET', 'k'], 'redis-cli.get', TOOL_CLASS.READ],
+    [['redis-cli', 'INFO'], 'redis-cli.info', TOOL_CLASS.READ],
+    [['mariadb', '-e', 'SELECT 1'], 'mariadb.select', TOOL_CLASS.READ],
+  ])('%j is %s', (argv, action, expected) => {
+    const resolved = ruled(argv as string[]);
+    expect(resolved.action).toBe(action);
+    expect(resolved.class).toBe(expected);
+  });
+
+  it('still calls an interactive session a write, as it does for mysql', () => {
+    expect(ruled(['mariadb']).class).toBe(TOOL_CLASS.WRITE);
+    expect(ruled(['redis-cli']).class).toBe(TOOL_CLASS.WRITE);
+  });
+});
+
 /* Somebody who writes a rule on `npm.publish` reasonably believes publishing is covered.
    Every spelling but npm's own reached the registry as an ordinary shell line. */
 describe('publishing, however it was run', () => {
