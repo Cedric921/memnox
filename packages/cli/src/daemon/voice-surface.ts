@@ -55,6 +55,7 @@ import { speak, type Render } from './kokoro-speech';
 import { mirrorFor } from './phone-turn';
 import { VoiceHold, voiceOnNotice } from '../remote/voice-hold';
 import { SessionViews } from './session-view';
+import { answerPolish, isPolishMethod } from './polish-calls';
 import { write, type Peer } from './socket-write';
 import { askingIn, WaitingFeed } from './waiting-feed';
 import {
@@ -225,6 +226,7 @@ export class VoiceSurface {
     principal?: RemotePrincipal,
   ): Promise<DaemonResponse> {
     const feed = this.feed;
+    if (isPolishMethod(request.method)) return answerPolish(this.deps.home, request);
     if (request.method === DAEMON_METHOD.LOCATE)
       return locateAnswer(this.deps.home, request);
     if (request.method === DAEMON_METHOD.SESSION_VIEW)
