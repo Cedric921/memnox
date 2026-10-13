@@ -106,13 +106,20 @@ function renderGap(
   flow.hint('memnox protect          put the dangerous ones behind ask or deny');
 }
 
+/** How an agent that is not asking decides, in the words a person repeats. */
+const UNASKED_WORDING: Readonly<Record<string, string>> = {
+  [APPROVAL_STATE.AUTO]: 'acts without asking',
+  [APPROVAL_STATE.MODEL_REVIEWED]: 'lets a model approve its actions',
+};
+
 /**
- * Agents that approve their own actions, each with the setting that says so. The pair
- * with a readable secret is the line: nothing between the agent and the file but the agent.
+ * Agents that approve their own actions, or hand that to a model, each with the setting
+ * that says so. The pair with a readable secret is the line: nothing between the agent
+ * and the file but the agent.
  */
 function noPromptRows(context: CliContext, report: DiscoveryReport): FlowRow[] {
   const unasked = report.agents.filter(
-    (agent) => agent.approval?.state === APPROVAL_STATE.AUTO,
+    (agent) => agent.approval !== undefined && agent.approval.state in UNASKED_WORDING,
   );
   return unasked.map((agent, at) => {
     const secrets = report.resources.filter(
@@ -127,7 +134,7 @@ function noPromptRows(context: CliContext, report: DiscoveryReport): FlowRow[] {
     return {
       label: at === 0 ? 'no prompt' : '',
       value: context.style.warn(
-        `${agent.kind} acts without asking (${agent.approval?.setting ?? 'set to'})${reach}`,
+        `${agent.kind} ${UNASKED_WORDING[agent.approval?.state ?? ''] ?? 'acts without asking'} (${agent.approval?.setting ?? 'set to'})${reach}`,
       ),
     };
   });

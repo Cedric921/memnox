@@ -421,6 +421,8 @@ Proposes reversible steps by default and prints the undo before it runs anything
 | `--hooks` | install `pre-push` and `pre-commit` in this repository |
 | `--claude-hook` | make Claude Code take a lease before it writes a file |
 | `--revert-claude-hook` | take that hook back out of Claude Code |
+| `--project-hook` | put that hook in this repository's own `.claude/settings.local.json` too, which a Claude Code started by a harness with project setting sources only still reads |
+| `--revert-project-hook` | take the hook back out of this repository |
 | `--managed` | move Claude Code's hook into its managed settings, where no local config can remove it |
 | `--revert-managed` | move it back into your own settings |
 | `--exclusive` | with `--managed`, run only managed hooks, so none a repository ships can |

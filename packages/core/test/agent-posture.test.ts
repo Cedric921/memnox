@@ -75,6 +75,24 @@ describe('whether Claude Code asks before it acts', () => {
     expect(posture.state).toBe(APPROVAL_STATE.ASKS);
   });
 
+  /* Under `auto` a model answers the permission prompt. That is neither asking a person
+     nor acting alone, and folding it into either would hide the one fact worth printing. */
+  it('says a model approves under auto, and names the file that says so', async () => {
+    const machine = FakeMachine.from({
+      [`${HOME}/.claude/settings.json`]: settings({ defaultMode: 'auto' }),
+    });
+    const posture = await approvalPostureOf(
+      DISCOVERED_AGENT_KIND.CLAUDE_CODE,
+      machine,
+      [],
+    );
+    expect(posture).toEqual({
+      state: APPROVAL_STATE.MODEL_REVIEWED,
+      setting: 'defaultMode = "auto"',
+      declaredIn: `${HOME}/.claude/settings.json`,
+    });
+  });
+
   it('is unknown with no settings file, and with one that does not parse', async () => {
     const none = FakeMachine.from({});
     const broken = FakeMachine.from({ [`${HOME}/.claude/settings.json`]: '{ nope' });

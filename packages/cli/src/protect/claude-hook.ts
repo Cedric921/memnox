@@ -202,6 +202,35 @@ export async function runClaudeHook(
   renderClaudeHook(context, path, reverting, walled);
 }
 
+/**
+ * The repository's own personal settings: read by a launch restricted to project setting
+ * sources, which the user file is not, and never committed, since the command line in it
+ * names this machine.
+ */
+export const PROJECT_CLAUDE_SETTINGS = join('.claude', 'settings.local.json');
+
+/**
+ * The same hook in this repository's own settings, for the Claude Code a harness starts
+ * as a child with `--setting-sources project`: that launch never reads `~/.claude`, so a
+ * hook only there governs a terminal session and nothing started by a chat window.
+ */
+export async function runProjectClaudeHook(
+  context: CliContext,
+  reverting: boolean,
+  dir: string,
+): Promise<void> {
+  const path = join(dir, PROJECT_CLAUDE_SETTINGS);
+  const raw = existsSync(path) ? await readFile(path, 'utf8') : '{}';
+  const settings = parseSettings(path, raw);
+
+  await mkdir(dirname(path), { recursive: true });
+  const next = reverting
+    ? withoutEditHook(settings)
+    : withEditHook(settings, claudeHookCommand(), claudeEvents(EVERY_TOOL));
+  await writeBackedUp(path, raw, next);
+  renderProjectClaudeHook(context, path, reverting);
+}
+
 /** The hook, and the wall around the shell where this Claude Code can hold one. */
 async function walledIf(
   home: string,
@@ -265,6 +294,32 @@ function renderClaudeHook(
   flow.hint('Two sessions on one file: the second waits, then is told who holds it.');
   flow.hint('Enrolled with "memnox login", the lease is shared with every machine.');
   flow.hint('Undo with "memnox protect --revert-claude-hook".');
+}
+
+function renderProjectClaudeHook(
+  context: CliContext,
+  path: string,
+  reverting: boolean,
+): void {
+  const { flow } = context;
+  flow.rows(reverting ? 'Removed' : 'Installed', [
+    { label: 'where', value: path },
+    { label: 'runs', value: `${EDIT_HOOK_BINARY} before every tool call` },
+    {
+      label: 'read by',
+      value:
+        'every Claude Code in this repository, including one a harness starts with project setting sources only',
+    },
+  ]);
+  if (reverting) {
+    flow.close('Claude Code started in this repository no longer meets the hook here.');
+    return;
+  }
+  flow.close(
+    'Claude Code in this repository checks every tool call against your rules, however it was started.',
+  );
+  flow.hint('The file is personal to this machine: keep it out of the commit.');
+  flow.hint('Undo with "memnox protect --revert-project-hook".');
 }
 
 /**

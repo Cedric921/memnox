@@ -39,6 +39,7 @@ export * from './share-card';
 export * from './health';
 export * from './credentials';
 export * from './browser';
+export * from './desktop';
 export * from './repo-evidence';
 export * from './gap';
 export * from './frontmatter';

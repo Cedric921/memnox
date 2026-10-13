@@ -422,6 +422,7 @@ does not go looking for something that is not there.
 | `13` progressive autonomy, as a question kept for later | `PendingApprovals.park` and `RoutedHoldPrompt`. Unanswered is parked for sixteen hours, the agent carries on, and a later yes lets its retry through. |
 | `18` black box, as one goal over many sessions | `core/session/mission.ts`, `memnox mission`. Sessions join by `--mission`, by inheritance, or by working in the mission's repository and worktrees; `mission show` is the screen for coming back. |
 | `21` the primary screen, reached by a person away | `cli/src/daemon/waiting-feed.ts`. Stopped, struggling and finished while nobody answered, beside every held call, waking a paired phone. |
+| `23` effective capability, as the desktop and the model that approves | `core/discovery/desktop.ts`: a server that both sees the screen and presses keys is a `desktop` surface, which `explain` reports as held by no seam. `APPROVAL_STATE.MODEL_REVIEWED` for Claude Code's `auto` mode. Both are risk rules in `docs/risk-bands.md`. |
 
 **Three rules these all had to obey, and they are worth keeping.**
 
@@ -615,6 +616,20 @@ never a config the agent cannot load. `manageable()` runs the same rewrite as a
 dry run before anybody is asked a question, so an unsupported config is found out
 at the top of the flow rather than after two answers.
 
+**What a desk-driving harness taught, without naming one.** Chat-style harnesses now
+run Claude Code and Codex as children with the permission mode on the command line, a
+model answering the prompt under "approve for me", routines that start turns with
+nobody present, and a bundled driver that clicks and types into any window on the Mac.
+Three generic facts came out of reading one, and no detector did: a server that both
+sees the screen and presses keys is a `desktop` surface and `explain` says no seam holds
+it, since nothing here sits between an MCP tool and the platform's input APIs; Claude
+Code's `auto` mode is `model-reviewed`, a posture of its own, because a model deciding
+what a person would have been asked is neither asking nor acting alone; and a hook in
+user settings is not in force under `--setting-sources project`, which is why
+`protect --project-hook` writes it into the repository's own `settings.local.json` as
+well. No product is named in the code, because a surface read off
+tool names covers the next harness too and a kind keyed to one product covers only it.
+
 **What rendering the boundary found.** The generated baseline's git rule was described
 as "force-pushing, and hard resets" and matched `git.push`, `git.reset`, `git.clean` —
 so it denied every ordinary push and permitted `git push --force`, which is the whole
@@ -720,7 +735,7 @@ and it is the whole reason this is adoptable.
 
 | ID | Goal | Size |
 |---|---|---|
-| OSS-3.13 | Verb tables as data under `packages/core/verbs/<cli>.toml`, checksum-verified | **Built.** 19 tables, compiled in rather than read from a writable path. |
+| OSS-3.13 | Verb tables as data under `packages/core/verbs/<cli>.toml`, checksum-verified | **Built.** 23 tables, compiled in rather than read from a writable path. |
 | OSS-3.14 | `protect --from-scan` generates CLI rules from the verb tables | **Built.** `protect --yes` writes a baseline; `--for` writes one CLI. |
 | OSS-3.15 | `protect --for <cli or server>` targeted flow | **Built.** Denies the credential file and keeps the CLI working. |
 

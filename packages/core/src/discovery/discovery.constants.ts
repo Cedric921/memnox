@@ -41,6 +41,8 @@ export const SURFACE_KIND = {
   DOCKER: 'docker',
   CLOUD: 'cloud',
   BROWSER: 'browser',
+  /** The screen, keyboard and mouse of this machine, which no seam here sits in front of. */
+  DESKTOP: 'desktop',
 } as const;
 
 export type SurfaceKind = (typeof SURFACE_KIND)[keyof typeof SURFACE_KIND];

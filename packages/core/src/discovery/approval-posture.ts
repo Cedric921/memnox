@@ -13,6 +13,8 @@ export const APPROVAL_STATE = {
   AUTO: 'auto',
   /** It asks, at least for what its own defaults consider risky. */
   ASKS: 'asks',
+  /** A model approves its actions and a person sees only what the model leaves. */
+  MODEL_REVIEWED: 'model-reviewed',
   /** Nothing on disk says, so neither answer is printed as a fact. */
   UNKNOWN: 'unknown',
 } as const;
@@ -30,6 +32,9 @@ const UNKNOWN_POSTURE: ApprovalPosture = { state: APPROVAL_STATE.UNKNOWN };
 
 /** Claude Code's modes that skip the prompt for every tool, not only for edits. */
 const CLAUDE_AUTO_MODES: readonly string[] = ['bypassPermissions'];
+
+/** Claude Code's mode in which a model answers the permission prompt and a person sees the rest. */
+const CLAUDE_MODEL_MODES: readonly string[] = ['auto'];
 
 /** An allow entry naming the shell with no argument pattern lets every command through. */
 const CLAUDE_UNSCOPED_SHELL: readonly string[] = ['Bash', 'Bash(*)', 'Bash(*:*)'];
@@ -111,6 +116,13 @@ function claudeDecision({ mode, shell, anyRead }: ClaudeSettings): ApprovalPostu
       state: APPROVAL_STATE.AUTO,
       setting: `allow includes "${shell.value}"`,
       declaredIn: shell.path,
+    };
+  }
+  if (mode !== null && CLAUDE_MODEL_MODES.includes(mode.value)) {
+    return {
+      state: APPROVAL_STATE.MODEL_REVIEWED,
+      setting: `defaultMode = "${mode.value}"`,
+      declaredIn: mode.path,
     };
   }
   if (anyRead === null) return UNKNOWN_POSTURE;

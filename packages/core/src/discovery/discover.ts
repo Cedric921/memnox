@@ -3,6 +3,7 @@ import { agentRefOf, type AgentRef, type DiscoveredAgent } from './agent';
 import { agentHostOf, type HostInspector } from './agent-host';
 import { approvalPostureOf } from './approval-posture';
 import { findBrowserAutomation, type BrowserFinding } from './browser';
+import { desktopSurfacesIn } from './desktop';
 import { chainsFor, type AgentChains } from './composition';
 import {
   authenticatedClis,
@@ -122,7 +123,12 @@ export async function discover(
   detected.agents = await Promise.all(
     detected.agents.map((agent) => withStanding(agent, reader, options)),
   );
-  const { surfaces, probed } = await probeServers(detected.surfaces, options.lister);
+  const { surfaces: probedSurfaces, probed } = await probeServers(
+    detected.surfaces,
+    options.lister,
+  );
+  // Read off the tools the servers declared, so it exists only once a server was asked.
+  const surfaces = [...probedSurfaces, ...desktopSurfacesIn(probedSurfaces)];
   const { resources, read } = await scanResources(reader, options.projectDirs ?? []);
   // Derived from the surfaces already found, never asserted on its own.
   const network = networkReach(surfaces);
