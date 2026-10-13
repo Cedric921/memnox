@@ -15,6 +15,18 @@ describe('finding the integrated terminal a session runs in', () => {
     expect(deviceName('ttys004')).toBe('ttys004');
   });
 
+  it('still finds the session when an earlier terminal never reports its pid', async () => {
+    const terminals = [
+      { terminal: 'never reports', processId: new Promise<number | undefined>(() => {}) },
+      { terminal: 'refused', processId: Promise.reject(new Error('gone')) },
+      { terminal: 'the session', processId: Promise.resolve(12) },
+    ];
+    const deviceOf = async (pid: number): Promise<string | null> =>
+      pid === 12 ? 'ttys028' : null;
+    expect(await terminalOn('/dev/ttys028', terminals, deviceOf, 20)).toBe('the session');
+    expect(await terminalOn('ttys001', terminals, deviceOf, 20)).toBeNull();
+  });
+
   it('takes only a real device from a link, since anyone can open one', () => {
     expect(deviceFromLink('tty=ttys013')).toBe('ttys013');
     expect(deviceFromLink('tty=%2Fdev%2Fttys013')).toBe('/dev/ttys013');

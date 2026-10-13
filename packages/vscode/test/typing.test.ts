@@ -76,7 +76,11 @@ describe('typing an instruction into an integrated terminal', () => {
     expect(requestOfFile('dsp_murdjtg4_ceeee04e.json')).toBe('dsp_murdjtg4_ceeee04e');
     expect(requestOfFile('dsp_murdjtg4_ceeee04e.json.123.tmp')).toBeNull();
     expect(requestOfFile('../escape.json')).toBeNull();
-    expect(deviceOfRequest(waiting)).toBe('ttys013');
+    expect(deviceOfRequest(waiting)).toEqual({ tty: 'ttys013', kind: 'type' });
+    expect(deviceOfRequest({ ...waiting, display: 'press' })).toEqual({
+      tty: 'ttys013',
+      kind: 'press',
+    });
     expect(deviceOfRequest({ ...waiting, display: 'close' })).toBeNull();
     expect(claimedElsewhere({ ...waiting, claimedBy: 41 }, 42)).toBe(true);
     expect(claimedElsewhere({ ...waiting, claimedBy: 42 }, 42)).toBe(false);

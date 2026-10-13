@@ -16,6 +16,9 @@ const AGENT_PROGRAMS = /^(claude|node|codex|gemini|cursor-agent|aider|opencode)$
 const AGENT_FOLDERS =
   /\/(claude|codex|gemini|cursor-agent|aider|opencode)\/(versions\/)?[^/]+$/i;
 
+/** Why a request is left alone without a word, since another window or link already answered it. */
+export const ALREADY_ANSWERED = 'it was already answered';
+
 /** Every link Memnox sends an editor names a request and a terminal the same way. */
 interface TypeLink {
   request: string;
@@ -36,14 +39,14 @@ export function waitingRequest(
   record: unknown,
   tty: string,
   moment: string,
-  display: 'type' | 'close' | 'interrupt',
+  display: 'type' | 'press' | 'close' | 'interrupt',
 ): { request: Record<string, unknown> } | { why: string } {
   if (record === null || typeof record !== 'object') {
     return { why: 'its request is gone' };
   }
   const request = record as Record<string, unknown>;
   if (request['display'] !== display) return { why: `it is not a request to ${display}` };
-  if (request['delivered'] !== undefined) return { why: 'it was already answered' };
+  if (request['delivered'] !== undefined) return { why: ALREADY_ANSWERED };
   const expires = request['expiresAt'];
   if (typeof expires !== 'string' || expires <= moment) {
     return { why: 'it waited too long' };
@@ -89,7 +92,7 @@ export function launchable(
     return { why: 'its request is gone' };
   const request = record as Record<string, unknown>;
   if (request['display'] !== 'launch') return { why: 'it is not a request to launch' };
-  if (request['delivered'] !== undefined) return { why: 'it was already answered' };
+  if (request['delivered'] !== undefined) return { why: ALREADY_ANSWERED };
   const expires = request['expiresAt'];
   if (typeof expires !== 'string' || expires <= moment)
     return { why: 'it waited too long' };
@@ -159,10 +162,15 @@ export function claimedElsewhere(record: unknown, pid: number): boolean {
   return typeof claimed === 'number' && claimed !== pid;
 }
 
-/** The device a type request names, for a window deciding whether the terminal is its own. */
-export function deviceOfRequest(record: unknown): string | null {
+/** The kinds a window acts on unasked when the terminal is its own: words typed, and keys pressed to answer. */
+export type HeldKind = 'type' | 'press';
+
+/** The device and kind a type or press request names, for a window deciding whether the terminal is its own. */
+export function deviceOfRequest(record: unknown): { tty: string; kind: HeldKind } | null {
   if (record === null || typeof record !== 'object') return null;
   const request = record as Record<string, unknown>;
   const tty = request['tty'];
-  return request['display'] === 'type' && typeof tty === 'string' ? tty : null;
+  const kind = request['display'];
+  if (typeof tty !== 'string' || (kind !== 'type' && kind !== 'press')) return null;
+  return { tty, kind };
 }
