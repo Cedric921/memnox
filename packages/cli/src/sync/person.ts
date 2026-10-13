@@ -12,9 +12,9 @@ import {
 import { callCloud } from './client';
 
 /**
- * A person signed in from this terminal, apart from the machine's own credential: what lets
- * `memnox inbox` show the questions a team routed to them and answer one, signed by a key that
- * never leaves this machine, as the phone signs with Face ID.
+ * A person signed in from this terminal with `memnox signin`, apart from the machine's own
+ * credential: what lets `memnox inbox` show the questions a workspace routed to them and answer
+ * one, signed by a key that never leaves this machine, as the phone signs with Face ID.
  */
 
 const PERSON_FILE = 'person.json';
@@ -48,7 +48,7 @@ export interface TeamHeld {
   approvalsNeeded: number;
 }
 
-interface PersonCode {
+export interface PersonCode {
   deviceCode: string;
   userCode: string;
   intervalSeconds: number;
@@ -57,7 +57,7 @@ interface PersonCode {
   verificationUriComplete?: string;
 }
 
-interface Granted {
+export interface Granted {
   token: string;
   personId: string;
   name: string;
@@ -76,12 +76,20 @@ async function forgetPerson(home: string): Promise<void> {
   await rm(personPathFor(home), { force: true });
 }
 
-export async function requestPersonCode(baseUrl: string): Promise<PersonCode> {
+/** `companionOf` is the Mac app's own device code, so one approval in the browser signs both in. */
+export async function requestPersonCode(
+  baseUrl: string,
+  companionOf?: string,
+): Promise<PersonCode> {
   const answer = await callCloud<PersonCode>({
     baseUrl,
     path: '/v1/person/codes',
     method: 'POST',
-    body: { name: `${hostname()} terminal`, kind: 'desktop' },
+    body: {
+      name: `${hostname()} terminal`,
+      kind: 'desktop',
+      ...(companionOf === undefined ? {} : { companionOf }),
+    },
   });
   if (answer.body === undefined || answer.status >= HTTP.BAD_REQUEST) {
     throw new Error(
@@ -113,9 +121,7 @@ export async function awaitPerson(
     }
     await wait(every);
   }
-  throw new Error(
-    'The code ran out before it was approved. Run memnox team login again.',
-  );
+  throw new Error('The code ran out before it was approved. Run memnox signin again.');
 }
 
 /** Picks the workspace in the person's organisation, then registers this terminal's key there. */
@@ -189,9 +195,7 @@ export async function teamHeld(person: PersonCredential): Promise<TeamHeld[]> {
     token: person.token,
   });
   if (answer.status === HTTP.UNAUTHORIZED) {
-    throw new Error(
-      'The workspace signed this terminal out. Run memnox team login again.',
-    );
+    throw new Error('The workspace signed this terminal out. Run memnox signin again.');
   }
   return Array.isArray(answer.body) ? answer.body : [];
 }

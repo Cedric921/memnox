@@ -28,7 +28,7 @@ export function registerInboxCommand(
   const deps: InboxDeps = { home: homedir, now: () => new Date(), ...overrides };
   program
     .command('inbox')
-    .description('Everything waiting on you: this machine and your team')
+    .description('Everything waiting on you: this machine and your workspace')
     .option('--json', 'machine-readable output')
     .action(async (options: { json?: boolean }) => {
       process.exitCode = await runInbox(context, deps, options.json === true);
@@ -68,7 +68,7 @@ async function runInbox(
     );
   }
   if (person === null)
-    flow.hint('memnox team login   also shows what your team routes to you');
+    flow.hint('memnox signin   also shows what your workspace routes to you');
   return EXIT.OK;
 }
 

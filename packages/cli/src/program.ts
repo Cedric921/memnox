@@ -32,7 +32,7 @@ import { registerUnattendedCommand } from './commands/unattended.command';
 import { registerAskCommand } from './commands/ask.command';
 import { registerVoiceCommand } from './commands/voice.command';
 import { registerPairCommand } from './commands/pair.command';
-import { registerTeamCommand } from './commands/team.command';
+import { registerSignInCommand } from './commands/signin.command';
 import { registerInboxCommand } from './commands/inbox.command';
 import { registerDevicesCommand } from './commands/devices.command';
 import { registerReportCommand } from './commands/report.command';
@@ -129,7 +129,7 @@ function registerVoiceCommands(program: Command, context: CliContext): void {
   registerAskCommand(program, context);
   registerVoiceCommand(program, context);
   registerPairCommand(program, context);
-  registerTeamCommand(program, context);
+  registerSignInCommand(program, context);
   registerInboxCommand(program, context);
   registerDevicesCommand(program, context);
 }

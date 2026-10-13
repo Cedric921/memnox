@@ -41,6 +41,7 @@ import { InterceptSurface } from './daemon/intercept-surface';
 import { write } from './daemon/socket-write';
 import type { VoiceAgentRoster } from './daemon/voice-agent-calls';
 import { isVoiceMethod, VoiceSurface } from './daemon/voice-surface';
+import { accountSignIns } from './daemon/account-sign-ins';
 import type { Brain } from './operator/brain';
 import { isRemoteMethod, RemoteEndpoint, type RemoteDeps } from './remote/endpoint';
 
@@ -125,6 +126,8 @@ interface DaemonDeps {
   brainIdleMs?: number;
   /** Which agents can be the voice, for the Mac app's settings. */
   voiceAgents?: VoiceAgentRoster;
+  /** Told once the Mac app has connected this machine to a workspace, so sync can start without a restart. */
+  onEnrolled?: () => void;
   /** The paired phones' tunnel; its relay, cloud and Noise are handed in by a test. */
   remote?: Omit<RemoteDeps, 'home' | 'now' | 'log' | 'voice'>;
   log: (message: string) => void;
@@ -170,28 +173,29 @@ export class MemnoxDaemon {
       report: (request) => void this.record(request),
       log: this.deps.log,
     });
-    this.voice = new VoiceSurface({
+    this.voice = this.voiceSurface(home);
+    this.startRemote(home);
+    await secureAddress(path);
+    return path;
+  }
+
+  /** What the Mac app and the phones talk to, with the sign ins the app drives for the person and this machine. */
+  private voiceSurface(home: string): VoiceSurface {
+    const { feedIntervalMs, brain, brainIdleMs, voiceAgents, onEnrolled } = this.deps;
+    return new VoiceSurface({
       home,
       now: () => this.now(),
       log: this.deps.log,
-      ...(this.deps.feedIntervalMs === undefined
-        ? {}
-        : { feedIntervalMs: this.deps.feedIntervalMs }),
-      ...(this.deps.brain === undefined ? {} : { brain: this.deps.brain }),
-      ...(this.deps.brainIdleMs === undefined
-        ? {}
-        : { brainIdleMs: this.deps.brainIdleMs }),
-      ...(this.deps.voiceAgents === undefined
-        ? {}
-        : { voiceAgents: this.deps.voiceAgents }),
+      ...(feedIntervalMs === undefined ? {} : { feedIntervalMs }),
+      ...(brain === undefined ? {} : { brain }),
+      ...(brainIdleMs === undefined ? {} : { brainIdleMs }),
+      ...(voiceAgents === undefined ? {} : { voiceAgents }),
+      ...accountSignIns(home, () => onEnrolled?.()),
       remote: {
         driving: (deviceId) => this.remote?.driving(deviceId) ?? false,
         tell: (deviceId, response) => this.remote?.tell(deviceId, response) ?? false,
       },
     });
-    this.startRemote(home);
-    await secureAddress(path);
-    return path;
   }
 
   /** The phones' tunnel, off unless sync is enrolled and a phone is paired, so a Mac with no phone opens nothing. */

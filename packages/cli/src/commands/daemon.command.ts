@@ -158,6 +158,8 @@ interface LoopState {
   gate?: LocalGate;
   /** Heard by the phones' relay link and acted on by the sync loop. */
   beats: HeartbeatBeats;
+  /** Filled by the loop once it runs: what to do when the Mac app connects this machine while it is up. */
+  later: { enrolled?: () => void };
 }
 
 /** The loop the service runs: evaluate over a socket, sync on a heartbeat, answer held calls. */
@@ -172,9 +174,7 @@ async function runLoop(
   if (claimed === null) return;
   const { state, path } = claimed;
   renderListening(context, path, state, options.sync);
-  let running = true;
-  // Only where the machine is enrolled, because an edit claim is a workspace's to hold.
-  const watcher = state.account === null ? null : new EditWatcher(home());
+  const sync = workspaceSync(home, options, state, log);
   // Local, and so whether or not the machine is enrolled: this is what setup asked it to hold.
   const keeper = new BoundaryKeeper(home(), { log });
   keeper.start();
@@ -183,16 +183,12 @@ async function runLoop(
     log(`The Memnox extension was not checked in the editors: ${String(err)}`),
   );
   const egress = await startEgress(home(), state, log);
-  if (state.account !== null) {
-    // Rides here because this is already the one process that outlives a command.
-    void syncLoop(home(), () => running, { log, beats: state.beats });
-    watcher?.start();
-  }
+  if (state.account !== null) sync.start();
+  state.later.enrolled = sync.start;
   // Held open deliberately: the command is the daemon, not a launcher for one.
   await new Promise<void>((resolve) => {
     const stop = (): void => {
-      running = false;
-      watcher?.stop();
+      sync.stop();
       keeper.stop();
       void Promise.all([state.daemon.close(), egress.stop()]).then(() => resolve());
     };
@@ -200,6 +196,34 @@ async function runLoop(
     process.once('SIGTERM', stop);
     restartOnRebuild(log, stop);
   });
+}
+
+/**
+ * Pulling from the workspace and holding its edit claims, started once only, whether the credential was there at
+ * start or the Mac app wrote it while this daemon was up. Only where enrolled, since an edit claim is a workspace's.
+ */
+function workspaceSync(
+  home: () => string,
+  options: DaemonOptions,
+  state: LoopState,
+  log: (message: string) => void,
+): { start: () => void; stop: () => void } {
+  let running = true;
+  let watcher: EditWatcher | null = null;
+  return {
+    start: () => {
+      if (watcher !== null || !options.sync) return;
+      // Rides here because this is already the one process that outlives a command.
+      void syncLoop(home(), () => running, { log, beats: state.beats });
+      watcher = new EditWatcher(home());
+      watcher.start();
+      log('Connected to the workspace, so rules and memory are pulled from now on.');
+    },
+    stop: () => {
+      running = false;
+      watcher?.stop();
+    },
+  };
 }
 
 /** How often a service-started daemon looks again while another one holds the socket. */
@@ -296,12 +320,14 @@ async function buildLoop(
   const budgets = await readBudgets(home);
   const spending = await spendingOf(home, budgets);
   const beats = new HeartbeatBeats();
+  const later: LoopState['later'] = {};
   const daemon = new MemnoxDaemon({
     ...(gate === undefined ? {} : { gate }),
     ...spending,
     remote: { beats },
     pauses: new SessionPauses(home),
     ...voiceOf(home),
+    onEnrolled: () => later.enrolled?.(),
     // Commentary rather than rail steps, because it writes for as long as the process lives.
     log: (message) => context.out.note(message),
   });
@@ -314,6 +340,7 @@ async function buildLoop(
     account,
     ...(gate === undefined ? {} : { gate }),
     beats,
+    later,
   };
 }
 

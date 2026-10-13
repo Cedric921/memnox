@@ -25,7 +25,9 @@ export function registerLoginCommand(
 ): void {
   program
     .command('login')
-    .description('Connect this machine to a workspace, so it gets your rules')
+    .description(
+      'Connect this machine to a workspace, so it gets your rules. "signin" is you; this is the machine',
+    )
     // No workspace flag: nothing unenrolled can prove one, so it lands where the approver is.
     .option('--url <base>', 'the control plane', DEFAULT_BASE_URL)
     .option('--enforce', 'start in enforce rather than observe')
@@ -96,6 +98,9 @@ async function runLogin(
   flow.close(style.ok('This machine is enrolled.'));
   flow.hint('It now pulls your workspace rules. Nothing else leaves this machine.');
   flow.hint('Put your agents to work with "memnox setup".');
+  flow.hint(
+    'Sign in as yourself with "memnox signin", so what is routed to you reaches here.',
+  );
   flow.hint('Take it back off with "memnox logout".');
 
   out.line(connected.machineId);

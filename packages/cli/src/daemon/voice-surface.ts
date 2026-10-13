@@ -34,6 +34,9 @@ import {
   type VoiceAgentRoster,
 } from './voice-agent-calls';
 import { confirmAnswer, type RemotePrincipal } from './confirm';
+import { answerMachine, isMachineMethod, type MachineSignIns } from './machine-calls';
+import { answerPerson, isPersonMethod, type PersonSignIns } from './person-calls';
+export { isVoiceMethod } from './voice-methods';
 import { NoticeWatcher } from './notice-watch';
 import { RecentExchanges } from './recall';
 import { streamTurn } from './stream-turn';
@@ -76,29 +79,6 @@ const FEED_INTERVAL_MS = 500;
 /** A finished session is news for minutes, so the ledger is read for it far less often. */
 const NOTICE_INTERVAL_MS = 10_000;
 
-const VOICE_METHODS: readonly string[] = [
-  DAEMON_METHOD.SUBSCRIBE,
-  DAEMON_METHOD.WAITING,
-  DAEMON_METHOD.CONFIRM,
-  DAEMON_METHOD.REGISTER_KEY,
-  DAEMON_METHOD.ASK,
-  DAEMON_METHOD.CANCEL,
-  DAEMON_METHOD.LOCATE,
-  DAEMON_METHOD.BRIEF,
-  DAEMON_METHOD.WARM,
-  DAEMON_METHOD.VOCABULARY,
-  DAEMON_METHOD.LEARN_WORDS,
-  DAEMON_METHOD.SESSION_VIEW,
-  DAEMON_METHOD.SESSIONS_LIST,
-  DAEMON_METHOD.DELIVERED,
-  DAEMON_METHOD.SEEN,
-  DAEMON_METHOD.TRACE,
-  DAEMON_METHOD.VOICE_AGENTS,
-  DAEMON_METHOD.CHOOSE_VOICE_AGENT,
-  DAEMON_METHOD.FILES_LIST,
-  DAEMON_METHOD.SPEAK,
-];
-
 interface VoiceDeps {
   home: string;
   now: () => string;
@@ -108,14 +88,14 @@ interface VoiceDeps {
   brain?: () => Brain;
   brainIdleMs?: number;
   voiceAgents?: VoiceAgentRoster;
+  /** The daemon's own person sign in, driven from the Mac app's Account page. */
+  person?: PersonSignIns;
+  /** This machine's connection to its workspace, driven from the same page. */
+  machine?: MachineSignIns;
   /** Where SPEAK renders a line: the Mac app's Kokoro, unless a test stands in for it. */
   render?: Render;
   /** The paired phones' side: whether one drives the Mac, and a line to one's live session. */
   remote?: Pick<RouterDeps, 'driving' | 'tell'>;
-}
-
-export function isVoiceMethod(method: string): boolean {
-  return VOICE_METHODS.includes(method) || isHomeMethod(method);
 }
 
 export class VoiceSurface {
@@ -254,6 +234,8 @@ export class VoiceSurface {
     if (request.method === DAEMON_METHOD.SESSIONS_LIST) {
       return { id: request.id, ok: true, sessions: await this.views.list() };
     }
+    if (isPersonMethod(request.method)) return answerPerson(request, this.deps.person);
+    if (isMachineMethod(request.method)) return answerMachine(request, this.deps.machine);
     if (isWordsMethod(request.method)) {
       return wordsAnswer(this.deps.home, request, this.deps.now());
     }

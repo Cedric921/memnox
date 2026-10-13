@@ -28,8 +28,9 @@ described as shipped.
    more. That is why linking comes first in this spec, and why an unlinked account can decide
    nothing.
 3. The terminal has two sign ins that people confuse: `memnox login` enrols the **machine** and
-   `memnox team login` signs in the **person**. Only the second one lets this terminal answer
-   questions routed from the team.
+   `memnox signin` signs in the **person**. Only the second one lets this terminal answer
+   questions routed from the workspace. It was `memnox signin` until the word misled:
+   one person signs in, and the Mac app's Account page runs the same flow for the daemon.
 
 ---
 
@@ -1050,7 +1051,7 @@ machine.
 - [Progressive disclosure] The closing screen carries up to six hints, and two of them tell the
   person to type `memnox config set mode enforce` "when you have read a week of it". The day
   seven nudge belongs in `status` on day seven.
-- [Consistency] Setup never mentions `memnox team login`, so a person who set up their machine
+- [Consistency] Setup never mentions `memnox signin`, so a person who set up their machine
   still cannot answer team questions from this terminal and is not told so.
 
 **Improved.**
@@ -1070,13 +1071,13 @@ machine.
 │
 └ 2 agents under Memnox, watching for a week before refusing anything.
 
-  Answer from this terminal too:  memnox team login
+  Answer from this terminal too:  memnox signin
   Take it all back out:           memnox uninstall
 ```
 
 - Ask where questions go as a choice that lists the person's linked tools, read from the
   workspace, rather than a yes or no about two named tools.
-- Offer `memnox team login` at the end when the person is not signed in.
+- Offer `memnox signin` at the end when the person is not signed in.
 - Two hints at most. Move the enforce nudge to `status`.
 
 ---
@@ -1108,9 +1109,9 @@ server" panel, or setup's hint.
 
 - [Consistency] `whoami` and the close name the workspace and machine by id ("This machine
   belongs to ws_8c1d..."), while setup and chat use names.
-- [Consistency] `login` is the machine and `team login` is the person, yet both read "login".
-  Lin runs `memnox login`, believes they are signed in, and `memnox inbox` still says
-  "memnox team login also shows what your team routes to you".
+- [Consistency] `login` is the machine and the person's sign in read alike until the second
+  became `memnox signin`, whose description says "login is the machine; this is you", and
+  `login` closes by offering it.
 - [Progressive disclosure] "Machine key generated" and "ed25519" are shown before the step the
   person must take, which pushes the code and URL down.
 
@@ -1126,7 +1127,7 @@ server" panel, or setup's hint.
 └ lin-laptop joined Acme as a workstation, watching.
 
   Next:  memnox setup        put your agents under Memnox
-         memnox team login   answer your team's questions here
+         memnox signin       answer what your workspace routes to you, here
 ```
 
 - Names, not ids, everywhere a person reads.
@@ -1193,7 +1194,7 @@ server" panel, or setup's hint.
 └ Memnox is keeping this machine.   memnox status --wiring for the rest
 ```
 
-- The five blocks in the shared order, with "Your team" sixth when signed in with `team login`.
+- The five blocks in the shared order, with "Your team" sixth when signed in with `signin`.
 - Wiring details (daemon, hooks, rules, probation) under `--wiring`, with only a failure
   surfacing in "Not covered".
 - Show the inbox inline rather than a hint to another command.
@@ -1276,7 +1277,7 @@ $ memnox approve c19e
 
 ## `memnox inbox`
 
-`commands/inbox.command.ts` (new, uncommitted) · reached from: `team login`'s hint, the card
+`commands/inbox.command.ts` (new, uncommitted) · reached from: `signin`'s hint, the card
 footer in the improved version.
 
 **Job.** Everything waiting on me, here and from my team, in one list.
@@ -1290,7 +1291,7 @@ footer in the improved version.
   "asked of your team" (", needs <n> people"), then the reason.
 - Close: "memnox approve <id> allows once, --session for the rest of it, memnox deny <id>
   refuses."
-- Not signed in: "memnox team login also shows what your team routes to you". Team read
+- Not signed in: "memnox signin also shows what your team routes to you". Team read
   failure: the error, as an aside.
 - Empty: "Nothing is waiting on you."
 
@@ -1477,10 +1478,10 @@ the empty hint with `memnox setup`.
 **What gets in the way.**
 
 - [Consistency] For Lin, who has no Apple device, the screen speaks only of iPhones and Macs,
-  with no word that chat or `team login` is the way for them.
+  with no word that chat or `signin` is the way for them.
 
 **Improved.** Add one closing aside when nothing is paired: "No iPhone
-or Mac? Answer from your chat DM or this terminal: memnox team login."
+or Mac? Answer from your chat DM or this terminal: memnox signin."
 
 ---
 
@@ -1505,9 +1506,9 @@ in `grant`'s description.
 
 ---
 
-## `memnox team login` and `logout`
+## `memnox signin` and `signout`
 
-`commands/team.command.ts` (new, uncommitted) · reached from: `inbox`'s hint.
+`commands/signin.command.ts` (was `team.command.ts`) · reached from: `login`'s close and `inbox`'s hint.
 
 **Job.** Sign me in as myself, so my team's questions reach this terminal.
 
@@ -1521,11 +1522,11 @@ answers one". Logout: "Signed <name> out of this terminal." or "Nobody is signed
 - [Consistency] "Waiting for you to approve it..." uses three dots, while `login` uses an
   ellipsis and names the deadline.
 - [Consistency] The code is shown before the URL, which is the reverse of `login`.
-- [Hierarchy] It lives under `team`, which reads as administration, when it is the personal
-  sign in every Linux user needs.
+- [Hierarchy] It lived under `team`, which reads as administration, when it is the personal
+  sign in every Linux user needs. Now `memnox signin`, top level, and `memnox team` says where it went.
 
-**Improved.** Same layout as `login`, with the deadline named. Expose it as `memnox login --me`
-too, and mention it from `login`'s and `setup`'s close.
+**Improved.** Same layout as `login`, URL then code, with the deadline named, and `login`'s close
+offers it. The Mac app's Account page runs the same flow for the daemon, so a Mac needs no terminal.
 
 ---
 
@@ -1568,7 +1569,7 @@ fix, and Windows users in `user-flows.md`.
 ◆ Do questions reach you       no: approvals go to the session only
 │                              → memnox config set approvals both
 ◇ Can you answer from here     no: nobody is signed in
-│                              → memnox team login
+│                              → memnox signin
 │
 ◇ What is reachable that should not be   1 high
 │   ~/.aws/credentials readable by Codex
@@ -1602,7 +1603,7 @@ The top ten improvements, in priority order.
 7. Give `memnox status` the five blocks in the shared order, with "Waiting on you" first and the
    wiring behind `--wiring`.
 8. Make setup ask where questions go from the person's linked chat tools (Telegram and Teams
-   included), and offer `memnox team login` before it closes.
+   included), and offer `memnox signin` before it closes.
 9. Carry the action id and the deadline on every chat question, and let `/memnox why` and
    `memnox why` with no id answer for the last stop the person can see.
 10. Fix the stale pointers: setup in
