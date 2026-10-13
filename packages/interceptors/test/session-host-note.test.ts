@@ -2,7 +2,7 @@ import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { SessionHosts } from '@memnox/core';
+import { RunTerminals, SessionHosts } from '@memnox/core';
 import { noteSessionHost, processChain } from '../src/session-host-note';
 
 const LISTING = [
@@ -53,6 +53,42 @@ describe('noting where a session runs', () => {
       pid: 400,
       app: 'Ghostty',
       tty: 'ttys009',
+    });
+  });
+
+  it('takes the tab memnox run noted over a terminal the agent opened for its own tools', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'memnox-host-note-'));
+    await new RunTerminals(home).note({
+      sessionId: 'ses_cursor',
+      agent: 'cursor',
+      pid: 4242,
+      tty: 'ttys004',
+      app: 'iTerm',
+      appPath: '/Applications/iTerm.app',
+      cwd: '/work/eye',
+      startedAt: '2026-10-14T16:02:16.000Z',
+    });
+    await noteSessionHost(
+      { hook_event_name: 'SessionStart', session_id: 'c-1', cwd: '/work/eye' },
+      {
+        home,
+        agent: 'cursor',
+        runSession: 'ses_cursor',
+        pid: process.pid,
+        cwd: '/work/eye',
+        now: () => new Date('2026-10-14T16:02:20.000Z'),
+      },
+      () =>
+        [
+          `  ${process.ppid}   400 ttys021  /bin/zsh`,
+          '  400   300 ttys021  /usr/local/bin/cursor-agent-worker',
+          '  300     1 ??       /usr/local/bin/cursor-agent',
+        ].join('\n'),
+    );
+    expect(await new SessionHosts(home).read('ses_cursor')).toMatchObject({
+      pid: 4242,
+      tty: 'ttys004',
+      app: 'iTerm',
     });
   });
 

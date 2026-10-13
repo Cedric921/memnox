@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process';
 import {
   agentProcessOf,
   hostOf,
+  RunTerminals,
   SessionHosts,
   startedInPanel,
   UNNAMED_SESSION,
@@ -37,12 +38,13 @@ export async function noteSessionHost(
   try {
     const chain = readableChain(process.ppid, listing);
     const agent = agentProcessOf(chain);
-    const { tty, ...place } = hostOf(chain);
+    const ran = await runPlace(context);
+    const { tty, ...place } = ran ?? hostOf(chain);
     const panel = startedInPanel(context.entrypoint);
     await new SessionHosts(context.home).note({
       sessionId,
       agent: context.agent,
-      pid: agent?.pid ?? process.ppid,
+      pid: ran?.pid ?? agent?.pid ?? process.ppid,
       ...place,
       ...(panel ? { panel } : tty === undefined ? {} : { tty }),
       cwd: start.cwd ?? context.cwd,
@@ -55,6 +57,26 @@ export async function noteSessionHost(
     // Showing the window is a convenience: a session is never held up for it.
     log(`could not note where the session runs: ${String(err)}`);
   }
+}
+
+/**
+ * The tab `memnox run` noted for itself before its agent began. An agent that runs its tools in a
+ * terminal of its own, as Cursor's does, would otherwise be noted on that inner one, which no tab holds.
+ */
+async function runPlace(
+  context: EditHookContext,
+): Promise<{ pid: number; tty?: string; app?: string; appPath?: string } | null> {
+  if (context.runSession === undefined) return null;
+  const run = await new RunTerminals(context.home)
+    .read(context.runSession)
+    .catch(() => null);
+  if (run === null || run.tty === undefined) return null;
+  return {
+    pid: run.pid,
+    tty: run.tty,
+    ...(run.app === undefined ? {} : { app: run.app }),
+    ...(run.appPath === undefined ? {} : { appPath: run.appPath }),
+  };
 }
 
 /** Any other hook of a session nobody has noted yet, read as if it were the start. */

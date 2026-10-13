@@ -34,6 +34,7 @@ import { answeredSessionStart, beforePause, replyInSession } from './in-session'
 import { log, readStdin } from './seam-runtime';
 import { noteSessionHost } from './session-host-note';
 import { clearTerminalQuestion, noteTerminalQuestion } from './terminal-question';
+import { noteCursorAsking } from './cursor-asking';
 import { sessionEventOf } from './session-events';
 import { answerToolCall, failedToolAnswer, type ToolAnswer } from './tool-hook';
 import { DEFAULT_AGENT_NAME, TOOL_POLICY_FLAG } from './tool-hook.constants';
@@ -85,6 +86,7 @@ async function main(): Promise<void> {
   // claim and a tool to record, so the claim goes first.
   const pause = sessionEventOf(payload);
   if (await answerEdits(payload, context)) return;
+  await noteCursorAsking(payload, reply !== null, context);
   emit(reply);
   if (pause === null) return;
   const said = await beforePause(payload, pause, context, process.env);
