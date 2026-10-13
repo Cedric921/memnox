@@ -41,8 +41,9 @@ const LOOSENING: readonly string[] = [
   // A paired device answers held calls, so pairing one, or giving it more, is the person's alone.
   'pair',
   'devices',
-  // Signing in as a person lets this terminal answer the team's questions, which is theirs alone.
-  'team',
+  // Signing in as a person lets this terminal answer in their name, which is theirs alone.
+  'signin',
+  'signout',
 ];
 
 /** Reads that share a subcommand with a loosening one. */

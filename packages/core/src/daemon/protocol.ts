@@ -2,6 +2,7 @@
  * A line-delimited JSON protocol over a Unix socket, or a named pipe on Windows, kept small
  * because an interceptor asks on every command, so asking has to cost a connect and a line.
  */
+import type { MachineStanding, PersonStanding } from './person-standing';
 import type { DecisionEffect } from '../constants/decision.constants';
 import type { RunTally } from '../session/notices';
 import type { TurnTests } from '../session/turn-tests';
@@ -16,6 +17,13 @@ import { HOME_METHOD } from './home';
 import { INTERCEPT_METHOD } from './intercept';
 import { REMOTE_METHOD } from './remote';
 import { SPEECH_METHOD } from './speech';
+import type {
+  CardExcerpt,
+  CardFile,
+  DisplayHost,
+  SessionCard,
+  SessionView,
+} from './session-view';
 import type { AskIntent, MailDraft, RuleDraft } from './voice-cards';
 
 export const DAEMON_METHOD = {
@@ -67,6 +75,24 @@ export const DAEMON_METHOD = {
   SEEN: 'seen',
   /** One folder under the person's home, names and sizes only, so a phone browses the Mac without the brain or the screen. */
   FILES_LIST: 'files-list',
+  /** Whether a person is signed in on this daemon, which is what the voice and the terminal act through. */
+  PERSON: 'person',
+  /** The Mac app starting the daemon's own sign in, which answers with the code and polls behind it. */
+  PERSON_SIGN_IN: 'person-sign-in',
+  /** The Mac app signing the daemon's person out, revoking this terminal on the control plane. */
+  PERSON_SIGN_OUT: 'person-sign-out',
+  /** Whether this machine is connected to a workspace, which is what carries rules, memory and phones to it. */
+  MACHINE: 'machine',
+  /** The Mac app connecting this machine to a workspace: the device flow `memnox login` runs, polled behind the answer. */
+  MACHINE_SIGN_IN: 'machine-sign-in',
+  /** The Mac app disconnecting this machine, which forgets its credential; rules already pulled stay in force. */
+  MACHINE_SIGN_OUT: 'machine-sign-out',
+  /** Dictation written the way the person would have typed it, by their own agent CLI kept warm for it. */
+  POLISH: 'polish',
+  /** Starts the process that polishes dictation, as the key goes down, so the answer skips its cold start. */
+  POLISH_WARM: 'polish-warm',
+  /** The person's own words typed into one session, verbatim and signed over `followUpMessage`, never read by the brain. */
+  FOLLOW_UP: 'follow-up',
   ...REMOTE_METHOD,
   ...SPEECH_METHOD,
   ...HOME_METHOD,
@@ -81,6 +107,7 @@ export interface DaemonRequest extends ExtensionRequestFields {
   /**
    * The session the request is about. On ASK: the session the person has open on the phone,
    * which the brain treats as the one they follow up on; it names a session and grants nothing.
+   * On FOLLOW_UP: the session the words are typed into.
    */
   sessionId?: string;
   agent?: string;
@@ -101,16 +128,22 @@ export interface DaemonRequest extends ExtensionRequestFields {
   subject?: string;
   /** On CONFIRM: a hold answer for a held call, or confirmed / declined for a proposal. */
   answer?: string;
-  /** On CONFIRM: base64 DER ECDSA over the confirmation message. Absent on a refusal. */
+  /** On CONFIRM: base64 DER ECDSA over the confirmation message. Absent on a refusal. On FOLLOW_UP: over `followUpMessage`. */
   signature?: string;
   /** On REGISTER_KEY: the base64 X9.63 P-256 point. */
   point?: string;
-  /** On ASK: what the person said, whole, in their own words. */
+  /** On ASK: what the person said, whole, in their own words. On FOLLOW_UP: what they typed, sent as it is. */
   said?: string;
   /** On ASK: they were waited on for the rest and said nothing more, so `said` is the whole of it. */
   finished?: boolean;
   /** On ASK: how the person asked, chosen by the keys they held rather than by any word they said. */
   intent?: AskIntent;
+  /** On ASK: the Mac already greeted them out loud this sitting, so the answer does not open with another hello. */
+  greeted?: boolean;
+  /** On POLISH: where it lands (email, work_chat, prompt...), the person's spellings, and text they selected. */
+  family?: string;
+  vocabulary?: string[];
+  selection?: string;
   /**
    * On ASK: what they have said so far, sent at a pause before the Mac is sure they finished,
    * so the answer can start early. Nothing of it is said until an ask with the same words.
@@ -203,96 +236,7 @@ export interface DaemonAskChunk {
 }
 
 export { DISPLAY, DISPLAY_VIA, type DisplayKind, type DisplayVia } from './display';
-
-/** Who said a line of a session's conversation. */
-export const SPEAKER = {
-  PERSON: 'person',
-  AGENT: 'agent',
-  /** A tool the agent ran, by its name and what it was for. */
-  TOOL: 'tool',
-} as const;
-
-export type Speaker = (typeof SPEAKER)[keyof typeof SPEAKER];
-
-/** A line of the conversation itself, as the live window shows it. */
-export interface ConversationLine {
-  at: string;
-  who: Speaker;
-  text: string;
-}
-
-/** A session as one card in the switcher: who, on what, in what state, and where it runs. */
-export interface SessionCard {
-  sessionId: string;
-  /** Which agent it is, such as claude-code, so a screen can show its logo and keep its colour. */
-  agent: string;
-  agentName: string;
-  task?: string;
-  state: string;
-  thinking: boolean;
-  repository?: string;
-  runningIn?: string;
-  /** Where in that app, in words: a Terminal tab, an editor's terminal, or an agent's panel in it. */
-  where?: string;
-  lastActive?: string;
-  /** When it began, so sessions can be told apart by the order they were started in. */
-  startedAt?: string;
-  /** What it has run, so a session that only said hello is never taken for the last one that worked. */
-  actions?: number;
-  host?: DisplayHost;
-}
-
-/** One thing a session did, as the live window lists it. */
-export interface SessionViewStep {
-  at: string;
-  /** shell, file, network, mcp, git, or whatever surface the action was on. */
-  surface: string;
-  /** What it did, in a line: the operation and its target. */
-  text: string;
-  /** It failed, or was refused, which the window marks. */
-  failed?: boolean;
-  refused?: boolean;
-}
-
-/** A session as it is right now: what it is on, what it just did, and what it changed. */
-export interface SessionView {
-  sessionId: string;
-  agent: string;
-  agentName: string;
-  task?: string;
-  /** working, open, idle, quiet, ended or paused, as the sessions list says it. */
-  state: string;
-  /** Thinking through a turn even when nothing new is recorded. */
-  thinking: boolean;
-  repository?: string;
-  runningIn?: string;
-  startedAt?: string;
-  lastActive?: string;
-  waitingOnYou: number;
-  paused?: string;
-  /** What its helpers are doing, one line each. */
-  helpers: string[];
-  /** Newest last, a dozen at most. */
-  steps: SessionViewStep[];
-  files: CardFile[];
-  /** The changed lines of the file it changed most, so the code it is writing can be shown. */
-  excerpt?: CardExcerpt;
-  /** The conversation's latest lines, where the agent keeps a transcript Memnox can read. */
-  conversation?: ConversationLine[];
-}
-
-/** A file on a summary card, with its lines added and removed; a binary file has no counts. */
-export interface CardFile {
-  path: string;
-  added?: number;
-  removed?: number;
-}
-
-/** A few changed lines of one file, so the card shows the code itself and not only its name. */
-export interface CardExcerpt {
-  path: string;
-  lines: string[];
-}
+export * from './session-view';
 
 export const DAEMON_EVENT = {
   /** A call is held until a person answers it. */
@@ -357,9 +301,9 @@ export interface DaemonEvent extends ExtensionEventFields {
   trace?: TraceCard;
   /** On DRAFT, the message to put in front of the person before it is sent. */
   draft?: MailDraft;
-  /** On APP, the app's links opened in order after `host.appPath`, and what it reads as it opens. */
+  /** On APP, the app's links opened in order after `host.appPath`, and what it reads as it opens; on LINK, the one page to open. */
   app?: { links: string[]; env?: Record<string, string> };
-  /** On LAUNCH, a terminal app or an editor's agent panel rather than a terminal tab or an editor's own terminal. */
+  /** On LAUNCH, a terminal app or an editor's agent panel rather than a terminal tab; on APP, a new chat first or the prefilled words sent. */
   via?: DisplayVia;
   /** On a PROPOSAL of a rule, the rule and where it could go, so the person picks a place before Touch ID. */
   rule?: RuleDraft;
@@ -418,21 +362,6 @@ export interface WalkPage {
   lines: string[];
 }
 
-/** Where a session runs, as far as its hook could see: the app, its terminal tab and its folder. */
-export interface DisplayHost {
-  app?: string;
-  appPath?: string;
-  tty?: string;
-  cwd?: string;
-  /**
-   * The agent's own id for the conversation, which is what an editor's agent panel opens by,
-   * where Memnox keyed the session by another.
-   */
-  conversation?: string;
-  /** Lines only this session's tab shows, so the Mac can find it among a terminal app's tabs by what is in it. */
-  marks?: string[];
-}
-
 export interface DaemonResponse extends ExtensionResponseFields {
   id: number;
   ok: boolean;
@@ -459,6 +388,12 @@ export interface DaemonResponse extends ExtensionResponseFields {
   chunk?: DaemonAskChunk;
   /** On VOICE_AGENTS and CHOOSE_VOICE_AGENT, every agent the voice knows, preferred first. */
   voiceAgents?: VoiceAgentStatus[];
+  /** On PERSON, PERSON_SIGN_IN and PERSON_SIGN_OUT: where the daemon's own sign in stands. */
+  person?: PersonStanding;
+  /** On MACHINE, MACHINE_SIGN_IN and MACHINE_SIGN_OUT: whether this machine is connected to a workspace. */
+  machine?: MachineStanding;
+  /** On POLISH: the dictation as it should be typed. */
+  polished?: string;
   /** On CONFIRM and REGISTER_KEY, what happened in a word or two; on PING, which memnox answered. */
   outcome?: string;
   version?: string;

@@ -101,6 +101,15 @@ export interface Proposal {
   answer?: ProposalAnswer;
   answeredAt?: string;
   answeredBy?: string;
+  /** What carrying it out came to, for work done in the person's name, so "did it go?" is answered from fact. */
+  ran?: ProposalRan;
+}
+
+export interface ProposalRan {
+  ok: boolean;
+  /** What went out, or why it did not, in the words the tool or the workspace gave. */
+  said: string;
+  at: string;
 }
 
 export type ProposalOutcome =
@@ -154,6 +163,21 @@ export class Proposals {
     return found
       .filter((proposal) => proposal.answer === undefined && proposal.expiresAt > moment)
       .sort((a, b) => a.proposedAt.localeCompare(b.proposedAt));
+  }
+
+  /** What carrying a confirmed proposal out came to, written beside the answer. */
+  async ran(id: string, ran: ProposalRan): Promise<void> {
+    const proposal = await this.read(id);
+    if (proposal === null) return;
+    await this.records.write(id, { ...proposal, ran });
+  }
+
+  /** Every proposal raised since a moment, newest first, answered or not. */
+  async since(moment: string): Promise<Proposal[]> {
+    const found = await this.records.all();
+    return found
+      .filter((proposal) => proposal.proposedAt >= moment)
+      .sort((a, b) => b.proposedAt.localeCompare(a.proposedAt));
   }
 
   /** First answer wins; an expired proposal is never confirmed, because the person heard an old one. */

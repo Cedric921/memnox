@@ -140,9 +140,8 @@ export function workDraftOf(
     used.add(key);
     return value.split(', ');
   });
-  // The name beside the id rather than over it, so the card still shows exactly what is sent.
-  const to =
-    toName === undefined || ids.length === 0 ? ids : [`${toName} (${ids.join(', ')})`];
+  // The name alone where the brain found one, since a Slack id like U0B3QDB89Q9 tells a person nothing.
+  const to = toName === undefined || ids.length === 0 ? ids : [toName];
   const where = placeOf(args, used);
   const fields = restOf(args, used);
   return {
@@ -156,6 +155,25 @@ export function workDraftOf(
     ...(body === undefined ? {} : { body }),
     fields,
   };
+}
+
+/**
+ * The arguments with the person's own words in place of the body the card showed, or null where the body
+ * is not plain text or there is none, so an edit never lands in an argument the card did not draw as words.
+ */
+export function editedArguments(argumentsText: string, edited: string): string | null {
+  let args: unknown;
+  try {
+    args = JSON.parse(argumentsText);
+  } catch {
+    // Arguments are checked as JSON before they are proposed, so this is a record written by hand.
+    return null;
+  }
+  if (args === null || typeof args !== 'object' || Array.isArray(args)) return null;
+  const record = args as Record<string, unknown>; // narrowed to a plain object just above
+  const key = BODY_KEYS.find((each) => textOf(record[each]) !== undefined);
+  if (key === undefined || typeof record[key] !== 'string') return null;
+  return JSON.stringify({ ...record, [key]: edited });
 }
 
 /** The first of these arguments that holds anything, marked as shown. */

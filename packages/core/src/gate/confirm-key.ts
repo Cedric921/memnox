@@ -34,9 +34,17 @@ export function confirmKeyPathFor(home: string): string {
   return join(home, MEMNOX_HOME, CONFIRM_KEY_FILE);
 }
 
-/** What gets signed. The subject is a proposal or pending id, so an old signature confirms nothing new. */
-export function confirmationMessage(subject: string, answer: string): string {
-  return `memnox-confirm:v1:${subject}:${answer}`;
+/**
+ * What gets signed. The subject is a proposal or pending id, so an old signature confirms nothing new.
+ * Words the person rewrote on a draft card go last and whole, so the signature covers exactly what is sent.
+ */
+export function confirmationMessage(
+  subject: string,
+  answer: string,
+  edited?: string,
+): string {
+  if (edited === undefined) return `memnox-confirm:v1:${subject}:${answer}`;
+  return `memnox-confirm:v2:${subject}:${answer}:${edited}`;
 }
 
 export function isP256Point(point: string): boolean {

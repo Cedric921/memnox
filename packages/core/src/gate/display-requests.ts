@@ -93,6 +93,8 @@ export interface DisplayDelivery {
   told?: boolean;
   /** The target's window either side of acting, and the words read off it after, as the Mac saw them. */
   evidence?: Witness;
+  /** The paired device it happened on, by name, when a phone did it rather than the Mac. */
+  on?: string;
 }
 
 export interface DisplayInput {

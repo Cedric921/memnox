@@ -10,6 +10,9 @@ import { JsonRecordDir } from '../store/json-records';
 
 export const STARTS_DIR = 'starts';
 
+/** What every start's id begins with, so a display that opens one is told from one typed into an open chat. */
+export const START_ID_PREFIX = 'stt_';
+
 /** Long enough to hear it read back and say yes, short enough that a stale one never starts. */
 export const START_TTL_MS = 5 * 60 * 1_000;
 
@@ -146,7 +149,7 @@ export class SessionStarts {
 
   async propose(input: StartProposal): Promise<SessionStart> {
     const start: SessionStart = {
-      id: `stt_${Date.parse(input.at).toString(36)}_${shortDigest(`${input.repository}${input.task}`)}`,
+      id: `${START_ID_PREFIX}${Date.parse(input.at).toString(36)}_${shortDigest(`${input.repository}${input.task}`)}`,
       agent: input.agent,
       command: input.command,
       repository: input.repository,

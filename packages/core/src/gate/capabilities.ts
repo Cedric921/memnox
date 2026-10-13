@@ -1,5 +1,6 @@
-import { DISPLAY, type DisplayKind } from '../daemon/display';
-import { DAEMON_METHOD } from '../daemon/protocol';
+import { DISPLAY, DISPLAY_VIA, type DisplayKind } from '../daemon/display';
+import { DAEMON_METHOD, type DaemonEvent } from '../daemon/protocol';
+import { START_ID_PREFIX } from '../coordination/session-starts';
 import { PROPOSAL_KIND, type ProposedChange } from './proposals';
 
 /**
@@ -12,7 +13,7 @@ export const REMOTE_CAPABILITY = {
   ASK: 'ask',
   /** A held call, or a proposal answering one. */
   ANSWER: 'answer',
-  /** Stopping, freezing or resuming. */
+  /** Stopping, freezing or resuming, and the person's own follow up typed into a session. */
   STEER: 'steer',
   RULES: 'rules',
   REWIND: 'rewind',
@@ -53,8 +54,17 @@ const REMOTE_METHODS: Readonly<Record<string, RemoteCapability>> = {
   [DAEMON_METHOD.BRIEF]: REMOTE_CAPABILITY.ASK,
   // Hearing a line in the person's own voice, which grants nothing beyond the sound of it.
   [DAEMON_METHOD.SPEAK]: REMOTE_CAPABILITY.ASK,
+  // How a page the phone was sent to open went; the voice surface keeps it to that phone's own shows.
+  [DAEMON_METHOD.DELIVERED]: REMOTE_CAPABILITY.SEE,
+  // Giving the voice back to the Mac only takes from the phone, so the least a paired phone holds is enough.
+  [DAEMON_METHOD.VOICE_RELEASE]: REMOTE_CAPABILITY.SEE,
   [DAEMON_METHOD.DRIVE]: REMOTE_CAPABILITY.MAC,
+  // Words for an agent to act on, so the follow up also carries a Face ID signature over them.
+  [DAEMON_METHOD.FOLLOW_UP]: REMOTE_CAPABILITY.STEER,
 };
+
+/** What the phone that asked does on its own screen, so the Mac never does it as well. */
+export const PHONE_OWN_DISPLAYS: readonly DisplayKind[] = [DISPLAY.LINK];
 
 /** A confirm is allowed by what it answers, which only the subject can say. */
 export const PER_SUBJECT = 'per-subject';
@@ -88,6 +98,19 @@ export const MAC_DISPLAYS: readonly DisplayKind[] = [
 /** Of those, what only reads or tidies, so it runs under `see` with no proposal and no signature. */
 export const MAC_READS: readonly DisplayKind[] = [DISPLAY.LOOK, DISPLAY.DISMISS];
 
+/** A show that starts a new session, which is done at the Mac, so no phone may ever ask for one, sign one or drive one. */
+export function startsSession(
+  event: Pick<DaemonEvent, 'display' | 'sessionId' | 'via'>,
+): boolean {
+  if (event.display === DISPLAY.LAUNCH) return true;
+  if (event.display !== DISPLAY.APP) return false;
+  // An app show types into the chat already open unless it carries a start's id or opens a new chat.
+  return (
+    event.via === DISPLAY_VIA.NEW_CHAT ||
+    (event.sessionId?.startsWith(START_ID_PREFIX) ?? false)
+  );
+}
+
 /** The capability a remote request needs, `per-subject` for a confirm, or null when it is never remote. */
 export function remoteCapabilityFor(
   method: string,
@@ -106,7 +129,8 @@ export function proposalCapability(change: ProposedChange): RemoteCapability | n
   if (change.kind === PROPOSAL_KIND.RESUME) return REMOTE_CAPABILITY.STEER;
   if (change.kind === PROPOSAL_KIND.RULES) return REMOTE_CAPABILITY.RULES;
   if (change.kind === PROPOSAL_KIND.REWIND) return REMOTE_CAPABILITY.REWIND;
-  if (change.kind === PROPOSAL_KIND.MAC) return REMOTE_CAPABILITY.MAC;
+  if (change.kind === PROPOSAL_KIND.MAC)
+    return startsSession(change.event) ? null : REMOTE_CAPABILITY.MAC;
   // Saying something as the person is answering for them, so a phone allowed to answer may sign it.
   if (change.kind === PROPOSAL_KIND.WORK || change.kind === PROPOSAL_KIND.ACCOUNT)
     return REMOTE_CAPABILITY.ANSWER;
@@ -118,7 +142,11 @@ export function proposalCapability(change: ProposedChange): RemoteCapability | n
  * send something off the machine, and rules, rewind and commands are never driven, so all keep asking.
  */
 export function driveCovers(change: ProposedChange, deviceId: string): boolean {
-  return change.kind === PROPOSAL_KIND.MAC && change.deviceId === deviceId;
+  return (
+    change.kind === PROPOSAL_KIND.MAC &&
+    change.deviceId === deviceId &&
+    !startsSession(change.event)
+  );
 }
 
 export function isRemoteCapability(value: string): value is RemoteCapability {

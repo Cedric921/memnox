@@ -54,7 +54,8 @@ describe('what governs an agent is never the agent’s to change', () => {
     'pair',
     'pair --name hostinger',
     'devices grant dev_1 rules',
-    'team login',
+    'signin',
+    'signout',
   ])('denies `memnox %s` typed by an agent', (line) => {
     const [binary, ...args] = ['memnox', ...line.split(' ')];
     const resolved = resolveAction(binary as string, args);

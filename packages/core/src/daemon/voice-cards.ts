@@ -8,6 +8,8 @@ import type { DecisionEffect } from '../constants/decision.constants';
 /** How a person asked: holding Control and Option says what follows is a rule they want in force. */
 export const ASK_INTENT = {
   RULE: 'rule',
+  /** What they asked before a sign in, asked again by the Mac once it finished, never something said just now. */
+  RESUME: 'resume',
 } as const;
 
 export type AskIntent = (typeof ASK_INTENT)[keyof typeof ASK_INTENT];

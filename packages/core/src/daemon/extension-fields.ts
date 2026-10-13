@@ -25,6 +25,16 @@ interface TeamEventFields {
   teamAnswer?: TeamAnswerBrief;
 }
 
+interface WorkRequestFields {
+  /** On CONFIRM of a draft: the words the person rewrote on its card, which the signature then covers. */
+  edited?: string;
+}
+
+interface AccountRequestFields {
+  /** On PERSON_SIGN_IN: the Mac app's own waiting device code, so one approval signs both in. */
+  companionOf?: string;
+}
+
 interface WorkEventFields {
   /** On a PROPOSAL to act in one of the person's tools, what goes out, drawn the way that tool draws it. */
   work?: WorkDraft;
@@ -42,6 +52,8 @@ export interface ExtensionRequestFields
     FilesRequestFields,
     SpeechRequestFields,
     TeamRequestFields,
+    WorkRequestFields,
+    AccountRequestFields,
     InterceptRequestFields {}
 
 export interface ExtensionResponseFields

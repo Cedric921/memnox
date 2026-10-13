@@ -1,4 +1,5 @@
 export * from './delivery';
+export * from './person-standing';
 export * from './protocol';
 export * from './request-decode';
 export {

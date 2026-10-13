@@ -38,6 +38,8 @@ export const DISPLAY = {
   PRESS: 'press',
   /** The icons of tools the person asked for and has not signed in to; each opens that tool's own sign in. */
   SIGN_IN: 'signin',
+  /** A web page the person asked to open, its one http or https address in `links`, opened in their browser. */
+  LINK: 'link',
 } as const;
 
 export type DisplayKind = (typeof DISPLAY)[keyof typeof DISPLAY];
@@ -50,6 +52,11 @@ export const DISPLAY_VIA = {
   PANEL: 'panel',
   /** On APP, a new chat started in the app before the words are typed, rather than the one open. */
   NEW_CHAT: 'new-chat',
+  /**
+   * On APP, the words the app's own prompt link left in its chat sent with Return, only once the Mac
+   * reads them in the focused chat input; the Mac answers verified when it sent them.
+   */
+  SEND_PREFILLED: 'send-prefilled',
 } as const;
 
 export type DisplayVia = (typeof DISPLAY_VIA)[keyof typeof DISPLAY_VIA];

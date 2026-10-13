@@ -68,11 +68,15 @@ export class SessionPosts {
     await this.records.remove(SessionPosts.idFor(kind, sessionId));
   }
 
-  /** Still worth telling, oldest first. */
+  /** Still worth telling, oldest first; a question dated ahead waits, since the agent may run it at once. */
   async open(moment: string): Promise<SessionPost[]> {
     const found = await this.records.all();
     return found
-      .filter((post) => post.expiresAt > moment)
+      .filter(
+        (post) =>
+          post.expiresAt > moment &&
+          (post.kind !== POST_KIND.ASKING || post.at <= moment),
+      )
       .sort((a, b) => a.at.localeCompare(b.at));
   }
 }

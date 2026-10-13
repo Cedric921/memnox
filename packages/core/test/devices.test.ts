@@ -12,6 +12,7 @@ import {
   proposalCapability,
   REMOTE_CAPABILITY,
   remoteCapabilityFor,
+  startsSession,
 } from '../src/gate/capabilities';
 import { ConfirmKeys } from '../src/gate/confirm-key';
 import {
@@ -172,6 +173,9 @@ describe('the capability table', () => {
     expect(remoteCapabilityFor(DAEMON_METHOD.FILES_LIST)).toBe('see');
     expect(remoteCapabilityFor(DAEMON_METHOD.SPEAK)).toBe('ask');
     expect(remoteCapabilityFor(DAEMON_METHOD.SPEAK, 'bm_george')).toBe('ask');
+    expect(remoteCapabilityFor(DAEMON_METHOD.DELIVERED)).toBe('see');
+    expect(remoteCapabilityFor(DAEMON_METHOD.FOLLOW_UP)).toBe('steer');
+    expect(remoteCapabilityFor(DAEMON_METHOD.VOICE_RELEASE)).toBe('see');
     for (const local of [
       DAEMON_METHOD.PAIR_BEGIN,
       DAEMON_METHOD.PAIR_ACCEPT,
@@ -181,7 +185,6 @@ describe('the capability table', () => {
       DAEMON_METHOD.REGISTER_KEY,
       DAEMON_METHOD.EVALUATE,
       DAEMON_METHOD.HOLD,
-      DAEMON_METHOD.DELIVERED,
     ]) {
       expect(remoteCapabilityFor(local), local).toBeNull();
     }
@@ -234,5 +237,35 @@ describe('the capability table', () => {
     expect(
       driveCovers({ kind: PROPOSAL_KIND.RULES, file: '/f', rules: [] }, 'dev_1'),
     ).toBe(false);
+  });
+
+  it('never lets a phone sign or drive a show that starts a session, which is done at the Mac', () => {
+    const show = {
+      kind: 'show',
+      subject: 'dsp_1',
+      agent: 'claude-code',
+      summary: 's',
+      at: NOW,
+    } as const;
+    const launch = { ...show, display: 'launch', sessionId: 'stt_1' } as const;
+    const appStart = { ...show, display: 'app', sessionId: 'stt_2' } as const;
+    const newChat = {
+      ...show,
+      display: 'app',
+      sessionId: 'app_codex',
+      via: 'new-chat',
+    } as const;
+    const typed = { ...show, display: 'app', sessionId: 'app_codex' } as const;
+
+    for (const event of [launch, appStart, newChat]) {
+      expect(startsSession(event), event.display).toBe(true);
+      const mac = { kind: PROPOSAL_KIND.MAC, deviceId: 'dev_1', event };
+      expect(proposalCapability(mac)).toBeNull();
+      expect(driveCovers(mac, 'dev_1')).toBe(false);
+    }
+    expect(startsSession(typed)).toBe(false);
+    expect(
+      proposalCapability({ kind: PROPOSAL_KIND.MAC, deviceId: 'dev_1', event: typed }),
+    ).toBe('mac');
   });
 });

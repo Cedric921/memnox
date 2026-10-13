@@ -21,10 +21,15 @@ const FIELD_TYPES: Readonly<Record<string, 'string' | 'number' | 'boolean'>> = {
   subject: 'string',
   answer: 'string',
   signature: 'string',
+  // A phone's rewritten words reach the confirm from afar, so anything but text is refused before it is trimmed.
+  edited: 'string',
   point: 'string',
   said: 'string',
   finished: 'boolean',
   intent: 'string',
+  greeted: 'boolean',
+  family: 'string',
+  selection: 'string',
   speculative: 'boolean',
   lookingAt: 'string',
   lookingAtWindow: 'string',
@@ -35,7 +40,7 @@ const FIELD_TYPES: Readonly<Record<string, 'string' | 'number' | 'boolean'>> = {
   voiceAgent: 'string',
   told: 'boolean',
 };
-const LIST_FIELDS: readonly string[] = ['learned', 'spans'];
+const LIST_FIELDS: readonly string[] = ['learned', 'spans', 'vocabulary'];
 const OBJECT_FIELDS: readonly string[] = ['proof', 'sight', 'evidence'];
 
 /** Null rather than a throw: a garbled line is a bad client, not a crash. */

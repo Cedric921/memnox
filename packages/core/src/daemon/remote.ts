@@ -23,6 +23,8 @@ export const REMOTE_METHOD = {
   VOICE_CHOICE: 'voice-choice',
   /** A phone driving the Mac until a time it signed for, or stopping when it names none. */
   DRIVE: 'drive',
+  /** A phone whose app left the screen handing the voice back to the Mac, unsigned since it only gives power up. */
+  VOICE_RELEASE: 'voice-release',
 } as const;
 
 /** What a remote or pairing answer settled, in the words the contract names. */
@@ -173,6 +175,26 @@ export function grantMessage(deviceId: string, capability: string): string {
 export function driveMessage(deviceId: string, until: string): string {
   return `memnox-drive:v1:${deviceId}:${until}`;
 }
+
+/**
+ * What a person signs to type their own words into one session, the words included so a signature
+ * for one message never carries another. The Mac's key or the asking phone's, after Touch ID or Face ID.
+ */
+export function followUpMessage(sessionId: string, words: string): string {
+  return `memnox-follow-up:v1:${sessionId}:${words}`;
+}
+
+/** How a follow up reached its session, for the screen that sent it to say in its own words. */
+export const FOLLOW_UP_OUTCOME = {
+  /** Working: it reads the words at its next step. */
+  QUEUED: 'queued',
+  /** Waiting at its prompt: the Mac is typing the words in and sending them. */
+  TYPED: 'typed',
+  /** Waiting where nothing can type: it reads the words the next time it is prompted. */
+  LATER: 'later',
+} as const;
+
+export type FollowUpOutcome = (typeof FOLLOW_UP_OUTCOME)[keyof typeof FOLLOW_UP_OUTCOME];
 
 /** What a phone signs at pairing to prove it holds the key it sent. */
 export function deviceProofMessage(handshakeHash: Buffer): string {
