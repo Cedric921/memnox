@@ -183,7 +183,8 @@ function openWebSocket(url: string, token: string): RelaySocket {
       // Text and binary arrive as one event; the relay's control frames are the only text.
       socket.addEventListener(event === 'text' ? 'message' : event, (message) => {
         if (event === 'text') {
-          if (typeof message.data === 'string') listener(Buffer.from(message.data, 'utf8'));
+          if (typeof message.data === 'string')
+            listener(Buffer.from(message.data, 'utf8'));
           return;
         }
         if (event !== 'message') return listener(Buffer.alloc(0));
