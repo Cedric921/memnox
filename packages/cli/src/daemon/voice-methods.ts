@@ -31,6 +31,7 @@ const VOICE_METHODS: readonly string[] = [
   DAEMON_METHOD.MACHINE_SIGN_OUT,
   DAEMON_METHOD.POLISH,
   DAEMON_METHOD.POLISH_WARM,
+  DAEMON_METHOD.FOLLOW_UP,
 ];
 
 export function isVoiceMethod(method: string): boolean {

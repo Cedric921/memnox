@@ -34,6 +34,7 @@ import {
   type VoiceAgentRoster,
 } from './voice-agent-calls';
 import { confirmAnswer, type RemotePrincipal } from './confirm';
+import { followUpAnswer, followUpDeps } from './follow-up';
 import { answerMachine, isMachineMethod, type MachineSignIns } from './machine-calls';
 import { answerPerson, isPersonMethod, type PersonSignIns } from './person-calls';
 export { isVoiceMethod } from './voice-methods';
@@ -261,6 +262,12 @@ export class VoiceSurface {
     if (isVoiceAgentMethod(request.method)) {
       return answerVoiceAgents(request, this.deps.voiceAgents);
     }
+    if (request.method === DAEMON_METHOD.FOLLOW_UP)
+      return followUpAnswer(
+        request,
+        followUpDeps(this.deps, this.views, this.router),
+        principal,
+      );
     return this.confirm(request, principal);
   }
 
