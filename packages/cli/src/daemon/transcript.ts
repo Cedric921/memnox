@@ -84,6 +84,18 @@ function everyLineIn(raw: string): ConversationLine[] {
   return lines;
 }
 
+/** Enough of a session's start to hold its first request after whatever the agent loads first. */
+const HEAD_BYTES = 256 * 1_024;
+
+/** The person's first words in the session, which say what it was opened for, or null before they said any. */
+export function readOpeningAsk(path: string): string | null {
+  return openingAskIn(headOf(path));
+}
+
+export function openingAskIn(raw: string): string | null {
+  return everyLineIn(raw).find((line) => line.who === SPEAKER.PERSON)?.text ?? null;
+}
+
 /** Long enough to answer "what did it find" from, short enough to never be a report read aloud. */
 const MOST_ANSWER_CHARS = 1_500;
 
@@ -333,6 +345,24 @@ function parsed(line: string): Entry | null {
   } catch {
     // A line cut where the tail began, or one still being written.
     return null;
+  }
+}
+
+/** The first stretch of a file, since a session's opening request never moves from its start. */
+function headOf(path: string, bytes: number = HEAD_BYTES): string {
+  try {
+    const fd = openSync(path, 'r');
+    try {
+      const length = Math.min(fstatSync(fd).size, bytes);
+      const buffer = Buffer.alloc(length);
+      readSync(fd, buffer, 0, length, 0);
+      return buffer.toString('utf8');
+    } finally {
+      closeSync(fd);
+    }
+  } catch {
+    // Gone or unreadable: the card says what else it knows of the session.
+    return '';
   }
 }
 

@@ -9,6 +9,7 @@ import {
   NodeWorktree,
   REPLAY_STEP,
   SessionHosts,
+  SPEAKER,
   type CardExcerpt,
   type CardFile,
   type DisplayHost,
@@ -27,7 +28,13 @@ import type { SessionToolDeps } from '../session-tools/read-tools';
 import type { RewindSeams } from '../session-tools/rewind-tool';
 import { SESSION_STATE, sessionsTool } from '../session-tools/sessions-tool';
 import { excerptOf, type ChangedFile } from '../session-tools/show-tool';
-import { readConversation, readLastAnswer, sessionTranscript } from './transcript';
+import {
+  readConversation,
+  readLastAnswer,
+  readOpeningAsk,
+  sessionTranscript,
+} from './transcript';
+import { branchAt, repositoryAround } from '../session-tools/repository-root';
 import {
   desktopConversation,
   desktopRoots,
@@ -54,11 +61,14 @@ const MOST_FILES = 8;
 const MOST_STEP_CHARS = 90;
 /** The window polls every couple of seconds, and a diff of the tree is not that cheap. */
 const FILES_FRESH_MS = 8_000;
+/** As much of the agent's last answer as a card shows, where the work stands rather than the whole report. */
+const MOST_LAST_SAID_CHARS = 320;
 
 interface SessionRow {
   session: string;
   agent: string;
   task?: string;
+  lastAsk?: string;
   state: string;
   turn?: string;
   repositories: string[];
@@ -81,6 +91,8 @@ const MOST_DESKTOP_LINES = 14;
 
 export class SessionViews {
   private readonly files = new Map<string, { at: number; code: Code }>();
+  /** Each session's first request once found, since it never changes and the card asks every poll. */
+  private readonly openings = new Map<string, string>();
 
   constructor(
     private readonly home: string,
@@ -124,33 +136,30 @@ export class SessionViews {
     const rows = (await sessionsTool(deps, { hours: '72' })) as SessionRow[];
     const row = rows.find((each) => each.session === sessionId);
     if (row === undefined) return null;
-    const [steps, { files, excerpt }, names] = await Promise.all([
+    const [steps, code, names, host, lastSaid] = await Promise.all([
       this.steps(sessionId),
       this.changed(deps, sessionId),
       readNames(this.home),
+      new SessionHosts(this.home).read(sessionId).catch(() => null),
+      this.lastAnswer(sessionId).catch(() => null),
     ]);
-    const repository = row.repositories[0];
-    return {
+    // A session that only ran commands wrote nowhere, so the folder it was opened in names its repository.
+    const opened = host?.cwd === undefined ? null : repositoryAround(host.cwd);
+    const repository = row.repositories[0] ?? opened ?? undefined;
+    const root = repository === undefined ? null : repositoryAround(repository);
+    const branch = root === null ? null : branchAt(root);
+    const task = row.task ?? (await this.openingAsk(sessionId));
+    return viewOf(row, {
       sessionId,
-      agent: row.agent,
       agentName: nameOf(names, row.agent),
-      state: row.state,
-      thinking: row.turn === 'in progress',
-      waitingOnYou: row.waitingOnYou,
-      helpers: helpersOf(row),
       steps,
-      files,
-      ...(excerpt === undefined ? {} : { excerpt }),
-      ...(row.task === undefined ? {} : { task: row.task }),
-      ...(repository === undefined ? {} : { repository: basename(repository) }),
-      ...(row.runningIn === undefined ? {} : { runningIn: row.runningIn }),
-      ...(row.started === undefined || row.started === ''
-        ? {}
-        : { startedAt: row.started }),
-      ...(row.lastActive === undefined ? {} : { lastActive: row.lastActive }),
-      ...(row.paused === undefined ? {} : { paused: row.paused }),
-      ...(await this.conversation(sessionId)),
-    };
+      code,
+      task,
+      repository,
+      branch,
+      lastSaid,
+      conversation: await this.conversation(sessionId),
+    });
   }
 
   /** What the agent said to end its latest turn, in full, for the voice to answer "what did it find". */
@@ -158,6 +167,27 @@ export class SessionViews {
     if (isHermesSession(sessionId)) return hermesLastAnswer(this.transcripts, sessionId);
     const path = await sessionTranscript(this.home, sessionId, this.transcripts);
     return path === null ? null : readLastAnswer(path);
+  }
+
+  /** What the session was opened for when no task was noted: the person's first request in it, kept once found. */
+  private async openingAsk(sessionId: string): Promise<string | undefined> {
+    const kept = this.openings.get(sessionId);
+    if (kept !== undefined) return kept;
+    const desktop = desktopSessionById(desktopRoots(this.home), sessionId);
+    const path =
+      desktop === null
+        ? await sessionTranscript(this.home, sessionId, this.transcripts)
+        : null;
+    const found =
+      desktop === null
+        ? path === null
+          ? null
+          : readOpeningAsk(path)
+        : (desktopConversation(desktop).find((line) => line.who === SPEAKER.PERSON)
+            ?.text ?? null);
+    if (found === null) return undefined;
+    this.openings.set(sessionId, found);
+    return found;
   }
 
   /** What was said, read from the agent's own transcript, or nothing where it keeps none Memnox can read. */
@@ -263,6 +293,22 @@ async function changesIn(
   return (await changesTool(deps, SEAMS, args).catch(() => ({}))) as Changes;
 }
 
+/** The start of the agent's last answer, cut at a word, since the card shows where things stand rather than the report. */
+function clipped(text: string): string {
+  // Markdown marks read as stray symbols on a card, so headings, bullets, bold and code ticks go.
+  const flat = text
+    .split('\n')
+    .map((line) => line.replace(/^\s*(#+|[-*]|\d+\.)\s+/, ''))
+    .join(' ')
+    .replace(/\*\*|__|`/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (flat.length <= MOST_LAST_SAID_CHARS) return flat;
+  const cut = flat.slice(0, MOST_LAST_SAID_CHARS);
+  const space = cut.lastIndexOf(' ');
+  return `${space > 0 ? cut.slice(0, space) : cut}…`;
+}
+
 function workingNow(row: SessionRow): boolean {
   return row.turn === 'in progress' || row.state === 'working';
 }
@@ -295,6 +341,51 @@ function cardOf(row: SessionRow, names: Names, host: SessionHost | null): Sessio
       ? {}
       : { startedAt: row.started }),
     ...(host === null ? {} : { host: hostOf(host) }),
+  };
+}
+
+/** What view gathered beside the session's row, for viewOf to lay out. */
+interface Gathered {
+  sessionId: string;
+  agentName: string;
+  steps: SessionViewStep[];
+  code: Code;
+  task: string | undefined;
+  repository: string | undefined;
+  branch: string | null;
+  lastSaid: string | null;
+  conversation: { conversation?: ConversationLine[] };
+}
+
+function viewOf(row: SessionRow, gathered: Gathered): SessionView {
+  const { sessionId, agentName, steps, code, task, repository, branch, lastSaid } =
+    gathered;
+  return {
+    sessionId,
+    agent: row.agent,
+    agentName,
+    state: row.state,
+    thinking: row.turn === 'in progress',
+    waitingOnYou: row.waitingOnYou,
+    helpers: helpersOf(row),
+    steps,
+    files: code.files,
+    ...(code.excerpt === undefined ? {} : { excerpt: code.excerpt }),
+    ...(task === undefined ? {} : { task }),
+    ...(row.lastAsk === undefined || row.lastAsk === task
+      ? {}
+      : { lastAsk: row.lastAsk }),
+    ...(repository === undefined ? {} : { repository: basename(repository) }),
+    ...(branch === null ? {} : { branch }),
+    ...(row.runningIn === undefined ? {} : { runningIn: row.runningIn }),
+    ...(row.where === undefined ? {} : { where: row.where }),
+    ...(lastSaid === null ? {} : { lastSaid: clipped(lastSaid) }),
+    ...(row.started === undefined || row.started === ''
+      ? {}
+      : { startedAt: row.started }),
+    ...(row.lastActive === undefined ? {} : { lastActive: row.lastActive }),
+    ...(row.paused === undefined ? {} : { paused: row.paused }),
+    ...gathered.conversation,
   };
 }
 

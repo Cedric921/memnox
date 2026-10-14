@@ -14,12 +14,15 @@ import { repositoryAround } from './repository-root';
 import { scopeOf } from './session-scope';
 
 /**
- * Which branch a session's repository is on and the commits made there since it started,
- * read from git itself, so "read the commit it just made" has the commit to read.
+ * Which branch a session's repository is on, the commits made there since it started and the
+ * branch's latest commits whoever made them, read from git itself, so "read the commit it just
+ * made" and "what was the last commit" both have the commit to read.
  */
 
 /** Enough commits to cover a working session, few enough to say out loud. */
 const MOST_COMMITS = 10;
+/** The branch's newest few, enough for "the last commit" and what came just before it. */
+const LATEST_COMMITS = 5;
 /** Enough repositories for one question, never a sweep of every folder touched. */
 const MOST_REPOSITORIES = 3;
 /** How far back to look for repositories and commits when no session is named or found. */
@@ -30,6 +33,14 @@ interface Commit {
   at: string;
   subject: string;
   files: string[];
+}
+
+/** A commit on the branch whoever made it, so the last commit is known though the session made none. */
+interface LatestCommit {
+  sha: string;
+  at: string;
+  author: string;
+  subject: string;
 }
 
 export async function repositoryTool(
@@ -116,12 +127,16 @@ async function describeRepository(
       '--format=%x1e%h%x1f%aI%x1f%s',
     ])
     .catch(() => '');
+  const latest = await git
+    .run(['log', '-n', String(LATEST_COMMITS), '--format=%h%x1f%aI%x1f%an%x1f%s'])
+    .catch(() => '');
   const status = await git.run(['status', '--porcelain=v1']).catch(() => null);
   return {
     repository: place,
     name: basename(place),
     branch,
     commits: commitsIn(log),
+    latestCommits: latestIn(latest),
     ...(status === null ? {} : { uncommitted: uncommittedIn(status) }),
   };
 }
@@ -149,5 +164,16 @@ function commitsIn(log: string): Commit[] {
       const [head = '', ...files] = record.split('\n');
       const [sha = '', at = '', subject = ''] = head.split('\u001f');
       return { sha, at, subject, files: files.filter((each) => each !== '') };
+    });
+}
+
+/** One commit a line, newest first, as its short id, time, author and message. */
+function latestIn(log: string): LatestCommit[] {
+  return log
+    .split('\n')
+    .filter((each) => each.trim() !== '')
+    .map((line) => {
+      const [sha = '', at = '', author = '', subject = ''] = line.split('\u001f');
+      return { sha, at, author, subject };
     });
 }

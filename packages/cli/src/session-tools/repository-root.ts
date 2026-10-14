@@ -1,5 +1,5 @@
-import { existsSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { existsSync, readFileSync, statSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
 
 /**
  * The repository a folder is in, found on the disk rather than by starting git, since a session
@@ -32,4 +32,28 @@ export function repositoryAround(folder: string): string | null {
   }
   if (found !== null) ROOTS_FOUND.set(folder, found);
   return found;
+}
+
+/** What HEAD holds while a branch is checked out, before the branch's name. */
+const BRANCH_REF = 'ref: refs/heads/';
+/** What a worktree's own `.git` file says before the folder git keeps for it. */
+const GITDIR_LINE = /^gitdir:\s*(.+)$/m;
+
+/**
+ * The branch a repository has checked out, read from its HEAD on the disk, since a card polled
+ * every few seconds should not start git for it; null when detached or unreadable.
+ */
+export function branchAt(root: string): string | null {
+  try {
+    const marker = join(root, GIT_MARKER);
+    const pointer = statSync(marker).isFile()
+      ? GITDIR_LINE.exec(readFileSync(marker, 'utf8'))?.[1]?.trim()
+      : marker;
+    if (pointer === undefined) return null;
+    const head = readFileSync(join(resolve(root, pointer), 'HEAD'), 'utf8').trim();
+    return head.startsWith(BRANCH_REF) ? head.slice(BRANCH_REF.length) : null;
+  } catch {
+    // Not a repository any more, or one git is rewriting this moment.
+    return null;
+  }
 }

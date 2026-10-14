@@ -359,6 +359,7 @@ function requestedHost(request: DisplayRequest): { host?: DisplayHost } {
       ...(request.cwd === undefined ? {} : { cwd: request.cwd }),
       ...(request.appPath === undefined ? {} : { appPath: request.appPath }),
       ...(request.tty === undefined ? {} : { tty: request.tty }),
+      ...(request.marks === undefined ? {} : { marks: request.marks }),
     },
   };
 }

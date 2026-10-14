@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { realpathSync } from 'node:fs';
 import { mkdir, mkdtemp, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   SessionHosts,
@@ -135,5 +135,68 @@ describe('the live window on a session', () => {
         '+export const total = 0;',
       ],
     });
+  });
+
+  it('says what a session is about from its first request, with its branch, where it runs and where it stands', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'memnox-live-'));
+    const repo = realpathSync(await mkdtemp(join(tmpdir(), 'memnox-live-repo-')));
+    execFileSync('git', ['init', '-q', '-b', 'feat/cancel'], {
+      cwd: repo,
+      stdio: 'ignore',
+    });
+    const agentSession = 'a1b2c3d4-0000-4000-8000-000000000001';
+    await new SessionHosts(home).note({
+      sessionId: 'ses_about',
+      agent: 'claude-code',
+      pid: process.pid,
+      seenAt: '2026-10-02T11:50:00.000Z',
+      cwd: repo,
+      app: 'Terminal',
+      tty: '/dev/ttys004',
+      agentSession,
+    });
+    const store = SqliteEventStore.forHome(home);
+    await store.append(
+      row({
+        sessionId: 'ses_about',
+        surface: 'shell',
+        operation: 'shell.exec',
+        target: 'ls',
+      }),
+    );
+    store.close();
+    const line = (value: unknown): string => JSON.stringify(value);
+    await mkdir(join(home, '.claude', 'projects', 'repo'), { recursive: true });
+    await writeFile(
+      join(home, '.claude', 'projects', 'repo', `${agentSession}.jsonl`),
+      [
+        line({
+          type: 'user',
+          timestamp: 't1',
+          message: { content: 'add order cancellation to the cart' },
+        }),
+        line({
+          type: 'assistant',
+          timestamp: 't2',
+          message: {
+            content: [
+              {
+                type: 'text',
+                text: '## Done\n- The **cancel** button is in `Cart.tsx`.',
+              },
+            ],
+          },
+        }),
+      ].join('\n'),
+    );
+
+    const view = await new SessionViews(home, () => NOW).view('ses_about');
+    expect(view).toMatchObject({
+      task: 'add order cancellation to the cart',
+      branch: 'feat/cancel',
+      where: expect.stringContaining('Terminal'),
+      lastSaid: 'Done The cancel button is in Cart.tsx.',
+    });
+    expect(view?.repository).toBe(basename(repo));
   });
 });
