@@ -27,7 +27,7 @@ import {
   teamScope,
 } from '../protect/rule-scope';
 import { textArg, type SessionToolDeps, type ToolArgs } from './read-tools';
-import { knownRepositories, repositoryNamed } from './start-tools';
+import { knownRepositories, repositoryNamed } from './known-repositories';
 import { teamCallsNow } from '../daemon/team-calls-store';
 
 /**
@@ -49,7 +49,7 @@ const SPOKEN_ANSWERS: readonly string[] = [
 ];
 
 /** Who the ledger says refused, since the operator only passed on what the person said. */
-const BY_VOICE = 'person (voice)';
+export const BY_VOICE = 'person (voice)';
 
 const RULE_EFFECTS: readonly string[] = Object.values(DECISION_EFFECT);
 

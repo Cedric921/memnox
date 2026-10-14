@@ -94,7 +94,7 @@ export async function waitingOnYes(
   return [
     ...starts.map(
       (each) =>
-        `start ${agentShown(each.agent)} in ${basename(each.repository)} on "${each.task}": on their yes, call start_session with start ${each.id}`,
+        `start ${agentShown(each.agent)} ${each.repository === undefined ? 'in its app with no folder' : `in ${basename(each.repository)}`} on "${each.task}": on their yes, call start_session with start ${each.id}`,
     ),
     ...instructions.map(
       (each) =>

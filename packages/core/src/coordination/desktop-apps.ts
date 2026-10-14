@@ -113,6 +113,7 @@ export function appLaunch(start: SessionStart): AppLaunch {
     ...(start.app === undefined ? {} : { appPath: start.app }),
     ...(task === '' ? {} : { typed: task }),
   };
+  if (folder === undefined) return chatLaunch(start, opened, task);
   switch (start.agent) {
     case 'codex':
       return { ...opened, links: [`codex://threads/new?${query({ path: folder })}`] };
@@ -134,6 +135,25 @@ export function appLaunch(start: SessionStart): AppLaunch {
       // Hermes opens on the folder it is launched with and has no link of its own for a chat.
       return { ...opened, env: { HERMES_DESKTOP_CWD: folder }, links: [] };
   }
+}
+
+/**
+ * A chat with no folder, for a question that is about no project: the app comes forward and the
+ * task is typed into a new chat there, except Cursor, whose chat its prompt link fills.
+ */
+function chatLaunch(
+  start: SessionStart,
+  opened: Pick<AppLaunch, 'appPath' | 'typed'>,
+  task: string,
+): AppLaunch {
+  if (start.agent !== 'cursor') return { ...opened, links: [] };
+  return {
+    ...(start.app === undefined ? {} : { appPath: start.app }),
+    links:
+      task === ''
+        ? []
+        : [`cursor://anysphere.cursor-deeplink/prompt?${query({ text: task })}`],
+  };
 }
 
 /** Every value percent encoded, spaces as %20, since an app's handler decodes it and never `+`. */

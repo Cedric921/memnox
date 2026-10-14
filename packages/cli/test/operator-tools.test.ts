@@ -141,11 +141,11 @@ async function stamp(path: string, moment: string): Promise<void> {
 }
 
 describe('what the operator is offered', () => {
-  it("reads, and writes nothing but a proposal, a pause, a watch, the person's answer to their agent's question in its picker or its terminal, their words typed into an agent's app, an app they named stopped or closed, a word they were misheard saying, what they told it about themselves, its own screenshots forgotten, a folder to open or make, or a request to show or start what the person said yes to", () => {
+  it("reads, and writes nothing but a proposal, a pause, a watch, the person's answer to their agent's question in its picker or its terminal, their words typed into an agent's app, an app they named stopped or closed, a word they were misheard saying, what they told it about themselves, its own screenshots forgotten, a folder to open or make, a draft it put up withdrawn, a page opened, a list put on screen, or a request to show or start what the person said yes to", () => {
     for (const tool of OPERATOR_TOOLS) {
       if (tool.annotations.readOnlyHint) continue;
       expect(tool.name).toMatch(
-        /^(propose_|show$|pause_session$|send_instruction$|type_in_app$|control_app$|answer_question$|answer_agent$|watch_for$|walk_through$|start_session$|show_agents$|memnox_command$|traces$|remember_word$|forget_word$|remember_about_me$|forget_about_me$|forget_screen$|open_folder$|create_folder$)/,
+        /^(propose_|show$|pause_session$|send_instruction$|type_in_app$|control_app$|answer_question$|answer_agent$|watch_for$|walk_through$|start_session$|show_agents$|memnox_command$|traces$|remember_word$|forget_word$|remember_about_me$|forget_about_me$|forget_screen$|open_folder$|create_folder$|withdraw$|open_link$|show_list$)/,
       );
     }
   });
@@ -1262,6 +1262,47 @@ describe('which branch, and what a session committed', () => {
       total: 1,
       shown: ['M orders.ts'],
     });
+  });
+
+  it('reads the last commit on the branch though the session made none', async () => {
+    const deps = await depsAt();
+    const repo = await mkdtemp(join(tmpdir(), 'memnox-cloud-'));
+    git(repo, 'init', '-q', '-b', 'main');
+    await writeFile(join(repo, 'orders.ts'), 'one\n');
+    git(repo, 'add', '.');
+    gitAt(repo, '2026-09-28T10:00:00Z', 'commit', '-q', '-m', 'feat: take orders');
+    await writeFile(join(repo, 'orders.ts'), 'two\n');
+    gitAt(repo, '2026-09-29T10:00:00Z', 'commit', '-q', '-am', 'fix: cancel an order');
+    await new SessionHosts(deps.home).note({
+      sessionId: 'ses_reader',
+      agent: 'claude-code',
+      pid: process.pid,
+      seenAt: '2026-09-30T11:00:00.000Z',
+      cwd: repo,
+    });
+    await recorded(deps.home, [
+      event('ses_reader', 'claude-code', { surface: 'shell', operation: 'shell.exec' }),
+    ]);
+
+    const answer = (await callOperatorTool(deps, SEAMS, 'repository', {
+      session: 'ses_reader',
+    })) as {
+      repositories: {
+        commits: unknown[];
+        latestCommits: { sha: string; author: string; subject: string; at: string }[];
+      }[];
+    };
+    const [found] = answer.repositories;
+    expect(found?.commits).toEqual([]);
+    expect(found?.latestCommits.map((each) => each.subject)).toEqual([
+      'fix: cancel an order',
+      'feat: take orders',
+    ]);
+    expect(found?.latestCommits[0]?.sha).toMatch(/^[0-9a-f]{7,}$/);
+    expect(found?.latestCommits[0]?.author).not.toBe('');
+    expect(Date.parse(found?.latestCommits[0]?.at ?? '')).toBe(
+      Date.parse('2026-09-29T10:00:00Z'),
+    );
   });
 });
 

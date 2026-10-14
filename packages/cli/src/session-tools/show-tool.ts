@@ -27,6 +27,7 @@ import { stopSession } from './stop-tool';
 import { closeSessionNow } from './close-tool';
 import { liveHost } from './live-host';
 import { sessionMarks } from './session-marks';
+import { placeBeforeHook, type PlaceBeforeHook } from './start-memory';
 import { paneOn, showPane } from './multiplexer';
 import {
   APP_SESSION_PREFIX,
@@ -112,13 +113,16 @@ async function putUp(
   if (display === DISPLAY.CARD && text === undefined) {
     return { shown: false, said: 'A card needs text: the summary you are about to say.' };
   }
-  const { host, openAt } = await whereItRuns(deps, sessionId);
+  const { host, openAt, early } = await whereItRuns(deps, sessionId);
   // A session in an agent's own desktop app has no tab or folder, so the app itself is what comes forward.
-  const appPath = host === null ? desktopAppOf(deps, sessionId) : null;
+  const appPath =
+    host === null ? (desktopAppOf(deps, sessionId) ?? early?.appPath ?? null) : null;
   const code = display === DISPLAY.CARD ? await codeFor(deps, seams, sessionId) : {};
   const shownIn = display === DISPLAY.FOCUS ? paneShownIn(deps, host) : null;
   const marks =
-    display === DISPLAY.FOCUS ? await sessionMarks(deps, sessionId, host) : [];
+    display === DISPLAY.FOCUS
+      ? [...(await sessionMarks(deps, sessionId, host)), ...(early?.marks ?? [])]
+      : [];
   const request = await new DisplayRequests(deps.home).request({
     ...code,
     ...(shownIn === null ? {} : { shownIn }),
@@ -130,6 +134,8 @@ async function putUp(
     ...(text === undefined ? {} : { text }),
     ...(openAt === undefined ? {} : { cwd: openAt }),
     ...(appPath === null ? {} : { appPath }),
+    // The tab its run noted, for a session whose agent has not acted yet and so has no host.
+    ...(early?.tty === undefined ? {} : { tty: early.tty }),
     at: deps.now().toISOString(),
   });
   const [showing, failed] = await Promise.all([
@@ -284,16 +290,23 @@ function desktopAppOf(deps: SessionToolDeps, sessionId: string): string | null {
 async function whereItRuns(
   deps: SessionToolDeps,
   sessionId: string,
-): Promise<{ host: SessionHost | null; openAt?: string }> {
+): Promise<{ host: SessionHost | null; openAt?: string; early?: PlaceBeforeHook }> {
   const host = await new SessionHosts(deps.home).read(sessionId);
+  // No hook noted it yet, as for an agent still asking its first question, so its run or its start says where.
+  const early =
+    host === null
+      ? ((await placeBeforeHook(deps.home, sessionId)) ?? undefined)
+      : undefined;
   // Where it runs was never noted, so its repository is opened in the editor instead.
   const place =
     host?.cwd ??
+    early?.cwd ??
     (host === null
       ? ((await folderOf(deps, sessionId)) ?? (await justStartedIn(deps, sessionId)))
       : undefined);
   // The window the person already has open, never a worktree or subfolder that makes a new one.
-  return place === undefined ? { host } : { host, openAt: mainCheckoutOf(place) };
+  const found = early === undefined ? { host } : { host, early };
+  return place === undefined ? found : { ...found, openAt: mainCheckoutOf(place) };
 }
 
 export interface ChangedFile {
@@ -367,7 +380,7 @@ const ALL_SHOWN =
   'Every session is on their screen now as a card of its own, all at once, each with Watch live and Open on it. Say so in one sentence, then how many are working, from the session list you were given. Never read the cards out one by one.';
 
 const ON_SCREEN =
-  'The card is on their screen in the top left corner, not in any app, with your summary laid out as written and the files it changed. Say in a whole sentence that the summary is on screen, then give the gist in two sentences of plain speech; never read the card out.';
+  'The card is on their screen in the top left corner, not in any app, with your summary laid out as written and the files it changed. The card already lists the files and the lines, so your summary says what the agent set out to do, why it changed what it changed, and where that stands, in plain words rather than file names or counts. Say in a whole sentence that the summary is on screen, then give the gist in two sentences of plain speech; never read the card out.';
 
 /** Said with every display, since naming the wrong session confidently is worse than naming none. */
 const NAME_IT =

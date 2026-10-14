@@ -51,6 +51,22 @@ describe('opening an agent desktop app on a repository', () => {
     });
   });
 
+  it('opens a chat on no folder when the person named none, rather than one of their projects', () => {
+    const { repository: _none, ...chat } = start(
+      'claude-code',
+      '/Applications/Claude.app',
+    );
+    expect(appLaunch(chat)).toEqual({
+      appPath: '/Applications/Claude.app',
+      links: [],
+      typed: 'review my changes and the tests',
+    });
+    const { repository: _also, ...cursor } = start('cursor');
+    expect(appLaunch(cursor).links).toEqual([
+      'cursor://anysphere.cursor-deeplink/prompt?text=review%20my%20changes%20and%20the%20tests',
+    ]);
+  });
+
   it('only opens the app when there is nothing to ask it yet', () => {
     expect(appLaunch(start('hermes', '/x/Hermes.app', '')).typed).toBeUndefined();
   });

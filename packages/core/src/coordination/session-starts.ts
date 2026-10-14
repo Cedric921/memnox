@@ -72,8 +72,11 @@ export interface SessionStart {
   agent: StartableAgent;
   /** What starts it: its bare command when the shell finds it, else the full path it was found at. */
   command: string;
-  /** The repository's root, checked to exist before it was ever proposed. */
-  repository: string;
+  /**
+   * The repository's root, checked to exist before it was ever proposed; absent only for a chat in
+   * an agent's desktop app the person named no folder for, since a chat needs none.
+   */
+  repository?: string;
   task: string;
   /** Started with `--hold-credentials`, so its environment carries no token for it to leak. */
   holdCredentials?: boolean;
@@ -97,7 +100,7 @@ export interface SessionStart {
 export interface StartProposal {
   agent: StartableAgent;
   command: string;
-  repository: string;
+  repository?: string;
   task: string;
   holdCredentials?: boolean;
   brief?: string;
@@ -125,7 +128,10 @@ export function startCommand(start: SessionStart): string {
     : shellQuoted(start.command);
   const hold = start.holdCredentials === true ? ' --hold-credentials' : '';
   const brief = start.brief === undefined ? '' : ` --brief ${shellQuoted(start.brief)}`;
-  const run = `cd ${shellQuoted(start.repository)} && memnox run${hold}${brief} -- ${command}`;
+  // A terminal start always has its folder, so the cd is left out only of a start that never runs in one.
+  const into =
+    start.repository === undefined ? '' : `cd ${shellQuoted(start.repository)} && `;
+  const run = `${into}memnox run${hold}${brief} -- ${command}`;
   // Nothing to do yet starts the agent waiting for its first prompt, never on a made-up task.
   if (task === '') return run;
   const flag = TASK_FLAG[start.agent];
@@ -149,10 +155,10 @@ export class SessionStarts {
 
   async propose(input: StartProposal): Promise<SessionStart> {
     const start: SessionStart = {
-      id: `${START_ID_PREFIX}${Date.parse(input.at).toString(36)}_${shortDigest(`${input.repository}${input.task}`)}`,
+      id: `${START_ID_PREFIX}${Date.parse(input.at).toString(36)}_${shortDigest(`${input.repository ?? ''}${input.task}`)}`,
       agent: input.agent,
       command: input.command,
-      repository: input.repository,
+      ...(input.repository === undefined ? {} : { repository: input.repository }),
       task: input.task,
       ...(input.holdCredentials === true ? { holdCredentials: true } : {}),
       ...(input.brief === undefined ? {} : { brief: input.brief }),

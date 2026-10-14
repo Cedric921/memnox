@@ -6,9 +6,12 @@ import {
   terminalKeys,
   wentIn,
   type RunTerminal,
+  type DisplayRequest,
   type SessionHost,
+  type ShownIn,
 } from '@memnox/core';
-import { liveHost, processAlive } from './live-host';
+import { liveHost } from './live-host';
+import { liveRun, tabOf } from './run-tab';
 import { unlessMacTold } from './mac-told';
 import type { OperatorCall } from './operator-call';
 import { textArg, type SessionToolDeps, type ToolArgs } from './read-tools';
@@ -50,19 +53,17 @@ async function answerAgentTool(deps: SessionToolDeps, args: ToolArgs): Promise<u
   const keys = terminalKeys(textArg(args, 'keys') ?? '');
   if (keys === null) return { answered: false, said: NOT_KEYS };
   if (sessionId === undefined) return { answered: false, said: NO_SESSION };
-  const { live, run } = await whereItAsks(deps, sessionId);
+  const { live, run, tab } = await whereItAsks(deps, sessionId);
   if (live?.tty === undefined || live.panel === true)
     return { answered: false, said: NO_TERMINAL };
   const moment = deps.now().toISOString();
-  const request = await new DisplayRequests(deps.home).request({
-    display: DISPLAY.PRESS,
+  const tty = live.tty;
+  const request = await pressIn(deps, {
     sessionId,
-    agent: live.agent,
-    title: keys.join(' '),
-    text: keys.join(' '),
-    tty: live.tty,
-    ...(live.appPath === undefined ? {} : { appPath: live.appPath }),
-    at: moment,
+    keys,
+    live: { ...live, tty },
+    tab,
+    moment,
   });
   const delivery = deps.delivered === undefined ? null : await deps.delivered(request.id);
   if (delivery !== null && !wentIn(delivery.outcome))
@@ -85,18 +86,58 @@ async function answerAgentTool(deps: SessionToolDeps, args: ToolArgs): Promise<u
   };
 }
 
-/** The tab the question is in, and the run that noted it when the agent has not reached its first hook. */
+/** The keys asked of the Mac, for that tab only. */
+function pressIn(
+  deps: SessionToolDeps,
+  press: {
+    sessionId: string;
+    keys: readonly string[];
+    live: SessionHost & { tty: string };
+    tab: ShownIn | null;
+    moment: string;
+  },
+): Promise<DisplayRequest> {
+  const { sessionId, keys, live, tab, moment } = press;
+  return new DisplayRequests(deps.home).request({
+    display: DISPLAY.PRESS,
+    sessionId,
+    agent: live.agent,
+    title: keys.join(' '),
+    text: keys.join(' '),
+    tty: live.tty,
+    ...(live.appPath === undefined ? {} : { appPath: live.appPath }),
+    ...(tab === null ? {} : { shownIn: tab }),
+    // Its id is in the banner memnox run printed in that tab, which finds it when its device does not.
+    marks: [sessionId],
+    at: moment,
+  });
+}
+
+/**
+ * The tab the question is in, and the run that noted it when the agent has not reached its first
+ * hook. A live run's own tab wins over the hooked one, which an agent that keeps a terminal of its
+ * own for its tools may have been noted on.
+ */
 async function whereItAsks(
   deps: SessionToolDeps,
   sessionId: string,
-): Promise<{ live: SessionHost | null; run: RunTerminal | null }> {
-  const hooked = await new SessionHosts(deps.home).read(sessionId);
-  if (hooked !== null) return { live: liveHost(hooked), run: null };
-  const run = await new RunTerminals(deps.home).read(sessionId);
+): Promise<{ live: SessionHost | null; run: RunTerminal | null; tab: ShownIn | null }> {
+  const [hooked, run, ran] = await Promise.all([
+    new SessionHosts(deps.home).read(sessionId),
+    new RunTerminals(deps.home).read(sessionId),
+    liveRun(deps.home, sessionId),
+  ]);
+  const tab = tabOf(ran);
+  if (hooked !== null) {
+    const live = liveHost(hooked);
+    return {
+      live: live === null || tab === null ? live : { ...live, ...tab },
+      run: null,
+      tab,
+    };
+  }
   // A run read its own tab as it started, so only whether it still runs is asked again.
-  const live =
-    run !== null && processAlive(run.pid) ? { ...run, seenAt: run.startedAt } : null;
-  return { live, run };
+  return { live: ran === null ? null : { ...ran, seenAt: ran.startedAt }, run, tab };
 }
 
 const NOT_KEYS =

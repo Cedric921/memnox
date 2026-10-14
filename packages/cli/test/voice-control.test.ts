@@ -37,7 +37,7 @@ import { callOperatorTool } from '../src/session-tools/operator-tools';
 import type { SessionToolDeps } from '../src/session-tools/read-tools';
 import type { RewindSeams } from '../src/session-tools/rewind-tool';
 import { showAgentsTool } from '../src/session-tools/agents-tool';
-import { repositoryNamed } from '../src/session-tools/start-tools';
+import { repositoryNamed } from '../src/session-tools/known-repositories';
 import { callTool } from '../src/session-tools/session-tools';
 
 /**
@@ -434,9 +434,10 @@ describe('starting a session out loud', () => {
         return { outcome: 'typed', at: NOW.toISOString() };
       },
       startSeen: async () => (up ? 'ses_run' : null),
+      // A yes here would also accept the permissions the folder brings, so it is theirs to give.
       seen: async () => ({
         app: 'Terminal',
-        text: 'Do you trust this folder?\n❯ No, exit\n  Yes, I trust this folder',
+        text: 'Do you trust this folder?\nThis folder pre-approves 2 tool permissions in .claude/settings.json\n❯ No, exit\n  Yes, I trust this folder',
       }),
     };
     // The run noted its tab as it came up, before the agent's own hook could.
@@ -475,6 +476,62 @@ describe('starting a session out loud', () => {
     });
     expect(answered).toMatchObject({ answered: true, session: 'ses_run' });
     expect(pressed).toEqual([{ text: 'down enter', tty: 'ttys009' }]);
+  });
+
+  it('knows Claude Code is asking about the folder when the tab cannot be read, from its own record', async () => {
+    const base = await depsAt();
+    const repo = await workedOn(base, 'memnox-runtime');
+    const deps: SessionToolDeps = {
+      ...base,
+      resolveCommand: () => 'claude',
+      delivered: async () => ({ outcome: 'typed', at: NOW.toISOString() }),
+      startSeen: async () => null,
+      // Screen Recording is off, so the look answers with nothing to read.
+      seen: async () => null,
+    };
+    // The folder brings settings of its own, so a yes unseen could accept more than the folder.
+    await mkdir(join(repo, '.claude'));
+    await writeFile(join(repo, '.claude', 'settings.json'), '{}');
+    // Claude Code has opened other folders and never this one.
+    await writeFile(
+      join(base.home, '.claude.json'),
+      JSON.stringify({ projects: { '/elsewhere': { hasTrustDialogAccepted: true } } }),
+    );
+    await new RunTerminals(base.home).note({
+      sessionId: 'ses_run',
+      agent: 'claude-code',
+      pid: process.pid,
+      tty: 'ttys009',
+      app: 'Terminal',
+      cwd: repo,
+      startedAt: NOW.toISOString(),
+    });
+    const proposed = (await callOperatorTool(deps, SEAMS, 'propose_start', {
+      repository: 'memnox runtime',
+      task: 'check the git history',
+    })) as { start: string };
+    const started = (await callOperatorTool(deps, SEAMS, 'start_session', {
+      start: proposed.start,
+    })) as { session?: string; question?: string; answerYes?: string; said: string };
+    expect(started.session).toBe('ses_run');
+    expect(started.question).toBe('Do you trust the files in this folder?');
+    expect(started.answerYes).toBe('down enter');
+    expect(started.said).toContain('never told to trust this folder');
+
+    // Once the person said yes there, the same unread tab is only offered a look.
+    await writeFile(
+      join(base.home, '.claude.json'),
+      JSON.stringify({ projects: { [repo]: { hasTrustDialogAccepted: true } } }),
+    );
+    const again = (await callOperatorTool(deps, SEAMS, 'propose_start', {
+      repository: 'memnox runtime',
+      task: 'check the git history',
+    })) as { start: string };
+    const second = (await callOperatorTool(deps, SEAMS, 'start_session', {
+      start: again.start,
+    })) as { question?: string; said: string };
+    expect(second.question).toBeUndefined();
+    expect(second.said).toContain('offer to look');
   });
 
   it('starts it without the tokens when they asked to keep them away from it', async () => {

@@ -30,6 +30,8 @@ export const PLACE = {
   EDITOR: 'editor',
   /** They named an editor that is not installed, which is said rather than started elsewhere. */
   NO_EDITOR: 'no-editor',
+  /** They named something as the editor that is no editor Memnox knows, which is asked about rather than guessed. */
+  UNKNOWN_EDITOR: 'unknown-editor',
   /** A new window of the tmux or WezTerm running here. */
   PANE: 'pane',
   /** A new window of another terminal app they named, such as Ghostty or Warp. */
@@ -45,6 +47,7 @@ type Place =
         | typeof PLACE.APP
         | typeof PLACE.TERMINAL
         | typeof PLACE.NO_EDITOR
+        | typeof PLACE.UNKNOWN_EDITOR
         | typeof PLACE.NO_TERMINAL;
     }
   | { kind: typeof PLACE.EDITOR; editor: EditorApp; path: string }
@@ -73,6 +76,8 @@ export async function placeFor(
     return inEditor(deps, null) ?? { kind: PLACE.NO_EDITOR };
   if (editorSaid !== undefined && editorSaid !== SAID.NO) {
     const editor = editorSaid === SAID.YES ? null : editorNamed(editorSaid);
+    // A name that is no editor, such as a misheard Cursor, never falls to whichever editor is installed first.
+    if (editor === null && editorSaid !== SAID.YES) return { kind: PLACE.UNKNOWN_EDITOR };
     return inEditor(deps, editor) ?? { kind: PLACE.NO_EDITOR };
   }
   const terminalSaid = textArg(args, TOOL_ARG.TERMINAL);

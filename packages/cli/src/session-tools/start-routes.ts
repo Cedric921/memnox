@@ -1,5 +1,6 @@
 import { basename } from 'node:path';
 import {
+  AGENT_ID,
   DELIVERY,
   DISPLAY,
   DISPLAY_VIA,
@@ -15,11 +16,15 @@ import { multiplexerNamed, openPane, typeIntoPane } from './multiplexer';
 import type { SessionToolDeps } from './read-tools';
 import { editorName } from './start-place';
 import { questionBeforeStart } from './start-question';
+import { claudeTrusts } from './claude-trust';
 
 /**
  * How a start reaches where it runs beyond a terminal tab, and what may be said of it once there:
  * started only when the agent showed itself running, never because a line was typed.
  */
+
+/** A start that runs in a folder, which every start but a desktop app chat does. */
+export type PlacedStart = SessionStart & { repository: string };
 
 /**
  * A new conversation in the editor's Claude Code panel with the task as its first message. It runs
@@ -27,7 +32,7 @@ import { questionBeforeStart } from './start-question';
  */
 export async function startInPanel(
   deps: SessionToolDeps,
-  start: SessionStart,
+  start: PlacedStart,
   moment: string,
 ): Promise<Record<string, unknown>> {
   const request = await new DisplayRequests(deps.home).request({
@@ -48,7 +53,7 @@ export async function startInPanel(
 /** A new window in the tmux or WezTerm running here, with the line typed in through it, no Mac needed. */
 export async function startInPane(
   deps: SessionToolDeps,
-  start: SessionStart,
+  start: PlacedStart,
   line: string,
   moment: string,
 ): Promise<Record<string, unknown>> {
@@ -70,7 +75,7 @@ export async function startInPane(
 /** What the Mac reported for the tab, checked against whether the agent itself came up. */
 export async function launched(
   deps: SessionToolDeps,
-  start: SessionStart,
+  start: PlacedStart,
   delivery: DisplayDelivery | null,
   moment: string,
 ): Promise<Record<string, unknown>> {
@@ -102,9 +107,28 @@ export async function launched(
       seen,
       start.editor === undefined ? STARTED : STARTED_IN_EDITOR,
     ),
+    ...(await trustAhead(deps, start, handed, seen)),
     ...asking,
   };
 }
+
+/**
+ * Said before anybody looks: Claude Code asks whether to trust a folder it has never opened, in its
+ * tab, before its first hook, so a start nobody could check on is most likely stopped on that.
+ */
+async function trustAhead(
+  deps: SessionToolDeps,
+  start: PlacedStart,
+  handed: boolean,
+  seen: boolean | null,
+): Promise<Record<string, unknown>> {
+  if (!handed || seen !== null || start.agent !== AGENT_ID.CLAUDE_CODE) return {};
+  if ((await claudeTrusts(deps.home, start.repository)) === true) return {};
+  return { trustFolder: TRUST_AHEAD };
+}
+
+const TRUST_AHEAD =
+  'Claude Code has never opened this folder, so before it starts it asks in its tab whether to trust the folder, with "No, exit" selected. When nothing else here says it is running, say that in a sentence and offer to answer yes for them; on their yes, look at the session and call answer_agent with the keys that pick "Yes, I trust this folder".';
 
 /** What the brain may say, from what the Mac reported, so a tab that never opened is never called working. */
 function startedAs(

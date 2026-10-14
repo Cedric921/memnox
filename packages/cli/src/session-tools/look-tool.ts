@@ -1,8 +1,17 @@
 import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { DISPLAY, DisplayRequests, MEMNOX_HOME, type Sight } from '@memnox/core';
+import {
+  DISPLAY,
+  DisplayRequests,
+  MEMNOX_HOME,
+  type DisplayInput,
+  type ShownIn,
+  type Sight,
+} from '@memnox/core';
 import type { OperatorCall } from './operator-call';
+import { liveRun, tabOf } from './run-tab';
+import { runOfStart } from './start-memory';
 import { textArg, type SessionToolDeps, type ToolArgs } from './read-tools';
 import type { ToolDefinition } from './session-tools';
 
@@ -23,6 +32,11 @@ export const LOOK_TOOL: ToolDefinition = {
         type: 'string',
         description:
           'the app to look at by its name, such as Safari; the window in front when left out',
+      },
+      session: {
+        type: 'string',
+        description:
+          "a session's id to read its own terminal tab, wherever it is and without Screen Recording; use it to see what an agent is asking in its terminal, rather than naming its app",
       },
       visual: {
         type: 'string',
@@ -51,11 +65,19 @@ export const LOOK_CALLS: Readonly<Record<string, OperatorCall>> = {
 
 async function lookTool(deps: SessionToolDeps, args: ToolArgs): Promise<unknown> {
   const app = textArg(args, 'app');
+  const session = textArg(args, 'session');
+  // A start named by its own id reaches the run that came up for it, which is where its tab is.
+  const run =
+    session === undefined
+      ? null
+      : ((await liveRun(deps.home, session)) ?? (await runOfStart(deps.home, session)));
+  const tab = tabOf(run);
   const request = await new DisplayRequests(deps.home).request({
     display: DISPLAY.LOOK,
-    sessionId: 'screen',
+    sessionId: session ?? 'screen',
     agent: 'memnox',
-    title: app ?? '',
+    title: app ?? tab?.app ?? '',
+    ...lookInTab(run?.sessionId ?? session, tab),
     at: deps.now().toISOString(),
   });
   const sight = await (deps.seen ?? ((id: string) => awaitSight(deps.home, id)))(
@@ -71,7 +93,25 @@ async function lookTool(deps: SessionToolDeps, args: ToolArgs): Promise<unknown>
     ...read,
     ...(visual && image !== undefined ? { image } : {}),
     ...changedSince(deps.home, sight),
-    ...(image === undefined ? { said: OUTLINE_ONLY } : {}),
+    // A tab read by script has its words and no picture, which is not a missing permission.
+    ...(image === undefined && read.text === undefined ? { said: OUTLINE_ONLY } : {}),
+  };
+}
+
+/**
+ * A session's own tab, which the Mac reads by script when it is in iTerm or Terminal, so the words in
+ * it come back without Screen Recording; its id is the mark that finds it when its device does not.
+ */
+export function lookInTab(
+  session: string | undefined,
+  tab: ShownIn | null,
+): Pick<DisplayInput, 'tty' | 'appPath' | 'shownIn' | 'marks'> {
+  if (session === undefined) return {};
+  return {
+    ...(tab?.tty === undefined ? {} : { tty: tab.tty }),
+    ...(tab?.appPath === undefined ? {} : { appPath: tab.appPath }),
+    ...(tab === null ? {} : { shownIn: tab }),
+    marks: [session],
   };
 }
 

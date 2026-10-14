@@ -45,29 +45,44 @@ export async function openAppStart(
 ): Promise<unknown> {
   const launch = appLaunch(start);
   const name = DESKTOP_APPS[start.agent].name;
+  // Words the app's own prompt link carries into its chat, which the Mac sends once it reads them there.
+  const prefilled = launch.typed === undefined && start.task.trim() !== '';
   const delivery = await shown(deps, {
     sessionId: start.id,
     agent: start.agent,
     name,
-    cwd: start.repository,
+    ...(start.repository === undefined ? {} : { cwd: start.repository }),
     ...launch,
+    // With no folder it is a question for a chat, asked in a new one rather than the chat left open.
+    ...(start.repository === undefined && launch.typed !== undefined
+      ? { newChat: true }
+      : {}),
+    ...(prefilled ? { sendPrefilled: true } : {}),
     at: moment,
   });
-  // Named as the app's own session, so a follow up to "the same session" is typed into this app.
-  const opened = {
-    repository: basename(start.repository),
+  const result: Record<string, unknown> = {
+    ...openedIn(start, name),
+    ...openedAs(delivery, launch.typed !== undefined),
+  };
+  // Called sent only when the Mac read the words in its chat and saw them go; otherwise they wait for the person's Return.
+  if (prefilled && delivery?.outcome === DELIVERY.VERIFIED)
+    return { ...result, said: APP_PREFILLED_SENT };
+  if (prefilled && result['said'] === APP_OPENED)
+    return { ...result, said: APP_PREFILLED };
+  return start.repository === undefined && result['said'] === APP_OPENED
+    ? { ...result, said: APP_OPENED_NO_FOLDER }
+    : result;
+}
+
+/** Named as the app's own session, so a follow up to "the same session" is typed into this app. */
+function openedIn(start: SessionStart, name: string): Record<string, unknown> {
+  return {
+    ...(start.repository === undefined
+      ? { noFolder: true }
+      : { repository: basename(start.repository) }),
     app: name,
     session: `${APP_SESSION_PREFIX}${start.agent}`,
   };
-  const result: Record<string, unknown> = {
-    ...opened,
-    ...openedAs(delivery, launch.typed !== undefined),
-  };
-  // Words sent by the app's own prompt link wait in its chat for the person's Return, never asked about again.
-  const prefilled = launch.typed === undefined && start.task.trim() !== '';
-  return prefilled && result['said'] === APP_OPENED
-    ? { ...result, said: APP_PREFILLED }
-    : result;
 }
 
 /**
@@ -116,6 +131,8 @@ interface AppShow {
   typed?: string;
   /** A new chat first, rather than typing into the one open. */
   newChat?: boolean;
+  /** The words a prompt link left in its chat sent, once the Mac reads them there. */
+  sendPrefilled?: boolean;
   at: string;
 }
 
@@ -134,7 +151,11 @@ async function shown(
     ...(show.appPath === undefined ? {} : { appPath: show.appPath }),
     links: show.links,
     ...(show.env === undefined ? {} : { env: show.env }),
-    ...(show.newChat === true ? { via: DISPLAY_VIA.NEW_CHAT } : {}),
+    ...(show.newChat === true
+      ? { via: DISPLAY_VIA.NEW_CHAT }
+      : show.sendPrefilled === true
+        ? { via: DISPLAY_VIA.SEND_PREFILLED }
+        : {}),
     at: show.at,
   });
   return deps.delivered === undefined ? null : deps.delivered(request.id);
@@ -320,8 +341,12 @@ const APP_TYPED =
   'The app is open and the Mac typed their words into its message box and sent them, so it is answering now. Say so in a few words, like "Sent to Claude." Never say it is done.';
 const APP_OPENED =
   'The app opened on that repository. Say so in a few words, like "Hermes is open in memnox runtime.", and ask what they would like it to do.';
+const APP_OPENED_NO_FOLDER =
+  'The app is open, on no folder since they named none. Say so in a few words, like "Claude is open.", and ask what they would like it to do; never name a repository.';
 const APP_PREFILLED =
   'The app opened on that repository with their words already in its chat, where it waits for them to press Return, since the app asks before running a prompt it was handed. Say that in one sentence, like "Cursor is open with your question in its chat; press Return there to send it." Never ask what it should do, and never offer to send it again.';
+const APP_PREFILLED_SENT =
+  'The app opened, its own link put their words in its chat, and the Mac read them there and sent them, so it is answering now. Say so in a few words, like "Sent to Cursor." Never say it is done, and never ask them to press Return.';
 const APP_CLIPBOARD =
   'The app is open, but the Mac could not type into it, and it already told them out loud the words are on the clipboard and how to paste them. Write nothing more.';
 const UNCONFIRMED =
