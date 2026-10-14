@@ -147,7 +147,7 @@ describe('pairing a phone', () => {
     const answer = await at.ask({ method: DAEMON_METHOD.PAIR_BEGIN });
 
     expect(answer).toMatchObject({ ok: false, outcome: REMOTE_OUTCOME.REFUSED });
-    expect(answer.reason).toContain('memnox login');
+    expect(answer.reason).toContain('Connect it first');
     expect(at.cloud.calls).toEqual([]);
   });
 
@@ -685,6 +685,26 @@ describe('a phone with its app open', () => {
     }
 
     expect(listening).toBe(true);
+    at.voice.close();
+  });
+
+  it('hands the voice to the Mac the moment its app leaves the screen, and takes it back on a fresh subscribe', async () => {
+    const at = await paired();
+    await through(at, { id: 43, method: DAEMON_METHOD.SUBSCRIBE });
+    const released = await through(at, { id: 44, method: DAEMON_METHOD.VOICE_RELEASE });
+
+    expect(released).toEqual([{ id: 44, ok: true }]);
+    expect(at.voice.hold.holder()).toBeNull();
+
+    await through(at, { id: 45, method: DAEMON_METHOD.SUBSCRIBE });
+    expect(at.voice.hold.holder()?.deviceId).toBe(at.deviceId);
+    at.voice.close();
+  });
+
+  it('refuses a voice release from the Mac socket, which never held it', async () => {
+    const at = await rig();
+    const answer = await at.ask({ method: DAEMON_METHOD.VOICE_RELEASE });
+    expect(answer.ok).toBe(false);
     at.voice.close();
   });
 

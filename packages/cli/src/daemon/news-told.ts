@@ -22,6 +22,28 @@ function isNews(event: DaemonEvent): boolean {
   );
 }
 
+/** A held call or an agent's question, which waits on the person's answer; a proposal is left out, since the Mac declines one nobody there asked for. */
+export function waitsOnAnswer(event: DaemonEvent): boolean {
+  if (event.kind === DAEMON_EVENT.HELD) return true;
+  return (
+    event.kind === DAEMON_EVENT.NOTICE &&
+    event.notice !== undefined &&
+    ANSWERED_NOTICES.includes(event.notice)
+  );
+}
+
+/** Forgets having told the Mac what still waits on an answer, so the next look at the feed sends it to be said. */
+export async function askAgain(
+  feed: { current(moment: string): Promise<DaemonEvent[]> },
+  now: string,
+  told: readonly (Set<string> | undefined)[],
+): Promise<void> {
+  // Unreadable only means nothing is asked again, and the cards on the Mac still show it.
+  const waiting = await feed.current(now).catch(() => []);
+  for (const event of waiting.filter(waitsOnAnswer))
+    told.forEach((each) => each?.delete(event.subject));
+}
+
 /**
  * The news subjects the Mac app has already heard, kept on disk because the app is reopened far
  * more often than the daemon restarts, and a paused session said on every open is noise.

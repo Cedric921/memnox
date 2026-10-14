@@ -35,8 +35,9 @@ const PAIRING_TTL_MS = 120_000;
 /** Once a phone answered, the person has this long to compare digits and touch the sensor. */
 const ANSWERED_TTL_MS = 5 * 60_000;
 
+// Names no command, since the Mac app shows these words and connects the machine from its Account page.
 const NOT_ENROLLED =
-  'This machine is not connected to Memnox Cloud, which carries the device to it. Run memnox login, then pair again.';
+  'This machine is not connected to Memnox Cloud, which carries the device to it. Connect it first, then pair again.';
 
 /** Wrong digits a pairing takes before it closes, so the code cannot be guessed. */
 const DIGIT_TRIES = 3;

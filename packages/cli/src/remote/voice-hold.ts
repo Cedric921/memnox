@@ -10,7 +10,7 @@ import {
 /**
  * Which paired phone holds the voice: that phone speaks every event and the Mac only shows it.
  * A phone holds it while its app is open, while it drives, while a question from it is in flight,
- * and for a while after the last of those.
+ * and for a while after the last of those, unless the person spoke to the Mac since the phone was last used.
  */
 
 /** Long enough that a follow up and what the agent raises from that turn stay on the phone. */
@@ -30,9 +30,14 @@ export interface PhoneActivity {
   endedAt?: string;
   /** The latest thing it did, which decides between two phones that both qualify. */
   lastActiveAt: string;
+  /** The person spoke to the Mac since this phone was last used, so it holds nothing until it is used again. */
+  yielded?: boolean;
+  /** Its app left the screen and let the voice go, so it holds nothing until it is back in front or asks. */
+  letGo?: boolean;
 }
 
 function qualifies(phone: PhoneActivity, now: number): boolean {
+  if (phone.yielded === true || phone.letGo === true) return false;
   if (phone.asking > 0 || phone.subscribed > 0) return true;
   if (phone.drivingUntil !== undefined && Date.parse(phone.drivingUntil) > now)
     return true;
@@ -108,8 +113,10 @@ export class VoiceHold {
   /** A drive grant began, with its until, or ended, without one. */
   driven(drivenBy: DrivenBy): void {
     if (drivenBy.until !== undefined) {
-      this.touch({ id: drivenBy.deviceId, name: drivenBy.name }).drivingUntil =
-        drivenBy.until;
+      const activity = this.touch({ id: drivenBy.deviceId, name: drivenBy.name });
+      activity.drivingUntil = drivenBy.until;
+      delete activity.yielded;
+      delete activity.letGo;
     } else {
       const activity = this.phones.get(drivenBy.deviceId);
       if (activity === undefined) return;
@@ -119,13 +126,49 @@ export class VoiceHold {
   }
 
   began(phone: Phone): void {
-    this.touch(phone).asking += 1;
+    const activity = this.touch(phone);
+    activity.asking += 1;
+    delete activity.yielded;
+    delete activity.letGo;
     this.settle();
   }
 
   /** Its app opened a stream, which holds the voice for as long as the stream lives. */
   subscribed(phone: Phone): void {
-    this.touch(phone).subscribed += 1;
+    const known = this.phones.get(phone.id);
+    // A stream renewed within the grace is the same visit, so only the app opened afresh takes the voice back from the Mac.
+    const fresh =
+      known === undefined ||
+      (known.subscribed === 0 &&
+        (known.endedAt === undefined ||
+          Date.parse(this.now()) - Date.parse(known.endedAt) >= VOICE_GRACE_MS));
+    const activity = this.touch(phone);
+    activity.subscribed += 1;
+    if (fresh) delete activity.yielded;
+    // A new stream means the app is in front again, so a voice it let go in the background is its again.
+    delete activity.letGo;
+    this.settle();
+  }
+
+  /** It subscribed again over a stream still open, which takes back only a voice it let go itself, never one the Mac took. */
+  renewed(deviceId: string): void {
+    const activity = this.phones.get(deviceId);
+    if (activity?.letGo !== true) return;
+    delete activity.letGo;
+    this.settle();
+  }
+
+  /** Its app left the screen and gave the voice up, so the Mac speaks at once rather than after a stream iOS may keep looking alive. */
+  released(deviceId: string): void {
+    const activity = this.phones.get(deviceId);
+    if (activity === undefined || activity.letGo === true) return;
+    activity.letGo = true;
+    this.settle();
+  }
+
+  /** The person spoke to the Mac, so the Mac answers and says what comes next until a phone is used again. */
+  macTookBack(): void {
+    for (const activity of this.phones.values()) activity.yielded = true;
     this.settle();
   }
 

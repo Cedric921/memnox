@@ -16,14 +16,18 @@ import {
   profileContext,
   lookingAtContext,
   openSessionContext,
+  phoneContext,
   windowContext,
   FINISHED_NOTE,
   heldCallsContext,
   momentContext,
+  GREETED_NOTE,
+  RESUME_NOTE,
   RULE_NOTE,
   questionsContext,
 } from './ask-context';
 import { BRAIN_CHUNK } from '../operator/brain';
+import { noteAskedFrom } from './asked-from';
 import { folderUses } from '../operator/folders';
 import { readHeardWords } from '../operator/heard-words';
 import { noteOffered, readProfile } from '../operator/profile';
@@ -119,6 +123,8 @@ export class VoiceAsk {
   private lookingAtWindow: string | undefined;
   /** The session the person has open on the phone, which the next turn is a follow up on. */
   private openSession: string | undefined;
+  /** Whether they speak through a phone, which never starts a session. */
+  private fromPhone = false;
 
   constructor(private readonly deps: AskDeps) {
     this.speculation = new Speculation(
@@ -137,6 +143,11 @@ export class VoiceAsk {
     this.lookingAt = request.lookingAt;
     this.lookingAtWindow = request.lookingAtWindow;
     this.openSession = request.sessionId;
+    this.fromPhone = request.origin !== undefined;
+    // Before the brain runs a tool, since a start reads it to refuse a question from a phone.
+    await noteAskedFrom(this.deps.home, request.origin?.deviceId, this.deps.now()).catch(
+      () => undefined,
+    );
     if (request.teamCalls !== undefined) {
       this.teamCalls = request.teamCalls;
       await keepTeamCalls(this.deps.home, request.teamCalls, this.deps.now()).catch(
@@ -170,8 +181,9 @@ export class VoiceAsk {
   ): Promise<void> {
     // Held keys say they are rules, and letting go says that is all of it, so no guess or hold applies.
     const rule = request.intent === ASK_INTENT.RULE;
+    const resuming = request.intent === ASK_INTENT.RESUME;
     // Never hold twice running: words after a hold are the rest of it, so they are answered.
-    const finished = rule || request.finished === true || this.justHeld();
+    const finished = rule || resuming || request.finished === true || this.justHeld();
     // Words sent after a hold carry a note a guess never had, so no guess is ever them.
     if (finished) this.speculation.drop();
     const guessed = finished ? null : await this.speculation.adopt(said, forward);
@@ -180,7 +192,9 @@ export class VoiceAsk {
     await this.noteGuess(GUESS_STATE.ASKED);
     const overtaken = this.speculation.takeOvertaken();
     const seams = { send: forward, wanted: () => true };
-    const words = rule ? `${RULE_NOTE}\n${said}` : said;
+    const note = rule ? RULE_NOTE : resuming ? RESUME_NOTE : undefined;
+    const greeted = request.greeted === true ? `${GREETED_NOTE}\n` : '';
+    const words = `${greeted}${note === undefined ? '' : `${note}\n`}${said}`;
     await this.keep(said, await this.turn(words, finished, seams, overtaken));
   }
 
@@ -317,6 +331,7 @@ export class VoiceAsk {
     const spoke = exchanges.filter((each) => each.unasked !== true).at(-1)?.at;
     const context = [
       momentContext(new Date(moment), spoke),
+      phoneContext(this.fromPhone),
       lookingAtContext(this.lookingAt),
       windowContext(this.lookingAtWindow),
       profileContext(profile.facts, offered),

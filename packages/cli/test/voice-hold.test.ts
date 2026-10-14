@@ -204,4 +204,70 @@ describe('the voice hold as it happens', () => {
     ]);
     voice.close();
   });
+
+  it('gives the voice to the Mac when the person speaks to it, until the phone is used again', () => {
+    const { hold: voice, moves } = hold();
+    voice.subscribed(iphone);
+    voice.macTookBack();
+    expect(voice.holder()).toBeNull();
+
+    voice.began(iphone);
+    expect(voice.holder()).toEqual({ deviceId: 'dev_phone', name: 'iPhone' });
+    expect(moves.map((each) => each.holding)).toEqual([true, false, true]);
+    voice.close();
+  });
+
+  it('keeps the voice on the Mac through a renewed stream, and gives it to a phone whose app opens afresh', () => {
+    const { hold: voice } = hold();
+    voice.subscribed(iphone);
+    voice.macTookBack();
+    voice.unsubscribed(iphone.id);
+    voice.subscribed(iphone);
+    expect(voice.holder()).toBeNull();
+
+    voice.unsubscribed(iphone.id);
+    vi.advanceTimersByTime(VOICE_GRACE_MS);
+    voice.subscribed(iphone);
+    expect(voice.holder()).toEqual({ deviceId: 'dev_phone', name: 'iPhone' });
+    voice.close();
+  });
+
+  it('gives the voice to the Mac at once when the app leaves the screen, though its stream still looks alive', () => {
+    const { hold: voice, moves } = hold();
+    voice.subscribed(iphone);
+    voice.released(iphone.id);
+    expect(voice.holder()).toBeNull();
+
+    voice.released(iphone.id);
+    vi.advanceTimersByTime(10 * VOICE_GRACE_MS);
+    expect(voice.holder()).toBeNull();
+    expect(moves.map((each) => each.holding)).toEqual([true, false]);
+    voice.close();
+  });
+
+  it('takes the voice back once the app is in front again, by a stream renewed or new, or a question', () => {
+    const { hold: voice } = hold();
+    voice.subscribed(iphone);
+    voice.released(iphone.id);
+    voice.renewed(iphone.id);
+    expect(voice.holder()?.deviceId).toBe('dev_phone');
+
+    voice.released(iphone.id);
+    voice.subscribed(iphone);
+    expect(voice.holder()?.deviceId).toBe('dev_phone');
+
+    voice.released(iphone.id);
+    voice.began(iphone);
+    expect(voice.holder()?.deviceId).toBe('dev_phone');
+    voice.close();
+  });
+
+  it('never takes back on a renewed stream a voice the person gave the Mac by speaking to it', () => {
+    const { hold: voice } = hold();
+    voice.subscribed(iphone);
+    voice.macTookBack();
+    voice.renewed(iphone.id);
+    expect(voice.holder()).toBeNull();
+    voice.close();
+  });
 });

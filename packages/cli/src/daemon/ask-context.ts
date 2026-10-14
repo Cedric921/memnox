@@ -29,9 +29,27 @@ const HEADING =
 export const RULE_NOTE =
   '[Memnox, not the person] They held the rule keys, so what follows is a rule or policy they want enforced on their agents. Turn each rule into propose_rule calls now: the action, the effect, any branches or paths it names, and the project only if they named one. Then say back in one sentence what the rule does, and ask whether it should hold on the whole Mac or only in one repository; the card on the Mac lets them pick and confirm with Touch ID. Never say it is in force. If what they said is not a rule at all, say so in one sentence and propose nothing.';
 
+/**
+ * Sent when the Mac asks again what the person asked before a sign in finished. The words are theirs from earlier,
+ * often a yes to signing in, so taking them as new opened the same sign in twice.
+ */
+export const RESUME_NOTE =
+  '[Memnox, not the person] They just finished signing in, and these are their words from before it. Carry on with the request they were about now that the tool is connected: use find_tool and then run_tool or propose_tool. Never open a sign in again for it, and never ask whether to.';
+
+/** Sent when the Mac's own wake line already said hello, which the brain never hears, so it greeted a second time. */
+export const GREETED_NOTE =
+  '[Memnox, not the person] The Mac already greeted them out loud a moment ago, so this is mid conversation: never open with a greeting or say good morning, afternoon or evening.';
+
 /** Put after words the brain held for, once waiting turned up nothing more, so it answers rather than holds again. */
 export const FINISHED_NOTE =
   '[Memnox, not the person] They stopped there and said nothing more, so this is all of it: answer it now and do not call keep_listening.';
+
+/** Said ahead of a phone's question, so the brain never offers a start the tools would refuse. */
+export function phoneContext(fromPhone: boolean): string {
+  return fromPhone
+    ? '[Memnox, not the person] They are speaking through their phone, away from the Mac, where a new session is never started.'
+    : '';
+}
 
 /** An app name is a few words; anything longer is not one and is left out. */
 const MOST_APP_CHARS = 60;

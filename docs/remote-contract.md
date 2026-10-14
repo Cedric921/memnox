@@ -159,6 +159,7 @@ answered `outcome: 'refused'`.
 | `device-ungrant`              | `deviceId`, `capability`              | `outcome: 'ungranted'`, `device`; unsigned because taking a capability away only reduces what is allowed; removing `mac` also ends a live drive                                                                     |
 | `voice-choice`                | `voice?`                              | sets the Kokoro voice when `voice` is present; always answers `voice`                                                                                                                                               |
 | `drive` (remote, needs `mac`) | `until?`, `signature?`                | `outcome: 'driving'` with `until`, or `'stopped'` when `until` is absent, or `refused`                                                                                                                              |
+| `voice-release` (`see`)       | none                                  | `ok: true`; the phone's app left the screen, so the voice goes back to the Mac at once; unsigned because it only gives power up                                                                                     |
 | `follow-up` (`steer`)         | `sessionId`, `said`, `signature`      | `outcome: 'queued'`, `'typed'` or `'later'`, or `refused` with `reason`; `said` reaches the session as it is, signed over `memnox-follow-up:v1:<sessionId>:<said>`                                                    |
 | `files-list` (remote, `see`)  | `path?`                               | `path`, `files: FileEntry[]`, or `refused` with `reason`; see below                                                                                                                                                 |
 | `speak` (remote, `ask`)       | `line`, `voice?`, `speed?`            | streams `audio: { rate, samples, last }` on the request's id until `last` is true, or `refused` with `reason`; see below                                                                                            |
@@ -201,7 +202,7 @@ on the Mac changes.
 
 | Capability | Methods and answers it covers                                                                                                                  | Phone default                             |
 | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
-| `see`      | `ping`, `sessions-list`, `session-view`, `waiting`, `subscribe`, `trace`, `voice-agents`, `voice-choice` without `voice`, `files-list`, `home` | on                                        |
+| `see`      | `ping`, `sessions-list`, `session-view`, `waiting`, `subscribe`, `trace`, `voice-agents`, `voice-choice` without `voice`, `files-list`, `home`, `voice-release` | on                                        |
 | `ask`      | `ask`, `cancel`, `warm`, `brief`, `speak`, `hand-over`                                                                                         | on                                        |
 | `answer`   | `confirm` on a held call or an `answer` proposal                                                                                               | on, a yes is signed                       |
 | `steer`    | `confirm` on a stop, freeze or resume proposal, and `follow-up`, which is signed                                                               | on, a yes is signed                       |
@@ -266,8 +267,12 @@ name, until }`, and the Mac island shows "Driven from <name>" for its whole leng
   follow up and what the agent raises from that turn stay on the phone. iOS drops the socket
   within seconds of the app leaving the front, so a live stream means the app is open, and the
   Mac never wakes on its name said to an open phone. When several phones qualify, the one active
-  most recently holds it. A revoked phone gives the voice back at once. The daemon decides this
-  and the apps only follow it:
+  most recently holds it. A revoked phone gives the voice back at once. A phone whose app leaves
+  the screen sends `voice-release` unless its person kept alerts on the phone, and the voice is
+  back on the Mac at once, with what still waits asked again there; a new `subscribe`, a
+  `subscribe` again on the same stream, an `ask` or a `drive` takes it back. A `start` display
+  (`launch`, or `app` for a start) never reaches a phone: a session is started at the Mac. The
+  daemon decides this and the apps only follow it:
   - While a phone holds the voice, every event to every subscriber, the Mac app and the phones
     alike, carries `heardOn: { deviceId, name }`. That phone speaks it and the Mac shows it
     without a sound.

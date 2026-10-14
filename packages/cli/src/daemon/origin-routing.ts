@@ -8,16 +8,24 @@ import {
   holds,
   MAC_DISPLAYS,
   MAC_READS,
+  PHONE_OWN_DISPLAYS,
   PROPOSAL_KIND,
   Proposals,
   REMOTE_CAPABILITY,
+  startsSession,
   type DaemonEvent,
   type DaemonResponse,
   type DeviceRecord,
   type DisplayKind,
 } from '@memnox/core';
 import { displayName, readNames } from '../agents/names';
-import { doneText, macRationale, NOT_ALLOWED_ON_MAC, OPEN_THE_MAC } from './done-lines';
+import {
+  doneText,
+  macRationale,
+  NOT_ALLOWED_ON_MAC,
+  OPEN_THE_MAC,
+  START_AT_THE_MAC,
+} from './done-lines';
 import { write, type Peer } from './socket-write';
 import { settled } from './waiting-feed';
 
@@ -57,6 +65,8 @@ export interface RouterDeps {
   driving: (deviceId: string) => boolean;
   /** One line to a device's live session, false when it has none. */
   tell: (deviceId: string, response: DaemonResponse) => boolean;
+  /** Whether a phone's app is open and subscribed, so a page sent to it is opened rather than lost. */
+  listening?: (deviceId: string) => boolean;
   /** What every event carries on its way out, such as which phone holds the voice. */
   stamp?: (event: DaemonEvent) => DaemonEvent;
 }
@@ -86,7 +96,7 @@ function shownOnPhone(event: DaemonEvent): boolean {
     event.kind === DAEMON_EVENT.SHOW &&
     event.sessionId !== undefined &&
     event.display !== undefined &&
-    PHONE_SHOWS.includes(event.display)
+    (PHONE_SHOWS.includes(event.display) || PHONE_OWN_DISPLAYS.includes(event.display))
   );
 }
 
@@ -148,6 +158,8 @@ export class OriginRouter {
   private readonly claimed = new Set<string>();
   /** A show sent to the Mac for a phone, by subject, so its result goes back to that phone. */
   private readonly awaiting = new Map<string, { deviceId: string; event: DaemonEvent }>();
+  /** A page sent to the phone that asked, by subject, so only that phone may say how it went. */
+  private readonly sentToPhone = new Map<string, string>();
 
   constructor(private readonly deps: RouterDeps) {}
 
@@ -175,7 +187,8 @@ export class OriginRouter {
     mac: readonly Peer[],
   ): Promise<Set<string>> {
     for (const event of events) {
-      if (this.claimed.has(event.subject) || event.needsMac !== true) continue;
+      if (this.claimed.has(event.subject) || this.keptForPhone(event)) continue;
+      if (event.needsMac !== true) continue;
       const deviceId = this.originOf(event.at);
       if (deviceId === undefined) continue;
       this.claimed.add(event.subject);
@@ -204,6 +217,13 @@ export class OriginRouter {
     return event.kind === DAEMON_EVENT.SHOW ? this.originOf(event.at) : undefined;
   }
 
+  /** Whether a phone reporting how a show went was the one sent it, which is all a phone may report on. */
+  sentTo(subject: string, deviceId: string): boolean {
+    if (this.sentToPhone.get(subject) !== deviceId) return false;
+    this.sentToPhone.delete(subject);
+    return true;
+  }
+
   /** The Mac said how a show went, which the phone that asked for it now hears in a line. */
   async delivered(subject: string, outcome: string): Promise<void> {
     const owed = this.awaiting.get(subject);
@@ -218,6 +238,9 @@ export class OriginRouter {
     deviceId: string,
     mac: readonly Peer[],
   ): Promise<void> {
+    // Never proposed, released or driven: a phone's question may follow a session up but never start one.
+    if (startsSession(event))
+      return this.refuse(event, deviceId, START_AT_THE_MAC, 'sessions start at the Mac');
     const device = await new Devices(this.deps.home).find(deviceId);
     if (device === null || mac.length === 0) {
       return this.refuse(event, deviceId, OPEN_THE_MAC, 'the Mac app is not open');
@@ -233,6 +256,22 @@ export class OriginRouter {
       );
     }
     await this.propose(event, device);
+  }
+
+  /** A page the phone that asked opens itself while its app is open, so the Mac never opens it as well. */
+  private keptForPhone(event: DaemonEvent): boolean {
+    if (
+      event.kind !== DAEMON_EVENT.SHOW ||
+      event.display === undefined ||
+      !PHONE_OWN_DISPLAYS.includes(event.display)
+    )
+      return false;
+    const deviceId = this.originOf(event.at);
+    // With the phone's app closed nobody there would open it, so the Mac does as it would have.
+    if (deviceId === undefined || this.deps.listening?.(deviceId) !== true) return false;
+    this.claimed.add(event.subject);
+    this.sentToPhone.set(event.subject, deviceId);
+    return true;
   }
 
   /** Held as a proposal for the phone to sign, and the brain told it waits on that phone. */

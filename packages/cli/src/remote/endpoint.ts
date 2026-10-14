@@ -53,7 +53,7 @@ export interface RemoteVoice {
   respond(peer: Peer, request: DaemonRequest, principal?: RemotePrincipal): Promise<void>;
   broadcast(event: DaemonEvent): void;
   /** Which phone holds the voice: a drive holds it while it lasts, and a revoked phone holds it no longer. */
-  readonly hold: Pick<VoiceHold, 'driven' | 'forget'>;
+  readonly hold: Pick<VoiceHold, 'driven' | 'forget' | 'released'>;
   drop(peer: Peer): void;
 }
 
@@ -180,6 +180,10 @@ export class RemoteEndpoint {
     }
     if (request.method === DAEMON_METHOD.DRIVE)
       return write(session, this.drive(device, request));
+    if (request.method === DAEMON_METHOD.VOICE_RELEASE) {
+      this.deps.voice()?.hold.released(device.id);
+      return write(session, { id: request.id, ok: true });
+    }
     const principal = { device, driving: this.drives.driving(device.id) };
     await this.deps.voice()?.respond(session, asked, principal);
   }
@@ -202,7 +206,7 @@ export class RemoteEndpoint {
     if (method === DAEMON_METHOD.VOICE_CHOICE) return this.voiceChoice(request);
     return refused(
       request,
-      'Driving the Mac comes from a paired phone, never from this socket.',
+      'Driving the Mac and letting its voice go come from a paired phone, never from this socket.',
     );
   }
 

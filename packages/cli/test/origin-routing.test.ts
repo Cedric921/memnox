@@ -8,6 +8,7 @@ import {
   DEVICE_KIND,
   Devices,
   DISPLAY,
+  PendingApprovals,
   DisplayRequests,
   PHONE_DEFAULT_CAPABILITIES,
   PROPOSAL_KIND,
@@ -18,8 +19,13 @@ import {
   type DeviceRecord,
   type DisplayKind,
 } from '@memnox/core';
-import { NOT_ALLOWED_ON_MAC, OPEN_THE_MAC } from '../src/daemon/done-lines';
+import {
+  NOT_ALLOWED_ON_MAC,
+  OPEN_THE_MAC,
+  START_AT_THE_MAC,
+} from '../src/daemon/done-lines';
 import { heardRemotely, markNeedsMac, OriginRouter } from '../src/daemon/origin-routing';
+import { askedFromPhone } from '../src/daemon/asked-from';
 import type { Peer } from '../src/daemon/socket-write';
 import { VoiceSurface } from '../src/daemon/voice-surface';
 import { BRAIN_CHUNK, type Brain } from '../src/operator/brain';
@@ -184,6 +190,44 @@ describe('a phone asking for something on the Mac', () => {
     expect(at.told.at(-1)?.done?.text).toMatch(/^Typed it into /);
   });
 
+  it('never starts a session for a phone, even one that drives the Mac and may act on it', async () => {
+    const at = await rig(
+      phone([...PHONE_DEFAULT_CAPABILITIES, REMOTE_CAPABILITY.MAC]),
+      true,
+    );
+    const mac = new Lines();
+    at.router.asked('dev_phone', ASKED);
+    const launch = await at.show(DISPLAY.LAUNCH);
+    const appStart = { ...(await at.show(DISPLAY.APP)), sessionId: 'stt_1' };
+
+    const claimed = await at.router.claim([launch, appStart], [mac]);
+
+    expect(claimed.has(launch.subject) && claimed.has(appStart.subject)).toBe(true);
+    expect(mac.lines).toEqual([]);
+    expect(await new Proposals(at.home).open(SHOWN)).toEqual([]);
+    expect(at.told).toEqual([
+      { id: 0, ok: true, done: { text: START_AT_THE_MAC } },
+      { id: 0, ok: true, done: { text: START_AT_THE_MAC } },
+    ]);
+    const deliveries = new DisplayRequests(at.home);
+    expect((await deliveries.deliveryOf(launch.subject))?.outcome).toBe('failed');
+    expect((await deliveries.deliveryOf(appStart.subject))?.outcome).toBe('failed');
+  });
+
+  it('still types into a chat already open in an app for a phone that drives', async () => {
+    const at = await rig(
+      phone([...PHONE_DEFAULT_CAPABILITIES, REMOTE_CAPABILITY.MAC]),
+      true,
+    );
+    const mac = new Lines();
+    at.router.asked('dev_phone', ASKED);
+    const typed = { ...(await at.show(DISPLAY.APP)), sessionId: 'app_codex' };
+
+    await at.router.claim([typed], [mac]);
+
+    expect(mac.lines).toHaveLength(1);
+  });
+
   it('leaves a show the Mac asked for to the Mac, as before', async () => {
     const at = await rig();
     at.router.asked(undefined, ASKED);
@@ -296,6 +340,44 @@ function turnsOn(lines: Lines): NonNullable<DaemonEvent['phoneTurn']>[] {
     each.event?.phoneTurn === undefined ? [] : [each.event.phoneTurn],
   );
 }
+
+describe('a question asked through a phone', () => {
+  it('tells the brain and its tools it came from the phone, and a question at the Mac says otherwise', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'memnox-phone-asker-'));
+    const prompts: string[] = [];
+    const voice = new VoiceSurface({
+      home,
+      now: () => ASKED,
+      log: () => undefined,
+      feedIntervalMs: 60_000,
+      brain: () => ({
+        ...talkingBrain(),
+        ask: (said: string) => {
+          prompts.push(said);
+          return talkingBrain().ask(said);
+        },
+      }),
+    });
+    const said = { method: DAEMON_METHOD.ASK, said: 'start claude in memnox runtime' };
+
+    await voice.respond(
+      new Lines(),
+      { id: 1, ...said, finished: true },
+      {
+        device: phone(),
+        driving: false,
+      },
+    );
+    const fromPhone = await askedFromPhone(home, new Date(ASKED));
+    await voice.respond(new Lines(), { id: 2, ...said, finished: true });
+    voice.close();
+
+    expect(fromPhone).toBe(true);
+    expect(await askedFromPhone(home, new Date(ASKED))).toBe(false);
+    expect(prompts[0]).toContain('speaking through their phone');
+    expect(prompts.at(-1)).not.toContain('speaking through their phone');
+  });
+});
 
 describe('a phone conversation mirrored on the Mac island', () => {
   it('shows what the phone said, the answer as it streams, and the end, only to the Mac app', async () => {
@@ -451,6 +533,69 @@ describe('the Mac staying silent while a phone holds the voice', () => {
     expect(mac.lines.at(-1)?.event?.heardOn).toBeUndefined();
   });
 
+  it('gives the voice back to the Mac the moment the person asks the Mac something', async () => {
+    const { voice, mac } = await talking();
+    await voice.respond(
+      new Lines(),
+      { id: 1, method: DAEMON_METHOD.SUBSCRIBE },
+      { device: phone(), driving: false },
+    );
+    await voice.respond(new Lines(), {
+      id: 2,
+      method: DAEMON_METHOD.ASK,
+      said: 'what is claude doing',
+    });
+    voice.broadcast(notice);
+    voice.close();
+
+    expect(voiceOnOf(mac)).toEqual([
+      { ...iphone, holding: true },
+      { ...iphone, holding: false },
+    ]);
+    expect(mac.lines.at(-1)?.event?.heardOn).toBeUndefined();
+  });
+
+  it('asks the Mac again about a held call the phone held, once the voice comes back', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'memnox-voice-back-'));
+    const voice = new VoiceSurface({
+      home,
+      now: () => ASKED,
+      log: () => undefined,
+      feedIntervalMs: 60_000,
+    });
+    await voice.respond(
+      new Lines(),
+      { id: 1, method: DAEMON_METHOD.SUBSCRIBE },
+      { device: phone(), driving: false },
+    );
+    await new PendingApprovals(home).raise(
+      {
+        sessionId: 'ses_1',
+        agent: 'claude-code',
+        operation: 'git.push',
+        target: 'main',
+        fingerprint: 'abc123def456',
+        reason: 'pushing to main needs a person',
+      },
+      ASKED,
+      120_000,
+    );
+    const mac = new Lines();
+    await voice.respond(mac, { id: 1, method: DAEMON_METHOD.SUBSCRIBE });
+    const held = (): DaemonEvent[] =>
+      mac.lines.flatMap((each) =>
+        each.event?.kind === DAEMON_EVENT.HELD ? [each.event] : [],
+      );
+    expect(held().map((each) => each.heardOn)).toEqual([iphone]);
+
+    voice.hold.forget(iphone.deviceId);
+    await vi.waitFor(() => expect(held()).toHaveLength(2));
+    voice.close();
+
+    expect(held()[1]?.heardOn).toBeUndefined();
+    expect(held()[1]?.subject).toBe(held()[0]?.subject);
+  });
+
   it('holds the voice on a phone that asks, for the grace after its answer', async () => {
     const { voice, mac } = await talking();
     await voice.respond(
@@ -533,6 +678,131 @@ describe('a show the brain raised for a phone that asked', () => {
     expect(showsOn(asker).some((each) => each.subject === sessions)).toBe(false);
     expect(showsOn(mac).find((each) => each.subject === card)?.origin).toEqual({
       deviceId: 'dev_phone',
+    });
+  });
+});
+
+describe('a page or a list asked for from a phone', () => {
+  async function linkRouter(listening: boolean): Promise<{
+    router: OriginRouter;
+    link: DaemonEvent;
+  }> {
+    const home = await mkdtemp(join(tmpdir(), 'memnox-phone-link-'));
+    await new Devices(home).add(phone());
+    const router = new OriginRouter({
+      home,
+      now: () => SHOWN,
+      driving: () => false,
+      tell: () => true,
+      listening: (deviceId) => listening && deviceId === 'dev_phone',
+    });
+    const link = markNeedsMac({
+      kind: DAEMON_EVENT.SHOW,
+      subject: 'dsp_link',
+      agent: 'memnox',
+      summary: '',
+      at: SHOWN,
+      display: DISPLAY.LINK,
+      sessionId: 'all',
+      app: { links: ['https://github.com/moise10r/orbit/pull/49'] },
+    });
+    return { router, link };
+  }
+
+  it('keeps a link from the Mac and lets only that phone say how it went', async () => {
+    const { router, link } = await linkRouter(true);
+    router.asked('dev_phone', ASKED);
+
+    const claimed = await router.claim([link], [new Lines()]);
+
+    expect(link.needsMac).toBeUndefined();
+    expect(claimed.has(link.subject)).toBe(true);
+    expect(router.sentTo(link.subject, 'dev_other')).toBe(false);
+    expect(router.sentTo(link.subject, 'dev_phone')).toBe(true);
+    expect(router.sentTo(link.subject, 'dev_phone')).toBe(false);
+  });
+
+  it('leaves a link to the Mac when the Mac asked, or when the phone that asked has its app closed', async () => {
+    const fromMac = await linkRouter(true);
+    fromMac.router.asked(undefined, ASKED);
+    expect((await fromMac.router.claim([fromMac.link], [])).has('dsp_link')).toBe(false);
+
+    const closed = await linkRouter(false);
+    closed.router.asked('dev_phone', ASKED);
+    expect((await closed.router.claim([closed.link], [])).has('dsp_link')).toBe(false);
+    expect(closed.router.sentTo('dsp_link', 'dev_phone')).toBe(false);
+  });
+
+  it('opens the link on the asking phone alone, puts the list on it, and keeps where the link opened', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'memnox-phone-page-'));
+    await new Devices(home).add(phone());
+    let now = ASKED;
+    const voice = new VoiceSurface({
+      home,
+      now: () => now,
+      log: () => undefined,
+      feedIntervalMs: 5,
+      brain: () => talkingBrain(),
+    });
+    const mac = new Lines();
+    const asker = new Lines();
+    const principal = { device: phone(), driving: false };
+    await voice.respond(mac, { id: 1, method: DAEMON_METHOD.SUBSCRIBE });
+    await voice.respond(asker, { id: 1, method: DAEMON_METHOD.SUBSCRIBE }, principal);
+    await voice.respond(
+      new Lines(),
+      { id: 2, method: DAEMON_METHOD.ASK, said: 'open pull request 49' },
+      principal,
+    );
+    now = SHOWN;
+    const requests = new DisplayRequests(home);
+    const link = await requests.request({
+      display: DISPLAY.LINK,
+      sessionId: 'all',
+      agent: 'memnox',
+      title: 'github.com',
+      links: ['https://github.com/moise10r/orbit/pull/49'],
+      at: SHOWN,
+    });
+    const list = await requests.request({
+      display: DISPLAY.CARD,
+      sessionId: 'all',
+      agent: 'memnox',
+      title: 'Open pull requests',
+      text: '- #49 Fix the relay',
+      at: SHOWN,
+    });
+
+    const showsOn = (lines: Lines): string[] =>
+      lines.lines.flatMap((each) =>
+        each.event?.kind === DAEMON_EVENT.SHOW ? [each.event.subject] : [],
+      );
+    await vi.waitFor(() =>
+      expect(showsOn(asker).sort()).toEqual([link.id, list.id].sort()),
+    );
+    expect(showsOn(mac)).not.toContain(link.id);
+    expect(showsOn(mac)).toContain(list.id);
+
+    const refused = new Lines();
+    await voice.respond(
+      refused,
+      { id: 3, method: DAEMON_METHOD.DELIVERED, subject: list.id, answer: 'typed' },
+      principal,
+    );
+    const told = new Lines();
+    await voice.respond(
+      told,
+      { id: 4, method: DAEMON_METHOD.DELIVERED, subject: link.id, answer: 'typed' },
+      principal,
+    );
+    voice.close();
+
+    expect(refused.lines[0]?.ok).toBe(false);
+    expect(await requests.deliveryOf(list.id)).toBeNull();
+    expect(told.lines[0]?.ok).toBe(true);
+    expect(await requests.deliveryOf(link.id)).toMatchObject({
+      outcome: 'typed',
+      on: 'iPhone',
     });
   });
 });

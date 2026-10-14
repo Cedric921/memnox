@@ -13,7 +13,7 @@ import {
   type DaemonResponse,
 } from '@memnox/core';
 import type { Brain } from '../operator/brain';
-import { keepOwner, readAddress, readOwner } from '../operator/owner';
+import { howToAddress, keepOwner } from '../operator/owner';
 import {
   backBrief,
   heldBrief,
@@ -25,7 +25,7 @@ import { isWordsMethod, wordsAnswer } from '../operator/recognizer-words';
 import { isHomeMethod } from './home-answer';
 import { answerHome } from './home-status';
 import { AddressLimit } from './address-limit';
-import { deliveredAnswer, seenAnswer } from './voice-deliveries';
+import { deliveredAnswer, phoneDeliveredAnswer, seenAnswer } from './voice-deliveries';
 import { SEEN } from './done-lines';
 import { BrainTurns } from './brain-turns';
 import {
@@ -54,6 +54,7 @@ import { filesListAnswer } from './folder-listing';
 import { markListeningFor } from './voice-listening';
 import { speak, type Render } from './kokoro-speech';
 import { mirrorFor } from './phone-turn';
+import { askAgain } from './news-told';
 import { VoiceHold, voiceOnNotice } from '../remote/voice-hold';
 import { SessionViews } from './session-view';
 import { answerPolish, isPolishMethod } from './polish-calls';
@@ -129,12 +130,17 @@ export class VoiceSurface {
     this.hold = new VoiceHold(deps.now, (voiceOn) => {
       const event = voiceOnNotice(voiceOn, deps.now());
       for (const peer of this.macPeers()) write(peer, { id: 0, ok: true, event });
+      // Back on the Mac, so what waits on an answer and was only shown there is said there.
+      if (voiceOn.holding) return;
+      const told = this.macPeers().map((peer) => this.subscribers.get(peer));
+      void askAgain(this.feed, deps.now(), told).then(() => this.pushWaiting());
     });
     this.router = new OriginRouter({
       home: deps.home,
       now: deps.now,
       driving: (deviceId) => deps.remote?.driving(deviceId) ?? false,
       tell: (deviceId, response) => deps.remote?.tell(deviceId, response) ?? false,
+      listening: (deviceId) => [...this.phones.values()].includes(deviceId),
       stamp: (event) => this.hold.stamp(event),
     });
     this.turns =
@@ -248,6 +254,11 @@ export class VoiceSurface {
     if (request.method === DAEMON_METHOD.REGISTER_KEY)
       return registerKeyAnswer(this.deps.home, request, this.deps.now());
     if (request.method === DAEMON_METHOD.DELIVERED) {
+      if (principal !== undefined) {
+        const sentToIt = this.router.sentTo(request.subject ?? '', principal.device.id);
+        const phone = { name: principal.device.name, sentToIt };
+        return phoneDeliveredAnswer(this.deps.home, request, this.deps.now(), phone);
+      }
       await this.router.delivered(request.subject ?? '', request.answer ?? '');
       return deliveredAnswer(this.deps.home, request, this.deps.now());
     }
@@ -338,7 +349,11 @@ export class VoiceSurface {
     const question = await new AgentQuestions(this.deps.home).read(subject);
     return question === null
       ? null
-      : questionBrief(question, agentName ?? question.agent, await this.howToAddress());
+      : questionBrief(
+          question,
+          agentName ?? question.agent,
+          await howToAddress(this.deps.home),
+        );
   }
 
   private async briefFor(request: DaemonRequest): Promise<string | null> {
@@ -358,11 +373,13 @@ export class VoiceSurface {
       return this.questionFor(request.subject ?? '', event?.agentName);
     if (request.briefing === BRIEFING.NOTICE && request.subject !== undefined) {
       const notice = this.notices.recent(request.subject) ?? askingIn(event);
-      return notice === null ? null : noticeBrief(notice, await this.howToAddress());
+      return notice === null
+        ? null
+        : noticeBrief(notice, await howToAddress(this.deps.home));
     }
     if (request.briefing === BRIEFING.HELD && request.subject !== undefined) {
       const held = event ?? (await this.feed.held(request.subject, this.deps.now()));
-      return held === null ? null : heldBrief(held, await this.howToAddress());
+      return held === null ? null : heldBrief(held, await howToAddress(this.deps.home));
     }
     if (request.briefing === BRIEFING.PAUSED && request.subject !== undefined) {
       const pause = await new SessionPauses(this.deps.home).read(request.subject);
@@ -398,6 +415,7 @@ export class VoiceSurface {
     const ask = this.router.asked(deviceId, this.deps.now());
     if (deviceId !== undefined) this.startFeed();
     if (principal !== undefined) this.hold.began(principal.device);
+    else this.hold.macTookBack();
     const { now } = this.deps;
     const mirror = mirrorFor(principal, request, { mac: () => this.macPeers(), now });
     try {
@@ -414,11 +432,6 @@ export class VoiceSurface {
     return [...this.subscribers.keys()].filter((peer) => !this.phones.has(peer));
   }
 
-  /** What a brief may open with: the address they chose, else their name, which a held call earns. */
-  private async howToAddress(): Promise<string | undefined> {
-    return (await readAddress(this.deps.home)) ?? (await readOwner(this.deps.home));
-  }
-
   /** Everything already waiting first, then each new thing as it appears. */
   private async subscribe(
     socket: Peer,
@@ -431,7 +444,7 @@ export class VoiceSurface {
     if (principal !== undefined && !this.phones.has(socket)) {
       this.phones.set(socket, principal.device.id);
       this.hold.subscribed(principal.device);
-    }
+    } else if (principal !== undefined) this.hold.renewed(principal.device.id);
     write(socket, { id, ok: true });
     await markListeningFor(this.deps.home, this.deps.now(), principal);
     // The Mac app is listening, so the first question should meet a brain that is already up.

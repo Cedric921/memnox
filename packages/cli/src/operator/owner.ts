@@ -66,3 +66,8 @@ async function writeOwner(home: string, change: Owner): Promise<void> {
   if (next.address === undefined) delete next.address;
   await writeJsonFile(path, next);
 }
+
+/** What a brief may open with: the address they chose, else their name, which a held call earns. */
+export async function howToAddress(home: string): Promise<string | undefined> {
+  return (await readAddress(home)) ?? (await readOwner(home));
+}

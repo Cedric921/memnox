@@ -12,6 +12,9 @@ export const OPEN_THE_MAC = 'Open Memnox on your Mac to do that';
 export const NOT_ALLOWED_ON_MAC =
   'This phone may not act on your Mac yet. Allow it from the Mac with Touch ID first';
 
+/** Said when a phone's question would start a session, which is only ever done at the Mac. */
+export const START_AT_THE_MAC = 'New sessions are started at your Mac';
+
 /** How the Mac said a look ended, beside the deliveries a typed instruction has. */
 export const SEEN = 'seen';
 
