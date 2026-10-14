@@ -288,6 +288,7 @@ export class VoiceSurface {
       answer: request.answer,
       at: this.deps.now(),
       ...(request.signature === undefined ? {} : { signature: request.signature }),
+      ...(request.edited === undefined ? {} : { edited: request.edited }),
       ...(principal === undefined ? {} : { principal }),
     });
     if (!result.ok) {

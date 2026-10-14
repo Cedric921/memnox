@@ -31,6 +31,7 @@ import { machinePolicyPath } from '../protect/machine-rules';
 import { mergeRules, WRITTEN_POLICY_FILE } from '../protect/merge-rules';
 import { fileForScope, scopeAnswered, scopedRules } from '../protect/rule-scope';
 import { recordLocalDecisions } from '../sync/local-decisions';
+import { editedProposal } from './confirm-edit';
 import { applyPersonal } from './confirm-work';
 import { FROM_NOW_ON, proposeFromNowOn } from './from-now-on';
 import { registerPolicyFile } from '../policy-registry';
@@ -59,6 +60,8 @@ interface ConfirmInput {
   subject: string;
   answer: string;
   signature?: string;
+  /** The words the person rewrote on a draft card, which the signature covers and which go out instead. */
+  edited?: string;
   at: string;
   /** How a confirmed memnox command is run; memnox itself unless a test hands in another. */
   run?: CommandRunner;
@@ -159,6 +162,9 @@ async function answerProposal(home: string, input: ConfirmInput): Promise<Confir
   const consent = await consentFor(home, input, await proposalNeeds(home, input, found));
   if ('refused' in consent) return { ok: false, error: consent.refused, refused: true };
   if (found === null) return { ok: false, error: `${input.subject} was never proposed` };
+  const edited = confirming ? editedProposal(found, input.edited) : found;
+  if (edited === null)
+    return { ok: false, error: `${input.subject} has no words to rewrite` };
   // Checked before it is marked, so a proposal aimed at another file is refused rather than half done.
   if (confirming && !writesOnlyAPolicyFile(home, found, scope)) {
     return {
@@ -177,8 +183,31 @@ async function answerProposal(home: string, input: ConfirmInput): Promise<Confir
   }
   if ('expired' in outcome) return { ok: false, error: `${input.subject} has expired` };
   if (!confirming) return { ok: true, outcome: answer };
+  const carried = { ...outcome.answered, change: edited.change };
+  return carryOut(home, carried, input, { proposals, by: consent.by, scope });
+}
+
+/**
+ * A confirmed proposal carried out. Work in their name is the one kind whose outcome lives outside this Mac, so
+ * what it came to is written beside the answer either way, for the voice to say whether it went.
+ */
+async function carryOut(
+  home: string,
+  proposal: Proposal,
+  input: ConfirmInput,
+  {
+    proposals,
+    by,
+    scope,
+  }: { proposals: Proposals; by: string; scope: RuleScope | undefined },
+): Promise<ConfirmResult> {
   const run = input.run ?? runMemnox;
-  return apply(home, outcome.answered, { at: input.at, run, by: consent.by, scope });
+  const applied = await apply(home, proposal, { at: input.at, run, by, scope });
+  const kind = proposal.change.kind;
+  if (kind !== PROPOSAL_KIND.WORK && kind !== PROPOSAL_KIND.ACCOUNT) return applied;
+  const said = applied.ok ? applied.outcome : applied.error;
+  await proposals.ran(proposal.id, { ok: applied.ok, said, at: input.at });
+  return applied;
 }
 
 /** What answering this proposal takes: the capability, and whether the session or a drive excuses a signature. */
@@ -447,7 +476,7 @@ async function consentFor(
 /** The device whose key signed this answer: only the phone it came from, or any trusted device at the Mac. */
 async function signerOf(home: string, input: ConfirmInput): Promise<DeviceRecord | null> {
   if (input.signature === undefined) return null;
-  const message = confirmationMessage(input.subject, input.answer);
+  const message = confirmationMessage(input.subject, input.answer, input.edited);
   const principal = input.principal?.device;
   if (principal === undefined)
     return new Devices(home).signerOf(message, input.signature);
