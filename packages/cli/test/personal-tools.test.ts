@@ -18,9 +18,13 @@ import type { SessionToolDeps } from '../src/session-tools/read-tools';
 import {
   findToolTool,
   proposeToolTool,
+  repositoriesTool,
   runToolTool,
+  workspaceGithubTool,
+  sentTool,
   signInTool,
 } from '../src/session-tools/personal-tools';
+import { isVoiceMethod } from '../src/daemon/voice-methods';
 import { WaitingFeed } from '../src/daemon/waiting-feed';
 import { confirmAccountTool, signOutTool } from '../src/session-tools/account-tools';
 import { PendingSignIns } from '../src/sync/sign-ins';
@@ -81,6 +85,21 @@ async function depsAt(seen: Seen, world: World = {}): Promise<SessionToolDeps> {
       accounts: async () => ({ ok: true, value: [github] }),
       signOut: async () => ({ ok: true, value: 1 }),
       signIn: async () => ({ ok: true, value: { url: 'https://consent', opened: true } }),
+      github: async (read) => ({
+        ok: true,
+        value: [{ number: read.number ?? 1, title: 'Rate limits' }],
+      }),
+      repositories: async (all) => ({
+        ok: true,
+        value: {
+          repositories: [
+            { name: 'memnox/runtime', isPrivate: true, pushedAt: '2026-10-09T08:00:00Z' },
+          ],
+          linked: true,
+          elsewhere: 2,
+          ...(all === true ? { others: [{ name: 'moise10r/leaderboard-app' }] } : {}),
+        },
+      }),
     },
   };
 }
@@ -236,20 +255,134 @@ describe("the person's own tools by voice", () => {
     expect(await new PendingSignIns(deps.home).all()).toEqual([]);
   });
 
-  it('names who a message goes to beside the id the tool takes', () => {
+  it('names who a message goes to by name, not by the id the tool takes', () => {
     const draft = workDraftOf(
       'slack',
       'SLACK_SEND_MESSAGE',
       { channel: 'U07AB', text: 'Could you take a look?' },
       { toName: 'Deco Mukendi' },
     );
-    expect(draft.to).toEqual(['Deco Mukendi (U07AB)']);
+    expect(draft.to).toEqual(['Deco Mukendi']);
   });
 
   it('opens the sign in for a tool an admin connected', async () => {
     const deps = await depsAt({ ran: [] });
     const signed = (await signInTool(deps, { toolkit: 'linear' })) as { said: string };
     expect(signed.said).toContain('Linear sign in is open');
+  });
+
+  it('never opens a sign in again for a tool already signed in, unless asked to', async () => {
+    const deps = await depsAt({ ran: [] });
+    const twice = (await signInTool(deps, { toolkit: 'github' })) as {
+      said: string;
+      url?: string;
+    };
+    expect(twice.url).toBeUndefined();
+    expect(twice.said).toContain('already signed in to GitHub as moise10r');
+    const again = (await signInTool(deps, { toolkit: 'github', again: 'true' })) as {
+      url?: string;
+    };
+    expect(again.url).toBe('https://consent');
+  });
+
+  it('never opens a second page while the first sign in is still waiting', async () => {
+    const deps = await depsAt({ ran: [] });
+    await signInTool(deps, { toolkit: 'linear', said: 'list my tickets' });
+    const second = (await signInTool(deps, {
+      toolkit: 'linear',
+      said: 'yes start it',
+    })) as {
+      said: string;
+      url?: string;
+    };
+    expect(second.url).toBeUndefined();
+    expect(second.said).toContain('still waiting in their browser');
+  });
+
+  it('says whether what they confirmed went out, from what happened', async () => {
+    const deps = await depsAt({ ran: [] });
+    const proposals = new Proposals(deps.home);
+    const work = (label: string) => ({
+      change: {
+        kind: PROPOSAL_KIND.WORK,
+        toolkit: 'slack',
+        tool: 'SLACK_SENDS_A_MESSAGE_TO_A_SLACK_CHANNEL',
+        argumentsText: '{}',
+        label,
+      },
+      rationale: label,
+      proposedBy: 'agt_memnox-operator',
+      at: NOW.toISOString(),
+      ttlMs: 5 * 60 * 1000,
+    });
+    const went = await proposals.propose(work('DM to Pac'));
+    await proposals.answer(went.id, 'confirmed', 'person (Touch ID)', NOW.toISOString());
+    await proposals.ran(went.id, {
+      ok: true,
+      said: 'confirmed: DM to Pac',
+      at: NOW.toISOString(),
+    });
+    const broke = await proposals.propose(work('DM to Ana'));
+    await proposals.answer(broke.id, 'confirmed', 'person (Touch ID)', NOW.toISOString());
+    await proposals.ran(broke.id, {
+      ok: false,
+      said: 'Slack is not connected',
+      at: NOW.toISOString(),
+    });
+    await proposals.propose(work('DM to Deco'));
+    const read = (await sentTool(deps)) as {
+      sent: Array<{ what: string; state: string; result?: string }>;
+    };
+    const states = Object.fromEntries(read.sent.map((each) => [each.what, each.state]));
+    expect(states).toEqual({
+      'DM to Pac': 'sent',
+      'DM to Ana': 'failed',
+      'DM to Deco': 'waiting',
+    });
+    expect(read.sent.find((each) => each.what === 'DM to Ana')?.result).toBe(
+      'Slack is not connected',
+    );
+  });
+
+  it('reads a repository through the workspace GitHub App, with no sign in', async () => {
+    const deps = await depsAt({ ran: [] });
+    const read = (await workspaceGithubTool(deps, {
+      repository: 'memnox/runtime',
+      what: 'pull',
+      number: '412',
+    })) as { data: Array<{ number: number }>; untrusted: boolean };
+    expect(read.data[0]?.number).toBe(412);
+    expect(read.untrusted).toBe(true);
+    const missing = (await workspaceGithubTool(deps, { what: 'pulls' })) as {
+      said: string;
+    };
+    expect(missing.said).toContain('owner/repo');
+  });
+
+  it('names the repositories the workspace connected', async () => {
+    const deps = await depsAt({ ran: [] });
+    const read = (await repositoriesTool(deps)) as {
+      repositories: Array<{ name: string }>;
+    };
+    expect(read.repositories.map((each) => each.name)).toEqual(['memnox/runtime']);
+  });
+
+  it('answers with the linked repository and only counts the rest the App can reach', async () => {
+    const deps = await depsAt({ ran: [] });
+    const read = (await repositoriesTool(deps)) as { said: string; others?: unknown };
+    expect(read.said).toContain('linked as its own');
+    expect(read.said).toContain('2 more');
+    expect(read.others).toBeUndefined();
+    const every = (await repositoriesTool(deps, { all: 'true' })) as {
+      others: Array<{ name: string }>;
+    };
+    expect(every.others.map((each) => each.name)).toEqual(['moise10r/leaderboard-app']);
+  });
+
+  it('lets the Mac app connect this machine through the voice surface', () => {
+    expect(isVoiceMethod('machine')).toBe(true);
+    expect(isVoiceMethod('machine-sign-in')).toBe(true);
+    expect(isVoiceMethod('machine-sign-out')).toBe(true);
   });
 
   it('lays out a Slack message and a mail with every argument shown', () => {

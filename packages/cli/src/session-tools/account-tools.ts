@@ -10,6 +10,7 @@ import { textArg, type SessionToolDeps, type ToolArgs } from './read-tools';
  */
 
 const CONFIRM_TTL_MS = minutesToMs(5);
+const GITHUB = 'github';
 
 const NO_SEAM =
   "This Mac cannot reach the person's own accounts. Say so in a sentence; never pretend it was done.";
@@ -18,14 +19,26 @@ const NO_SEAM =
 export async function myAccountsTool(deps: SessionToolDeps): Promise<unknown> {
   const seam = deps.personalWork;
   if (seam === undefined) return { reached: false, said: NO_SEAM };
-  const [read, elsewhere, workspace] = await Promise.all([
+  const [read, elsewhere, workspace, appRepositories] = await Promise.all([
     seam.accounts(),
     deps.personElsewhere?.() ?? false,
     deps.workspaceName?.() ?? null,
+    linkedNames(seam.repositories),
   ]);
   if (!read.ok) return { reached: false, said: read.said };
+  const ownGithub = read.value.some((each) => each.toolkit === GITHUB);
   return {
     ...(elsewhere ? { elsewhere: twoWorkspaces(workspace) } : {}),
+    ...(appRepositories.length === 0
+      ? {}
+      : {
+          workspaceGithub: {
+            repositories: appRepositories,
+            said: ownGithub
+              ? 'GitHub is also connected to their workspace through the Memnox GitHub App, with these repositories.'
+              : 'GitHub is connected to their workspace through the Memnox GitHub App, with these repositories, so never say GitHub is not connected. Read pull requests, issues and commits there with workspace_github at once, with no sign in. Only commenting or changing something as them takes their own GitHub sign in, once, which sign_in opens.',
+          },
+        }),
     accounts: read.value.map((each) => ({
       toolkit: each.toolkit,
       ...workAccountOf(each),
@@ -97,4 +110,12 @@ export async function confirmAccountTool(
     proposed: proposal.id,
     said: `Read it back: ${label} is theirs. It holds once they confirm with Touch ID.`,
   };
+}
+
+/** The workspace's GitHub App is a connection too, and leaving it out had the voice deny a GitHub the person could see. */
+async function linkedNames(
+  read: NonNullable<SessionToolDeps['personalWork']>['repositories'],
+): Promise<string[]> {
+  const found = await read?.();
+  return found?.ok === true ? found.value.repositories.map((each) => each.name) : [];
 }

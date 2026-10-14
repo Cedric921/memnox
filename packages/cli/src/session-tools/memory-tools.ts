@@ -112,7 +112,7 @@ function factRow(fact: WorkspaceFact): Record<string, unknown> {
  */
 export function twoWorkspaces(machineWorkspace: string | null): string {
   const here = machineWorkspace ?? 'the workspace this Mac is in';
-  return `This Mac is in ${here}, and their own sign in, which their accounts and tools go through, is in a different workspace. Say both plainly. When ${here} is theirs, running memnox team and approving it there moves their sign in to it; otherwise memnox login, approved in their own workspace, moves this Mac. Never say which one is wrong unless they told you.`;
+  return `This Mac is in ${here}, and their own sign in, which their accounts and tools go through, is in a different workspace. Say both plainly. When ${here} is theirs, running memnox signin and approving it there moves their sign in to it; otherwise memnox login, approved in their own workspace, moves this Mac. Never say which one is wrong unless they told you.`;
 }
 
 /** The settled facts with the workspace's name, and a word when this Mac is enrolled in another one. */

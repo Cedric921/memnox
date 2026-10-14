@@ -29,7 +29,9 @@ import type {
   CheckedAccount,
   PersonalAnswer,
   PersonalRun,
+  GithubRead,
   PersonalTools,
+  WorkspaceRepositories,
 } from '../sync/personal-work';
 
 import { withEvents } from '../event-store';
@@ -70,6 +72,10 @@ export interface SessionToolDeps {
     link: (toolkit: string) => Promise<PersonalAnswer<string>>;
     /** Whose accounts their sign ins reached, each checked against them. */
     accounts: () => Promise<PersonalAnswer<CheckedAccount[]>>;
+    /** The repositories the workspace connected through its GitHub App. */
+    repositories?: (all?: boolean) => Promise<PersonalAnswer<WorkspaceRepositories>>;
+    /** One read of a repository through that App: pull requests, issues, files, comments, commits. */
+    github?: (read: GithubRead) => Promise<PersonalAnswer<unknown>>;
     /** Signs out of every sign in to one tool, answering how many were undone. */
     signOut: (toolkit: string) => Promise<PersonalAnswer<number>>;
     /** Opens the provider's one time sign in for a tool an admin connected. */

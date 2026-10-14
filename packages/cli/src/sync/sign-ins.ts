@@ -37,6 +37,10 @@ export class PendingSignIns {
     });
   }
 
+  read(toolkit: string): Promise<PendingSignIn | null> {
+    return this.records.read(toolkit);
+  }
+
   all(): Promise<PendingSignIn[]> {
     return this.records.all();
   }

@@ -2,6 +2,7 @@ import { createHash, createPrivateKey, sign } from 'node:crypto';
 import {
   confirmationMessage,
   HTTP,
+  readAccount,
   secondsToMs,
   type WorkAccount,
   type WorkAccountCheck,
@@ -69,7 +70,7 @@ export interface PersonalRun {
 }
 
 const NOT_SIGNED_IN =
-  'This Mac is not signed in as a person, so nothing can be done in their name. Say they can run memnox team login once.';
+  'This Mac is not signed in as a person, so nothing can be done in their name. Say they can sign in once under Account in the Memnox app, the row for the voice and the terminal, or with memnox signin in a terminal.';
 const NOT_REACHABLE =
   'The workspace could not be asked just now. Say so in a sentence; never say there is nothing there.';
 
@@ -183,6 +184,90 @@ export async function signInLink(
   });
 }
 
+/** One repository the workspace's GitHub App was granted, by `owner/repo`. */
+export interface WorkspaceRepository {
+  name: string;
+  isPrivate?: boolean;
+  pushedAt?: string;
+}
+
+/** What the workspace answers about its repositories: the linked ones, and how many more its App can reach. */
+export interface WorkspaceRepositories {
+  repositories: WorkspaceRepository[];
+  /** Whether `repositories` is what the workspace linked, rather than everything its GitHub App was granted. */
+  linked: boolean;
+  elsewhere: number;
+  others?: WorkspaceRepository[];
+}
+
+/**
+ * The repositories the workspace connected, newest push first. Only names, which the workspace hands this Mac's own
+ * credential too, so "which repository is linked" is answered before the person has signed in here.
+ */
+export async function workspaceRepositories(
+  home: string,
+  all = false,
+): Promise<PersonalAnswer<WorkspaceRepositories>> {
+  const reader = (await readPerson(home)) ?? (await machineReader(home));
+  if (reader === null) return { ok: false, said: NOT_SIGNED_IN };
+  try {
+    const answer = await callCloud<Partial<WorkspaceRepositories>>({
+      baseUrl: reader.baseUrl,
+      path: `${workPath(reader, 'repositories')}${all ? '?all=true' : ''}`,
+      token: reader.token,
+      timeoutMs: READ_TIMEOUT_MS,
+    });
+    if (answer.status !== HTTP.OK) return refusal(answer);
+    return { ok: true, value: repositoriesOf(answer.body) };
+  } catch (err) {
+    if (err instanceof CloudUnreachable) return { ok: false, said: NOT_REACHABLE };
+    throw err;
+  }
+}
+
+/** This Mac's own enrolment in the workspace, unless it was taken back. */
+async function machineReader(home: string): Promise<CloudReader | null> {
+  const account = await readAccount(home);
+  return account === null || account.revokedAt !== undefined ? null : account;
+}
+
+/** An answer from before the linked ones were told apart reads as every repository being linked. */
+function repositoriesOf(
+  body: Partial<WorkspaceRepositories> | undefined,
+): WorkspaceRepositories {
+  return {
+    repositories: listOf(body?.repositories),
+    linked: body?.linked ?? true,
+    elsewhere: typeof body?.elsewhere === 'number' ? body.elsewhere : 0,
+    ...(Array.isArray(body?.others) ? { others: body.others } : {}),
+  };
+}
+
+/** One read of a repository through the workspace's GitHub App, which needs no GitHub sign in of the person's own. */
+export interface GithubRead {
+  repository: string;
+  what: string;
+  number?: number;
+}
+
+export async function readWorkspaceGithub(
+  home: string,
+  read: GithubRead,
+): Promise<PersonalAnswer<unknown>> {
+  return asPerson(home, async (person) => {
+    const answer = await callCloud<{ data?: unknown }>({
+      baseUrl: person.baseUrl,
+      path: workPath(person, 'github/read'),
+      method: 'POST',
+      token: person.token,
+      timeoutMs: READ_TIMEOUT_MS,
+      body: read,
+    });
+    if (answer.status !== HTTP.OK) return refusal(answer);
+    return { ok: true, value: answer.body?.data ?? null };
+  });
+}
+
 /** Whose accounts the person's sign ins reached, each checked against them by the workspace. */
 export async function personalAccounts(
   home: string,
@@ -291,7 +376,10 @@ function listOf<T>(value: T[] | undefined): T[] {
   return Array.isArray(value) ? value : [];
 }
 
-function workPath(person: PersonCredential, route: string): string {
+/** Whoever a read goes out as: the person, or for workspace names alone this Mac. */
+type CloudReader = Pick<PersonCredential, 'baseUrl' | 'workspaceId' | 'token'>;
+
+function workPath(person: CloudReader, route: string): string {
   return `/v1/workspaces/${encodeURIComponent(person.workspaceId)}/me/${route}`;
 }
 

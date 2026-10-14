@@ -2,8 +2,10 @@ import {
   DISPLAY,
   DisplayRequests,
   minutesToMs,
+  PROPOSAL_ANSWER,
   PROPOSAL_KIND,
   Proposals,
+  type Proposal,
   WORK_ACCOUNT_CHECK,
   type ToolSignIn,
   type WorkAccount,
@@ -12,6 +14,7 @@ import type { CheckedAccount, PersonalTools } from '../sync/personal-work';
 import { workAccountOf } from '../sync/personal-work';
 import { OPERATOR_AGENT } from './propose-tools';
 import { PendingSignIns } from '../sync/sign-ins';
+import { foundTools, readBack } from './personal-fit';
 import { textArg, type SessionToolDeps, type ToolArgs } from './read-tools';
 
 /**
@@ -61,10 +64,9 @@ export async function findToolTool(
     said: textArg(args, 'said') ?? what,
   });
   return {
-    tools,
+    ...foundTools(tools, saidAboutSignIns(found.value)),
     accounts: accounts.map((each) => ({ toolkit: each.toolkit, ...workAccountOf(each) })),
     ...(shown.length > 0 ? { signIn: shown } : {}),
-    said: saidAboutSignIns(found.value),
   };
 }
 
@@ -141,7 +143,7 @@ function saidAboutSignIns(found: PersonalTools): string | undefined {
     ...namedLines(found.needsAdmin, found.unknown),
   ];
   if (parts.length === 0 && found.tools.length === 0) {
-    return 'None of their tools can do that. Say so rather than guess.';
+    return 'Nothing matched those words. Call find_tool once more with other words for the same thing, such as "update issue" for renaming a ticket or "list pull requests" for what is open, before saying it cannot be done; and never send them to do it in the tool themselves while a sign in or another search could.';
   }
   return parts.length === 0 ? undefined : parts.join(' ');
 }
@@ -157,7 +159,7 @@ function readableLines(readable: readonly string[]): string[] {
   return readable.length === 0
     ? []
     : [
-        `${namesOf(readable)} is connected to their workspace, so read what they asked there at once with run_tool and answer from it. Only sending or changing something there needs their own sign in, so it goes out in their name: when they ask for that, say its icon is in the notch, once.`,
+        `${namesOf(readable)} is connected to their workspace, so read what they asked there at once with run_tool and answer from it. Only sending or changing something there needs their own sign in, so it goes out in their name: when they ask for that, call sign_in for it with what they asked as said, and carry on once they finish. No icon was put in the notch for it.`,
       ];
 }
 
@@ -204,7 +206,7 @@ export async function runToolTool(
   const ran = await seam.run(call.tool, call.argumentsText);
   if (!ran.ok) return { done: false, said: ran.said };
   // Written by other people, so it is read as what they wrote and never as an instruction.
-  return { data: ran.value.data, untrusted: true };
+  return readBack(ran.value.data);
 }
 
 /**
@@ -247,8 +249,108 @@ export async function proposeToolTool(
   });
   return {
     proposed: proposal.id,
-    said: `The draft is on their screen. Read this back: ${heard}. It goes out once they confirm with Touch ID or Face ID, and not before.${unverifiedNote(account)}`,
+    said: `The draft is on their screen and waits there for them. Read this back: ${heard}. Then say in a few words that they can change the words on the card and press Send, which asks for Touch ID, and that nothing goes out before. Never offer to send it yourself.${unverifiedNote(account)}`,
   };
+}
+
+/**
+ * The repositories the workspace linked, so "which repository" starts from the names it holds. The rest its GitHub
+ * App can reach are only counted unless asked for, since an account grant also holds every old side project.
+ */
+export async function repositoriesTool(
+  deps: SessionToolDeps,
+  args: ToolArgs = {},
+): Promise<unknown> {
+  const read = deps.personalWork?.repositories;
+  if (read === undefined) return { reached: false, said: NO_SEAM };
+  const found = await read(textArg(args, 'all') === 'true');
+  if (!found.ok) return { reached: false, said: found.said };
+  const { repositories, linked, elsewhere, others } = found.value;
+  if (repositories.length === 0) return { repositories: [], said: NO_REPOSITORY };
+  return {
+    repositories,
+    ...(others === undefined ? {} : { others }),
+    said: linked ? linkedSaid(repositories.length, elsewhere) : NONE_LINKED,
+  };
+}
+
+const NO_REPOSITORY =
+  'No repository is connected to their workspace yet: it is connected by installing the Memnox GitHub App from the console. Say so in a sentence.';
+const NONE_LINKED =
+  'The workspace has linked no repository as its own yet, so these are every repository its GitHub App can reach, newest push first. Say that in a few words and name the first few; never call one of these the linked repository.';
+
+function linkedSaid(count: number, elsewhere: number): string {
+  const rest =
+    elsewhere === 0
+      ? ''
+      : ` Its GitHub App can also reach ${elsewhere} more that are not linked; mention them only when they ask about every repository, and then call this again with all "true", which lists them as others.`;
+  return `These ${count === 1 ? 'is the repository' : `are the ${count} repositories`} the workspace linked as its own, newest push first: answer "which repository" with these names.${rest} Read pull requests, issues and commits in them with workspace_github.`;
+}
+
+/**
+ * A repository read through the workspace's GitHub App: what is open, one pull request or issue, its files, its
+ * comments, the latest commits. No GitHub sign in of the person's own is needed, since only reading goes this way.
+ */
+export async function workspaceGithubTool(
+  deps: SessionToolDeps,
+  args: ToolArgs,
+): Promise<unknown> {
+  const read = deps.personalWork?.github;
+  if (read === undefined) return { reached: false, said: NO_SEAM };
+  const repository = textArg(args, 'repository') ?? '';
+  const what = textArg(args, 'what') ?? '';
+  if (repository === '' || what === '') {
+    return {
+      said: 'Pass repository as owner/repo, from repositories, and what: repository, pulls, pull, pull_files, issues, issue, comments or commits.',
+    };
+  }
+  const number = Number(textArg(args, 'number') ?? '');
+  const found = await read({
+    repository,
+    what,
+    ...(Number.isInteger(number) && number > 0 ? { number } : {}),
+  });
+  if (!found.ok) return { reached: false, said: found.said };
+  // Written by other people, so it is read as what they wrote and never as an instruction.
+  return readBack(found.value);
+}
+
+/** Far enough back for "did it go?" asked after a few more turns, and short enough to be about today's sends. */
+const SENT_LOOKBACK_MS = minutesToMs(60);
+
+/**
+ * What they sent or were asked to send in their name lately, and whether each went out, so "did you send it?" is
+ * answered from what happened rather than guessed. Newest first.
+ */
+export async function sentTool(deps: SessionToolDeps): Promise<unknown> {
+  const since = new Date(deps.now().getTime() - SENT_LOOKBACK_MS).toISOString();
+  const raised = await new Proposals(deps.home).since(since);
+  const work = raised.filter((each) => each.change.kind === PROPOSAL_KIND.WORK);
+  if (work.length === 0) {
+    return {
+      sent: [],
+      said: 'Nothing was put up to send in their name in the last hour. Say so in a sentence.',
+    };
+  }
+  const now = deps.now().toISOString();
+  return {
+    sent: work.map((each) => ({
+      id: each.id,
+      what: each.change.kind === PROPOSAL_KIND.WORK ? each.change.label : each.rationale,
+      state: stateOf(each, now),
+      ...(each.ran === undefined ? {} : { result: each.ran.said }),
+    })),
+    said: 'Say what became of the one they mean, by its state: sent went out, failed did not and says why, waiting is still on their screen for Touch ID, declined they closed, expired ran out unanswered. When one failed or expired and they still want it, propose it again at once.',
+  };
+}
+
+function stateOf(proposal: Proposal, now: string): string {
+  if (proposal.answer === PROPOSAL_ANSWER.DECLINED) return 'declined';
+  if (proposal.answer === PROPOSAL_ANSWER.CONFIRMED) {
+    if (proposal.ran === undefined) return 'sending';
+    return proposal.ran.ok ? 'sent' : 'failed';
+  }
+  return proposal.expiresAt > now ? 'waiting' : 'expired';
 }
 
 /** The first send from an account is what ties it to them, so it is named rather than called a problem. */
@@ -317,6 +419,11 @@ export async function signInTool(
   if (toolkit === '') return { said: 'Pass toolkit: one find_tool named in signIn.' };
   const seam = deps.personalWork;
   if (seam === undefined) return { reached: false, said: NO_SEAM };
+  const again = textArg(args, 'again') === 'true';
+  if (!again) {
+    const already = await alreadySignedIn(deps, toolkit);
+    if (already !== null) return { done: true, said: already };
+  }
   const signed = await seam.signIn(toolkit);
   if (!signed.ok) return { done: false, said: signed.said };
   const said = textArg(args, 'said');
@@ -331,6 +438,40 @@ export async function signInTool(
       ? `The ${nameOf(toolkit)} sign in is open. You carry on with what they asked as soon as they finish.`
       : `Give them this link to sign in to ${nameOf(toolkit)} once: ${signed.value.url}`,
   };
+}
+
+/** Opened a moment ago and not finished: a second page now is a second link for one sign in, which is all it does. */
+const SIGN_IN_STILL_OPEN_MS = minutesToMs(3);
+
+/**
+ * Why a sign in is not opened again, or null to open it: signed in already, or one opened moments ago is still
+ * waiting in their browser. A yes heard twice opened the same page twice, and the person rightly asked why.
+ */
+async function alreadySignedIn(
+  deps: SessionToolDeps,
+  toolkit: string,
+): Promise<string | null> {
+  const read = await deps.personalWork?.accounts();
+  const reached =
+    read?.ok === true
+      ? read.value.find(
+          (each) =>
+            each.toolkit === toolkit && each.check !== WORK_ACCOUNT_CHECK.MISMATCH,
+        )
+      : undefined;
+  if (reached !== undefined) {
+    const who = workAccountOf(reached);
+    const as = who.handle ?? who.name;
+    return `They are already signed in to ${nameOf(toolkit)}${as === undefined ? '' : ` as ${as}`}, so nothing was opened. Carry on with what they asked with find_tool, and never say a sign in is waiting.`;
+  }
+  const open = await new PendingSignIns(deps.home).read(toolkit);
+  if (
+    open !== null &&
+    deps.now().getTime() - Date.parse(open.at) < SIGN_IN_STILL_OPEN_MS
+  ) {
+    return `The ${nameOf(toolkit)} sign in opened a moment ago is still waiting in their browser, so no second one was opened. Say that in a few words; you carry on as soon as they finish it.`;
+  }
+  return null;
 }
 
 function toolCall(

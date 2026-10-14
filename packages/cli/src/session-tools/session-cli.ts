@@ -29,6 +29,8 @@ import {
   signInLink,
   signInPersonal,
   signOutOf,
+  readWorkspaceGithub,
+  workspaceRepositories,
 } from '../sync/personal-work';
 import type { SessionToolDeps } from './read-tools';
 import type { RewindSeams } from './rewind-tool';
@@ -109,6 +111,8 @@ function depsFor(argv: readonly string[], env: NodeJS.ProcessEnv): SessionToolDe
       signIn: (toolkit) => signInPersonal(homedir(), toolkit),
       link: (toolkit) => signInLink(homedir(), toolkit),
       accounts: () => personalAccounts(homedir()),
+      repositories: (all) => workspaceRepositories(homedir(), all),
+      github: (read) => readWorkspaceGithub(homedir(), read),
       signOut: (toolkit) => signOutOf(homedir(), toolkit),
     },
     delivered: (requestId, waitMs) => awaitDelivery(homedir(), requestId, waitMs),
