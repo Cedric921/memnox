@@ -91,6 +91,23 @@ describe('an answer guessed while the person pauses', () => {
     expect(speculation.takeOvertaken()).toBe(true);
   });
 
+  it('asks afresh rather than adopt a guess whose turn was cut short, so the words are answered', async () => {
+    const speculation = new Speculation<string>(() => undefined);
+    const turn = manualTurn();
+    speculation.start('why are you slow memnox memnox', turn.run);
+    turn.begin();
+    turn.send({ kind: BRAIN_CHUNK.CANCELLED });
+    turn.end('');
+    const heard: DaemonAskChunk[] = [];
+    expect(
+      await speculation.adopt('Why are you slow? Memnox memnox', (chunk) =>
+        heard.push(chunk),
+      ),
+    ).toBe(null);
+    expect(heard).toEqual([]);
+    expect(speculation.takeOvertaken()).toBe(true);
+  });
+
   it('drops a guess the person talked on past, and stops the brain only when it is on it', async () => {
     let stops = 0;
     const speculation = new Speculation<string>(() => {

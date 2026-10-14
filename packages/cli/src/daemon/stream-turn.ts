@@ -43,11 +43,21 @@ export async function streamTurn(
     send(chunk);
     if (!isHold(chunk)) return;
     held = true;
-    send({ kind: BRAIN_CHUNK.DONE });
-    turns.cancel();
+    closeHeld(turns, send, done);
   };
   await turns.ask(asked, each, wanted);
   return { answered: answered.join(''), ended: !held && !cut, held, acted };
+}
+
+/** Closes a turn that ended in a hold: the done the surface waits for, and the brain stopped if still going. */
+function closeHeld(
+  turns: BrainTurns,
+  send: (chunk: DaemonAskChunk) => void,
+  done: boolean,
+): void {
+  send({ kind: BRAIN_CHUNK.DONE });
+  // A hold read from the turn's own end has nothing left to stop, and an interrupt sent to an idle brain killed its warm process.
+  if (!done) turns.cancel();
 }
 
 /** What separates an MCP tool's server prefix from its own name, as in mcp__memnox-operator__show. */

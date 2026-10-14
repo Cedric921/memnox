@@ -43,6 +43,8 @@ interface Guess<R> {
   started: boolean;
   /** Overtaken or stopped at a tool that acts: nothing more of it is wanted. */
   dropped: boolean;
+  /** Its turn was stopped by something other than a drop, so adopting it would answer with nothing. */
+  stopped: boolean;
   finished: boolean;
   done: Promise<R | undefined>;
 }
@@ -79,12 +81,14 @@ export class Speculation<R> {
       forward: null,
       started: false,
       dropped: false,
+      stopped: false,
       finished: false,
       done: Promise.resolve(undefined),
     };
     const send = (chunk: DaemonAskChunk): void => {
       if (guess.forward !== null) return guess.forward(chunk);
       if (guess.dropped) return;
+      if (chunk.kind === BRAIN_CHUNK.CANCELLED) guess.stopped = true;
       if (acts(chunk)) {
         this.dropGuess(guess);
         return;
@@ -118,6 +122,13 @@ export class Speculation<R> {
       this.drop();
       // Only a guess the brain is on is waited out; one still gathering its context is skipped when its moment comes.
       if (guess !== null && guess.started) await guess.done;
+      return null;
+    }
+    // A guess cut short holds only its end, and adopting that left the person with silence, so it is asked afresh.
+    if (guess.stopped) {
+      this.guess = null;
+      if (guess.started) this.overtaken = true;
+      await guess.done;
       return null;
     }
     this.guess = null;

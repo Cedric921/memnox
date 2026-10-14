@@ -3,7 +3,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { decodeResponse, type DaemonResponse } from '@memnox/core';
+import { BrainTurns } from '../src/daemon/brain-turns';
 import { OpeningHold } from '../src/daemon/opening-hold';
+import { streamTurn } from '../src/daemon/stream-turn';
 import { VoiceSurface } from '../src/daemon/voice-surface';
 import { BRAIN_CHUNK, type Brain, type BrainChunk } from '../src/operator/brain';
 
@@ -56,6 +58,26 @@ describe('the first words of a reply', () => {
     const said = await asked([{ kind: BRAIN_CHUNK.TEXT, text: 'I am listening.' }, HOLD]);
     expect(said.filter((each) => each.chunk?.kind === 'text')).toEqual([]);
     expect(said.some((each) => each.chunk?.tool?.endsWith('keep_listening'))).toBe(true);
+  });
+
+  it('never interrupt a brain whose turn already ended on a written out hold, which killed its warm process', async () => {
+    let cancels = 0;
+    const brain: Brain = {
+      ...brainSaying([
+        { kind: BRAIN_CHUNK.TEXT, text: 'I am listening.' },
+        { kind: BRAIN_CHUNK.DONE },
+      ]),
+      cancel: () => {
+        cancels += 1;
+      },
+    };
+    const turn = await streamTurn(
+      new BrainTurns(() => brain, 60_000),
+      'so I was',
+      () => undefined,
+    );
+    expect(turn.held).toBe(true);
+    expect(cancels).toBe(0);
   });
 
   it('are said whole when they are an answer', async () => {
