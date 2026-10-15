@@ -40,8 +40,13 @@ import {
  */
 
 const NOW = '2026-10-05T10:00:00.000Z';
-/** Turns of the event loop a handshake reply may take, many more than a reply from memory. */
-const HANDSHAKE_TURNS = 200_000;
+/** Turns of the event loop a step that reads from disk may take, many more than one answered from memory. */
+const DISK_TURNS = 200_000;
+
+/** Waits as long as a read from disk may take, and fails saying so rather than going on as if it had. */
+async function waitFor(check: () => boolean, never: string): Promise<void> {
+  if (!(await settle(check, DISK_TURNS))) throw new Error(never);
+}
 
 function later(ms: number): string {
   return new Date(Date.parse(NOW) + ms).toISOString();
@@ -131,7 +136,7 @@ async function answered(
   const begun = await at.ask({ method: DAEMON_METHOD.PAIR_BEGIN, name: 'Studio Mac' });
   const qr = qrOf(begun);
   const pairingId = begun.pairing?.id ?? '';
-  await settle(() => at.relay.up);
+  await waitFor(() => at.relay.up, 'the relay link never opened');
   const phone = new Phone(at.relay);
   const before = at.relay.payloads(MAILBOX).length;
   phone.startPairing(Buffer.from(qr.secret, 'base64'));
@@ -162,7 +167,7 @@ describe('pairing a phone', () => {
     const at = await rig();
     const begun = await at.ask({ method: DAEMON_METHOD.PAIR_BEGIN });
     const qr = qrOf(begun);
-    await settle(() => at.relay.up);
+    await waitFor(() => at.relay.up, 'the relay link never opened');
 
     expect(begun.outcome).toBe(REMOTE_OUTCOME.PAIRING);
     expect(begun.pairing?.qr).toMatch(/^memnox:\/\/pair\?d=/);
@@ -354,11 +359,8 @@ async function handshakeReply(relay: MemoryRelay, before: number): Promise<Buffe
       .payloads(MAILBOX)
       .slice(before)
       .find((each) => each[0] === FRAME.HANDSHAKE);
-  // It waits on reads from disk, which a loaded runner can take longer than the usual turns over.
-  await settle(() => reply() !== undefined, HANDSHAKE_TURNS);
-  const found = reply();
-  if (found === undefined) throw new Error('the runtime never answered the handshake');
-  return found;
+  await waitFor(() => reply() !== undefined, 'the runtime never answered the handshake');
+  return reply() ?? Buffer.alloc(0);
 }
 
 async function open(
@@ -378,7 +380,10 @@ async function through(
 ): Promise<unknown[]> {
   const before = at.relay.payloads(MAILBOX).length;
   at.phone.send(request);
-  await settle(() => at.relay.payloads(MAILBOX).length > before);
+  await waitFor(
+    () => at.relay.payloads(MAILBOX).length > before,
+    'the runtime never answered the phone',
+  );
   return at.phone.read(at.relay.payloads(MAILBOX).slice(before));
 }
 
@@ -594,7 +599,7 @@ describe('a drive that ends early tells the Mac with no until', () => {
   it("on the phone's close message", async () => {
     const at = await driving();
     at.relay.deliver(MAILBOX, frame(FRAME.CLOSE));
-    await settle(() => !at.endpoint.driving(at.deviceId));
+    await waitFor(() => !at.endpoint.driving(at.deviceId), 'the drive never ended');
 
     stoppedOnce(at);
   });
@@ -602,7 +607,7 @@ describe('a drive that ends early tells the Mac with no until', () => {
   it('when the relay drops the session', async () => {
     const at = await driving();
     at.relay.drop();
-    await settle(() => !at.endpoint.driving(at.deviceId));
+    await waitFor(() => !at.endpoint.driving(at.deviceId), 'the drive never ended');
 
     stoppedOnce(at);
   });
@@ -682,7 +687,10 @@ describe('a phone with its app open', () => {
 
     const ended = vi.spyOn(at.voice.hold, 'unsubscribed');
     at.relay.drop();
-    await settle(() => ended.mock.calls.length > 0);
+    await waitFor(
+      () => ended.mock.calls.length > 0,
+      'the hold never heard the phone leave',
+    );
     expect(ended).toHaveBeenCalledWith(at.deviceId);
     expect(at.voice.hold.holder()?.deviceId).toBe(at.deviceId);
     at.voice.close();
