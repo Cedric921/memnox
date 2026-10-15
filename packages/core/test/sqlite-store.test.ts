@@ -44,7 +44,7 @@ describe('the event store', () => {
   it('round-trips every field, including the rule and the alternative', async () => {
     const db = await store();
     const original = event({
-      principal: 'tresor',
+      principal: 'ada',
       subagent: 'a1b2c3d4e5f6',
       subagentType: 'Explore',
       target: 'memnox/runtime#41',
@@ -95,11 +95,11 @@ describe('the event store', () => {
     const db = await store();
     await db.append(event({ effect: 'ask' }));
 
-    await db.recordAuthorization('evt_1', 'tresor');
-    expect((await db.query({}))[0]?.authorizedBy).toBe('tresor');
+    await db.recordAuthorization('evt_1', 'ada');
+    expect((await db.query({}))[0]?.authorizedBy).toBe('ada');
 
     await db.recordAuthorization('evt_1', 'somebody-else');
-    expect((await db.query({}))[0]?.authorizedBy).toBe('tresor');
+    expect((await db.query({}))[0]?.authorizedBy).toBe('ada');
     db.close();
   });
 
@@ -232,9 +232,9 @@ describe('what a release may and may not carry with it', () => {
     const db = await store();
     await db.append(event({ effect: 'ask' }));
 
-    await db.recordAuthorization('evt_1', 'tresor');
+    await db.recordAuthorization('evt_1', 'ada');
 
-    expect((await db.query({}))[0]?.authorizedBy).toBe('tresor');
+    expect((await db.query({}))[0]?.authorizedBy).toBe('ada');
     db.close();
   });
 

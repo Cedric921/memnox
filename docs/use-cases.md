@@ -203,7 +203,7 @@ is eight hours.
 **What you'll see.** Every decision it made says who allowed it and until when:
 
 ```
-moise allowed this until 2026-09-26T10:30:00.000Z (reproducing the retry bug), allowance alw_3f9a1c2e
+maya allowed this until 2026-09-26T10:30:00.000Z (reproducing the retry bug), allowance alw_3f9a1c2e
 ```
 
 ---

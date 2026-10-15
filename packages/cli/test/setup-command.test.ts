@@ -430,15 +430,15 @@ describe('memnox setup', () => {
     it('forgets the names and answers given for the workspace it is leaving', async () => {
       /* "Call it something your workspace will recognise" and "put it under
          Memnox" were both asked about the plane being left, so a laptop moved
-         off localhost kept offering "Moise claude" as the name the new
+         off localhost kept offering "Maya claude" as the name the new
          workspace knew it by. It had never heard of it. */
       await run({
         enrolledAt: LOCAL,
         url: LOCAL,
         yes: false,
-        names: { 'Claude Code': 'Moise claude' },
+        names: { 'Claude Code': 'Maya claude' },
       });
-      expect(await readNames(home)).toMatchObject({ 'agt_claude-code': 'Moise claude' });
+      expect(await readNames(home)).toMatchObject({ 'agt_claude-code': 'Maya claude' });
 
       const { out } = await run({ enrolledAt: LOCAL, url: BASE, move: true, yes: false });
 
@@ -446,7 +446,7 @@ describe('memnox setup', () => {
       expect(text).toContain('for the workspace you left');
       /* What it asked about on the way through is the detected name, because
          that is all there is once the chosen one is gone. */
-      expect(text).not.toContain('Moise claude');
+      expect(text).not.toContain('Maya claude');
     });
 
     it('says an agent belongs to another workspace rather than reporting it done', async () => {

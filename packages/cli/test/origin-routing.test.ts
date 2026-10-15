@@ -707,7 +707,7 @@ describe('a page or a list asked for from a phone', () => {
       at: SHOWN,
       display: DISPLAY.LINK,
       sessionId: 'all',
-      app: { links: ['https://github.com/moise10r/orbit/pull/49'] },
+      app: { links: ['https://github.com/acme/shop/pull/49'] },
     });
     return { router, link };
   }
@@ -764,7 +764,7 @@ describe('a page or a list asked for from a phone', () => {
       sessionId: 'all',
       agent: 'memnox',
       title: 'github.com',
-      links: ['https://github.com/moise10r/orbit/pull/49'],
+      links: ['https://github.com/acme/shop/pull/49'],
       at: SHOWN,
     });
     const list = await requests.request({

@@ -71,11 +71,11 @@ describe('the chain a row is read back as', () => {
     expect(
       delegationChain({
         agent: 'claude-code',
-        principal: 'tresor',
+        principal: 'ada',
         subagent: 'a1b2c3d4e5f6',
         subagentType: 'Explore',
       }),
-    ).toBe('tresor > claude-code > Explore subagent a1b2c3d4');
+    ).toBe('ada > claude-code > Explore subagent a1b2c3d4');
     expect(delegationChain({ agent: 'claude-code' })).toBe('claude-code');
   });
 });

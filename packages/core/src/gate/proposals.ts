@@ -84,7 +84,7 @@ export type ProposedChange =
   | {
       kind: typeof PROPOSAL_KIND.ACCOUNT;
       toolkit: string;
-      /** The account as the person heard it named: "moise10r on GitHub". */
+      /** The account as the person heard it named: "maya on GitHub". */
       label: string;
     };
 

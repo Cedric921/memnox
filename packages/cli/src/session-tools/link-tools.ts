@@ -94,7 +94,7 @@ export async function showListTool(
   if (title === '' || text === '') {
     return {
       shown: false,
-      said: 'Pass title, such as "Open pull requests in moise10r/orbit", and text: the list as markdown, one bullet per item.',
+      said: 'Pass title, such as "Open pull requests in acme/shop", and text: the list as markdown, one bullet per item.',
     };
   }
   await new DisplayRequests(deps.home).request({

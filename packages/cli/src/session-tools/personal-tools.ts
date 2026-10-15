@@ -384,7 +384,7 @@ async function theirAccountFor(
   };
 }
 
-/** "As moise10r on GitHub", so the person hears whose name it goes out under. */
+/** "As maya on GitHub", so the person hears whose name it goes out under. */
 function asWhom(toolkit: string, account: WorkAccount): string {
   const who = account.handle ?? account.name;
   return who === undefined ? `On ${nameOf(toolkit)}` : `As ${who} on ${nameOf(toolkit)}`;

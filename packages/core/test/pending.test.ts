@@ -31,10 +31,10 @@ describe('a hold something else can answer', () => {
     const approvals = new PendingApprovals(await home());
     const raised = await approvals.raise(REQUEST, NOW, 120_000);
 
-    const outcome = await approvals.answer(raised.id, HOLD_ANSWER.ONCE, 'tresor', NOW);
+    const outcome = await approvals.answer(raised.id, HOLD_ANSWER.ONCE, 'ada', NOW);
     expect(outcome).not.toBeNull();
     expect((outcome as { answered: { answeredBy?: string } }).answered.answeredBy).toBe(
-      'tresor',
+      'ada',
     );
   });
 
@@ -95,7 +95,7 @@ describe('waiting for somebody to answer', () => {
       sleep: async () => {
         ticks += 1;
         if (ticks === 2) {
-          await approvals.answer(raised.id, HOLD_ANSWER.SESSION, 'tresor', NOW);
+          await approvals.answer(raised.id, HOLD_ANSWER.SESSION, 'ada', NOW);
         }
       },
       intervalMs: 0,

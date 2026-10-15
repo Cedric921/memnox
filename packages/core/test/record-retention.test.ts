@@ -51,7 +51,7 @@ describe('the records beside the ledger age out with it', () => {
       pausedAt: OLD,
     };
     await pauses.pause({ ...pause, sessionId: 'ses_lifted' });
-    await pauses.resume('ses_lifted', 'moise', OLD);
+    await pauses.resume('ses_lifted', 'maya', OLD);
     await pauses.pause({ ...pause, sessionId: 'ses_held' });
     await new SessionTurns(home).ended('ses_old', 'claude-code', OLD);
     await new SessionPosts(home).put({

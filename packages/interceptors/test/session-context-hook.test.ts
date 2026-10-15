@@ -181,7 +181,7 @@ describe('the boundary, when a session starts', () => {
     const deps = await machine();
     await writeProtectionStop(deps.home, {
       at: '2026-09-24T09:00:00.000Z',
-      by: 'moise',
+      by: 'maya',
       reason: 'demo',
       mode: ENFORCEMENT_MODE.ENFORCE,
     });
@@ -192,7 +192,7 @@ describe('the boundary, when a session starts', () => {
     ).hookSpecificOutput.additionalContext;
 
     expect(text).toContain('stopped');
-    expect(text).toContain('moise');
+    expect(text).toContain('maya');
     expect(text).toContain('memnox start');
   });
 

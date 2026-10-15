@@ -128,7 +128,7 @@
    {
     "id": "apr_evt_0002",
     "answer": "once",
-    "by": "tresor"
+    "by": "ada"
    }
   ],
   "fleetSpend": [
@@ -228,7 +228,7 @@
     "agentSessionId": "ses_01",
     "payload": {
      "outcome": "approved",
-     "resolvedBy": "tresor"
+     "resolvedBy": "ada"
     }
    }
   ]

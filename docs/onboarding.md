@@ -227,7 +227,7 @@ no keyword matching; voice is an extra approval route and never replaces the oth
    no module mocks; no wall-clock assertions in tests; one-line comments that say why.
 9. **Copy:** no em dash, en dash or spaced hyphen in any prose, comment or commit; write
    the linking word the dash was hiding.
-10. **Commits:** one line with a conventional prefix, no body, author `moise10r`. Commit
+10. **Commits:** one line with a conventional prefix, no body, under your own name, with no co-author line. Commit
     only your own files, green on typecheck, format, tests and knip at every commit. A
     user-visible change carries a changeset with all four packages at `patch`. Release
     only through `pnpm ship`, and only when asked.

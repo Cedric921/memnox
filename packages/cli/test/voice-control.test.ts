@@ -1029,7 +1029,7 @@ describe('work from the workspace', () => {
   const SAID = {
     title: '@Memnox implement the task "Fix auth token refresh"',
     system: 'slack',
-    author: 'Moise',
+    author: 'Maya',
     at: '2026-10-02T10:00:00.000Z',
   };
   const WHOLE_TICKET = `${TICKET.excerpt} Acceptance: a refresh never logs the token, and a failed refresh signs the person out once.`;

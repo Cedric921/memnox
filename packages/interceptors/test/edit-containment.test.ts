@@ -130,7 +130,7 @@ describe('a hooked agent writing outside its repository', () => {
     // The yes was about a file in /etc, so a write to a dotfile at home still asks.
     expect(
       await containedEdit(
-        edits('/Users/moise/.zshrc'),
+        edits('/Users/maya/.zshrc'),
         false,
         context(machine),
         () => REPO,
@@ -156,7 +156,7 @@ describe('a hooked agent writing outside its repository', () => {
       'session',
       NOW.toISOString(),
     );
-    await approvals.answer(held.id, 'once', 'moise', NOW.toISOString());
+    await approvals.answer(held.id, 'once', 'maya', NOW.toISOString());
 
     expect(
       await containedEdit(edits('/etc/hosts'), false, context(machine), () => REPO),

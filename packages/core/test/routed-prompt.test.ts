@@ -78,8 +78,8 @@ describe('a held call is written down before anybody is asked', () => {
     expect(said.join(' ')).toContain('memnox approve');
     expect(said.join(' ')).toContain(waiting);
 
-    await approvals.answer(waiting, HOLD_ANSWER.ONCE, 'tresor', new Date().toISOString());
-    expect(await asking).toEqual({ answer: HOLD_ANSWER.ONCE, by: 'tresor' });
+    await approvals.answer(waiting, HOLD_ANSWER.ONCE, 'ada', new Date().toISOString());
+    expect(await asking).toEqual({ answer: HOLD_ANSWER.ONCE, by: 'ada' });
   }, 30_000);
 
   it('keeps a question on this machine when the route says the session only', async () => {
@@ -93,7 +93,7 @@ describe('a held call is written down before anybody is asked', () => {
     const asking = prompt.ask(request, PATIENT_MS);
     const waiting = await held(approvals);
     const raised = await approvals.read(waiting);
-    await approvals.answer(waiting, HOLD_ANSWER.DENY, 'tresor', new Date().toISOString());
+    await approvals.answer(waiting, HOLD_ANSWER.DENY, 'ada', new Date().toISOString());
     await asking;
 
     expect(raised?.route).toBe('session');
@@ -135,9 +135,9 @@ describe('a held call is written down before anybody is asked', () => {
 
     const asking = prompt.ask(request, PATIENT_MS);
     const waiting = await held(approvals);
-    await approvals.answer(waiting, HOLD_ANSWER.DENY, 'tresor', new Date().toISOString());
+    await approvals.answer(waiting, HOLD_ANSWER.DENY, 'ada', new Date().toISOString());
 
-    expect(await asking).toEqual({ answer: HOLD_ANSWER.DENY, by: 'tresor' });
+    expect(await asking).toEqual({ answer: HOLD_ANSWER.DENY, by: 'ada' });
   }, 30_000);
 
   /* A walk-away must not become a yes, and it must not hang the agent either. */
@@ -215,7 +215,7 @@ describe('what the seams now get', () => {
 
     const holding = service.hold(request);
     const waiting = await held(approvals);
-    await approvals.answer(waiting, HOLD_ANSWER.ONCE, 'tresor', new Date().toISOString());
+    await approvals.answer(waiting, HOLD_ANSWER.ONCE, 'ada', new Date().toISOString());
 
     expect((await holding).outcome).toBe(HOLD_OUTCOME.ALLOWED);
   }, 30_000);

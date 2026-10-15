@@ -107,7 +107,7 @@ describe('a listing fitted to the answer', () => {
     const issues = Array.from({ length: 20 }, (_, at) => ({
       number: at + 1,
       title: `Issue ${at + 1}`,
-      html_url: `https://github.com/moise10r/orbit/issues/${at + 1}`,
+      html_url: `https://github.com/acme/shop/issues/${at + 1}`,
       isPullRequest: at % 2 === 0,
       body: 'b'.repeat(600),
       created_at: '2026-10-01T10:00:00Z',
@@ -117,7 +117,7 @@ describe('a listing fitted to the answer', () => {
     expect(rows).toHaveLength(20);
     expect(fitted.leftOut).toContain('body');
     expect(rows[19]).toMatchObject({ number: 20, isPullRequest: false });
-    expect(rows[0]?.html_url).toBe('https://github.com/moise10r/orbit/issues/1');
+    expect(rows[0]?.html_url).toBe('https://github.com/acme/shop/issues/1');
     expect(answerText({ data: fitted.value })).not.toContain('left out');
   });
 });
@@ -166,13 +166,13 @@ describe('a page or a list put in front of the person', () => {
   it('asks the Mac to open a web address, and nothing else', async () => {
     const deps = await depsAt();
     const opened = (await openLinkTool(deps, {
-      url: 'https://github.com/moise10r/orbit/pull/49',
+      url: 'https://github.com/acme/shop/pull/49',
     })) as { opened: string };
-    expect(opened.opened).toBe('https://github.com/moise10r/orbit/pull/49');
+    expect(opened.opened).toBe('https://github.com/acme/shop/pull/49');
     const [shown] = await new DisplayRequests(deps.home).open(NOW.toISOString());
     expect(shown).toMatchObject({
       display: DISPLAY.LINK,
-      links: ['https://github.com/moise10r/orbit/pull/49'],
+      links: ['https://github.com/acme/shop/pull/49'],
     });
     for (const url of [
       'file:///etc/passwd',

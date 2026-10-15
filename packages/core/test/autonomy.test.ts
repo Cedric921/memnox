@@ -44,7 +44,7 @@ const event = (over: Partial<MemnoxEvent> = {}): MemnoxEvent => ({
 });
 
 const approved = (n: number, over: Partial<MemnoxEvent> = {}): MemnoxEvent[] =>
-  Array.from({ length: n }, () => event({ authorizedBy: 'tresor', ...over }));
+  Array.from({ length: n }, () => event({ authorizedBy: 'ada', ...over }));
 
 describe('what a person has already decided', () => {
   it('recommends handing over what they keep saying yes to', () => {
@@ -310,7 +310,7 @@ describe('handing over without reaching past what was approved', () => {
 
   it('holds back approvals spread over more targets than one rule should list', () => {
     const spread = Array.from({ length: MOST_HANDED_TARGETS + 1 }, (_, at) =>
-      event({ authorizedBy: 'tresor', target: `path/${at}` }),
+      event({ authorizedBy: 'ada', target: `path/${at}` }),
     );
     const verdict = handOverVerdict('vercel.deploy-preview', delegations(spread));
     expect(verdict.ready ? '' : verdict.because).toContain(
@@ -321,7 +321,7 @@ describe('handing over without reaching past what was approved', () => {
   it('judges the action by the widest class it was recorded under', () => {
     const [found] = delegations([
       ...approved(PROMOTION_THRESHOLD),
-      event({ authorizedBy: 'tresor', class: TOOL_CLASS.DESTRUCTIVE }),
+      event({ authorizedBy: 'ada', class: TOOL_CLASS.DESTRUCTIVE }),
     ]);
     expect(found?.class).toBe(TOOL_CLASS.DESTRUCTIVE);
     expect(found?.recommendation).toBe(AUTONOMY.SUPERVISED);

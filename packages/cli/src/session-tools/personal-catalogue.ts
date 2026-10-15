@@ -140,7 +140,7 @@ export const PERSONAL_TOOLS: readonly ToolDefinition[] = [
   ),
   proposeTool(
     'propose_account',
-    'When they say an account one of their sign ins reached is theirs, such as "yes, moise10r is me": written down for Touch ID, and matched from then on.',
+    'When they say an account one of their sign ins reached is theirs, such as "yes, maya is me": written down for Touch ID, and matched from then on.',
     {
       toolkit: { type: 'string', description: 'the tool, such as "github"' },
       said: SAID_ARG,
@@ -173,7 +173,7 @@ export const PERSONAL_TOOLS: readonly ToolDefinition[] = [
     {
       title: {
         type: 'string',
-        description: 'the card heading, such as "Open pull requests in moise10r/orbit"',
+        description: 'the card heading, such as "Open pull requests in acme/shop"',
       },
       text: {
         type: 'string',

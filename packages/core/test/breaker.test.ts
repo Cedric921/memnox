@@ -206,10 +206,10 @@ describe('a pause is a held session, not a denial', () => {
       pausedAt: NOW,
     });
 
-    expect(await pauses.resume('ses_1', 'tresor', NOW)).not.toBeNull();
+    expect(await pauses.resume('ses_1', 'ada', NOW)).not.toBeNull();
     expect(await pauses.inForce('ses_1')).toBeNull();
-    expect((await pauses.read('ses_1'))?.resumedBy).toBe('tresor');
+    expect((await pauses.read('ses_1'))?.resumedBy).toBe('ada');
     // Lifting one that is not held is an answer, not a failure.
-    expect(await pauses.resume('ses_1', 'tresor', NOW)).toBeNull();
+    expect(await pauses.resume('ses_1', 'ada', NOW)).toBeNull();
   });
 });

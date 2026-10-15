@@ -51,7 +51,7 @@ async function depsAt(seen: Seen, world: World = {}): Promise<SessionToolDeps> {
   const home = await mkdtemp(join(tmpdir(), 'memnox-personal-'));
   const github = {
     toolkit: 'github',
-    account: { externalId: '42', handle: 'moise10r' },
+    account: { externalId: '42', handle: 'maya' },
     check: world.check ?? WORK_ACCOUNT_CHECK.MATCHED,
   };
   return {
@@ -97,7 +97,7 @@ async function depsAt(seen: Seen, world: World = {}): Promise<SessionToolDeps> {
           ],
           linked: true,
           elsewhere: 2,
-          ...(all === true ? { others: [{ name: 'moise10r/leaderboard-app' }] } : {}),
+          ...(all === true ? { others: [{ name: 'maya/leaderboard-app' }] } : {}),
         },
       }),
     },
@@ -157,7 +157,7 @@ describe("the person's own tools by voice", () => {
     expect(proposal?.change).toEqual({
       kind: PROPOSAL_KIND.ACCOUNT,
       toolkit: 'github',
-      label: 'moise10r on github',
+      label: 'maya on github',
     });
     const out = (await signOutTool(deps, { toolkit: 'github' })) as { done: boolean };
     expect(out.done).toBe(true);
@@ -189,7 +189,7 @@ describe("the person's own tools by voice", () => {
       label: 'reply on pull request 412: fixed in the last push',
     })) as { proposed: string; said: string };
     expect(seen.ran).toHaveLength(0);
-    expect(answer.said).toContain('As moise10r on GitHub');
+    expect(answer.said).toContain('As maya on GitHub');
     const proposal = await new Proposals(deps.home).read(answer.proposed);
     expect(proposal?.change).toEqual({
       kind: PROPOSAL_KIND.WORK,
@@ -197,7 +197,7 @@ describe("the person's own tools by voice", () => {
       tool: COMMENT,
       argumentsText: ARGS,
       label: 'reply on pull request 412: fixed in the last push',
-      account: { check: WORK_ACCOUNT_CHECK.MATCHED, key: '42', handle: 'moise10r' },
+      account: { check: WORK_ACCOUNT_CHECK.MATCHED, key: '42', handle: 'maya' },
     });
   });
 
@@ -213,7 +213,7 @@ describe("the person's own tools by voice", () => {
       toolkit: 'github',
       tool: COMMENT,
       kind: WORK_DRAFT_KIND.COMMENT,
-      account: { check: WORK_ACCOUNT_CHECK.MATCHED, key: '42', handle: 'moise10r' },
+      account: { check: WORK_ACCOUNT_CHECK.MATCHED, key: '42', handle: 'maya' },
       where: 'memnox/runtime#412',
       body: 'Fixed in the last push',
       fields: [],
@@ -278,7 +278,7 @@ describe("the person's own tools by voice", () => {
       url?: string;
     };
     expect(twice.url).toBeUndefined();
-    expect(twice.said).toContain('already signed in to GitHub as moise10r');
+    expect(twice.said).toContain('already signed in to GitHub as maya');
     const again = (await signInTool(deps, { toolkit: 'github', again: 'true' })) as {
       url?: string;
     };
@@ -376,7 +376,7 @@ describe("the person's own tools by voice", () => {
     const every = (await repositoriesTool(deps, { all: 'true' })) as {
       others: Array<{ name: string }>;
     };
-    expect(every.others.map((each) => each.name)).toEqual(['moise10r/leaderboard-app']);
+    expect(every.others.map((each) => each.name)).toEqual(['maya/leaderboard-app']);
   });
 
   it('lets the Mac app connect this machine through the voice surface', () => {

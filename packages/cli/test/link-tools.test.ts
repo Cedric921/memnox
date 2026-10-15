@@ -9,7 +9,7 @@ import type { SessionToolDeps } from '../src/session-tools/read-tools';
 /** The voice says where a page opened from whoever opened it, so a phone's page is never called the Mac's. */
 
 const NOW = new Date('2026-10-15T09:00:00.000Z');
-const PAGE = 'https://github.com/moise10r/orbit/pull/49';
+const PAGE = 'https://github.com/acme/shop/pull/49';
 
 async function depsWith(delivery: DisplayDelivery | null): Promise<SessionToolDeps> {
   const home = await mkdtemp(join(tmpdir(), 'memnox-link-'));

@@ -3142,7 +3142,7 @@ never on a name alone. Everything else is somebody saying so." Two sections:
 
 - "Attach an account": an explanation of attribution going forward only, the current account
   pills "provider · id", three fields "Provider" (free text with suggestions, placeholder
-  "github"), "Account id" (placeholder "moise10r"), "Handle, optional", and the button "Attach to
+  "github"), "Account id" (placeholder "maya"), "Handle, optional", and the button "Attach to
   <name>".
 - "This is the same person as": "Every account and address on <name> moves onto the record you
   choose, and this one stops existing...", a select "Choose the record to keep", and the button

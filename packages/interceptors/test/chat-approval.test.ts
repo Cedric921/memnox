@@ -63,7 +63,7 @@ async function ask(home: string, route: ApprovalRoute, personThere = false) {
 }
 
 const home = () => mkdtemp(join(tmpdir(), 'memnox-chat-approval-'));
-const person = () => 'moise';
+const person = () => 'maya';
 
 describe('a question the agent cannot show a prompt for', () => {
   it('is held, and the agent is told to ask the person here', async () => {
@@ -98,11 +98,11 @@ describe('a question the agent cannot show a prompt for', () => {
     await ask(machine, APPROVAL_ROUTE.SESSION);
 
     const said = await answerInChat(machine, 's1', 'yes', NOW, person);
-    expect(said).toContain('moise said yes, once: you may');
+    expect(said).toContain('maya said yes, once: you may');
     const retry = await ask(machine, APPROVAL_ROUTE.SESSION);
 
     expect(retry?.ruling.effect).toBe(DECISION_EFFECT.ALLOW);
-    expect(retry?.ruling.reason).toContain('moise allowed this');
+    expect(retry?.ruling.reason).toContain('maya allowed this');
     // Once is once: the call after that is asked about again.
     expect((await ask(machine, APPROVAL_ROUTE.SESSION))?.ruling.effect).toBe(
       DECISION_EFFECT.ASK,
@@ -129,7 +129,7 @@ describe('a question the agent cannot show a prompt for', () => {
 
     const retry = await ask(machine, APPROVAL_ROUTE.SESSION);
     expect(retry?.ruling.effect).toBe(DECISION_EFFECT.DENY);
-    expect(retry?.ruling.reason).toContain('moise said no to this');
+    expect(retry?.ruling.reason).toContain('maya said no to this');
   });
 
   it('reads an ordinary prompt as a prompt, never as an answer', async () => {
@@ -177,7 +177,7 @@ describe('a person who also takes questions in their DM', () => {
       await approvals.answer(
         held.id,
         'once',
-        'moise in Slack',
+        'maya in Slack',
         new Date(clock).toISOString(),
       );
     };
@@ -189,7 +189,7 @@ describe('a person who also takes questions in their DM', () => {
       sleep: sleep,
     });
 
-    expect(said).toContain('moise in Slack said yes, once: you may');
+    expect(said).toContain('maya in Slack said yes, once: you may');
     expect(said).toContain('Try the same call again now and carry on');
     expect((await ask(machine, APPROVAL_ROUTE.BOTH))?.ruling.effect).toBe(
       DECISION_EFFECT.ALLOW,
@@ -202,7 +202,7 @@ describe('a person who also takes questions in their DM', () => {
     const approvals = new PendingApprovals(machine);
     const [held] = await approvals.list(NOW.toISOString());
     if (held === undefined) throw new Error('the question was held');
-    await approvals.answer(held.id, 'deny', 'moise in Discord', NOW.toISOString());
+    await approvals.answer(held.id, 'deny', 'maya in Discord', NOW.toISOString());
 
     const said = await answersArrived({
       home: machine,
@@ -210,7 +210,7 @@ describe('a person who also takes questions in their DM', () => {
       now: () => NOW,
       waitMs: 0,
     });
-    expect(said).toContain('moise in Discord said no');
+    expect(said).toContain('maya in Discord said no');
     expect(
       await answersArrived({ home: machine, sessionId: 's1', now: () => NOW, waitMs: 0 }),
     ).toBeNull();
