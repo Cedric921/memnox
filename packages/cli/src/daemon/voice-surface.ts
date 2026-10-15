@@ -55,6 +55,7 @@ import { filesListAnswer } from './folder-listing';
 import { markListeningFor } from './voice-listening';
 import { speak, type Render } from './kokoro-speech';
 import { mirrorFor } from './phone-turn';
+import { HeardByBroadcast } from './heard-by-broadcast';
 import { askAgain } from './news-told';
 import { VoiceHold, voiceOnNotice } from '../remote/voice-hold';
 import { SessionViews } from './session-view';
@@ -105,6 +106,7 @@ interface VoiceDeps {
 export class VoiceSurface {
   /** Each subscriber with what it has already been told, so nobody hears a thing twice or never. */
   private readonly subscribers = new Map<Peer, Set<string>>();
+  private readonly heard = new HeardByBroadcast();
   /** Subscribers that are paired phones, by device, which never hear the Mac's own shows. */
   private readonly phones = new Map<Peer, string>();
   private readonly router: OriginRouter;
@@ -204,8 +206,9 @@ export class VoiceSurface {
   broadcast(event: DaemonEvent): void {
     const stamped = this.hold.stamp(event);
     for (const socket of this.subscribers.keys()) {
-      if (!this.phones.has(socket) || heardRemotely(event))
-        write(socket, { id: 0, ok: true, event: stamped });
+      if (this.phones.has(socket) && !heardRemotely(event)) continue;
+      write(socket, { id: 0, ok: true, event: stamped });
+      this.heard.note(socket, event.subject);
     }
   }
 
@@ -477,6 +480,7 @@ export class VoiceSurface {
       // A phone's shows go first, so the Mac app is never sent the raw one as well.
       const claimed = await this.router.claim(waiting, this.macPeers());
       if (this.macPeers().length > 0) await this.feed.told.keep(waiting);
+      this.heard.fold(this.subscribers, waiting);
       sendWaiting(this.subscribers, waiting, {
         claimed,
         now: this.deps.now(),
