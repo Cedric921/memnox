@@ -59,7 +59,8 @@ describe('stopping an agent by voice', () => {
     expect(request).toMatchObject({
       display: 'interrupt',
       sessionId: 'ses_a',
-      tty: expect.stringMatching(/^ttys\d+$/),
+      // A terminal as each system names it: ttys004 on macOS, pts/0 on Linux.
+      tty: expect.stringMatching(/^(ttys\d+|pts\/\d+)$/),
     });
     expect((await new SessionTurns(home).read('ses_a'))?.endedAt).toBe(NOW.toISOString());
   });

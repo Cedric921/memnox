@@ -40,6 +40,8 @@ import {
  */
 
 const NOW = '2026-10-05T10:00:00.000Z';
+/** Turns of the event loop a handshake reply may take, many more than a reply from memory. */
+const HANDSHAKE_TURNS = 200_000;
 
 function later(ms: number): string {
   return new Date(Date.parse(NOW) + ms).toISOString();
@@ -351,11 +353,14 @@ async function open(
 ): Promise<void> {
   const before = relay.payloads(MAILBOX).length;
   phone.startSession(runtimeStatic);
-  await settle(() => relay.payloads(MAILBOX).length > before);
-  const reply = relay
-    .payloads(MAILBOX)
-    .slice(before)
-    .find((each) => each[0] === FRAME.HANDSHAKE);
+  const handshake = (): Buffer | undefined =>
+    relay
+      .payloads(MAILBOX)
+      .slice(before)
+      .find((each) => each[0] === FRAME.HANDSHAKE);
+  // The reply waits on reads from disk, which a loaded runner can take longer than the usual turns over.
+  await settle(() => handshake() !== undefined, HANDSHAKE_TURNS);
+  const reply = handshake();
   if (reply === undefined) throw new Error('the runtime never answered the handshake');
   phone.finishSession(reply);
 }
