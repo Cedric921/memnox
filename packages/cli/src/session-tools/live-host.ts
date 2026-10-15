@@ -30,6 +30,9 @@ export function processAlive(pid: number): boolean {
   }
 }
 
+/** What `ps` prints for a process with no terminal: `??` on macOS, `?` on Linux. */
+const NO_TERMINAL = new Set(['', '?', '??']);
+
 /** The controlling terminal of a process, as `ps` names it, or null for one with none. */
 function ttyOf(pid: number): string | null {
   try {
@@ -37,7 +40,7 @@ function ttyOf(pid: number): string | null {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
     }).trim();
-    return tty === '' || tty === '??' ? null : tty;
+    return NO_TERMINAL.has(tty) ? null : tty;
   } catch {
     // Gone between the two questions, or ps refused: no terminal to name.
     return null;

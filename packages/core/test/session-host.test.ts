@@ -42,6 +42,16 @@ describe('where a session runs', () => {
     ).toEqual({ tty: 'ttys004', appPath: '/Applications/iTerm.app', app: 'iTerm' });
   });
 
+  it('takes the Linux mark for no terminal as none, as it does the macOS one', () => {
+    expect(
+      hostOf([
+        { pid: 3, command: 'claude', tty: '?' },
+        { pid: 2, command: '/bin/bash', tty: 'pts/2' },
+      ]).tty,
+    ).toBe('pts/2');
+    expect(hostOf([{ pid: 3, command: 'claude', tty: '?' }]).tty).toBeUndefined();
+  });
+
   it("names the terminal a Codex inside ChatGPT runs in, never the agent's own app", () => {
     expect(
       hostOf([

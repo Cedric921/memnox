@@ -50,8 +50,8 @@ export function agentProcessOf(chain: readonly HostProcess[]): HostProcess | und
 /** Enough of a chain to hold agent, shells and the app, and never a walk up to launchd. */
 const DEEPEST = 32;
 
-/** `ps` prints this for a process with no terminal, which is not a tab anybody can find. */
-const NO_TERMINAL = '??';
+/** What `ps` prints for a process with no terminal, `??` on macOS and `?` on Linux, which is not a tab anybody can find. */
+const NO_TERMINAL: ReadonlySet<string> = new Set(['', '?', '??']);
 
 /**
  * The app and terminal a chain of processes sits in, nearest first. The app is the outermost
@@ -61,7 +61,7 @@ const NO_TERMINAL = '??';
 export function hostOf(
   chain: readonly HostProcess[],
 ): Pick<SessionHost, 'app' | 'appPath' | 'tty'> {
-  const tty = chain.find((each) => each.tty !== '' && each.tty !== NO_TERMINAL)?.tty;
+  const tty = chain.find((each) => !NO_TERMINAL.has(each.tty))?.tty;
   const agent = agentProcessOf(chain);
   const above = chain.slice(agent === undefined ? 0 : chain.indexOf(agent) + 1, DEEPEST);
   const appPath = above
