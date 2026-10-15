@@ -4,6 +4,7 @@ import {
   LEDGER_SCAN_LIMIT,
   msToMinutes,
   PendingApprovals,
+  RunTerminals,
   SessionHosts,
   SessionPauses,
   SessionSubagents,
@@ -16,6 +17,7 @@ import {
   UNNAMED_SESSION,
   type MemnoxEvent,
   type PendingApproval,
+  type RunTerminal,
   type SessionHost,
 } from '@memnox/core';
 import { readTurnOver, sessionTranscript } from '../daemon/transcript';
@@ -132,15 +134,10 @@ export async function sessionsTool(
   const waiting = await new PendingApprovals(deps.home).list(moment.toISOString());
   const turns = await turnsWithThinking(deps.home, grouped, agent, moment);
   await addJustOpened(deps.home, grouped, agent, since.toISOString());
+  const runs = await addJustLaunched(deps.home, grouped, agent, since.toISOString());
   const hosted = await hostedIds(deps.home);
   foldAliases(grouped, hosted);
-  const rows = [];
-  for (const [sessionId, rowsOf] of grouped) {
-    const turn = newestTurn(turns, hosted, sessionId);
-    if (isOperator(rowsOf, turn)) continue;
-    const one = { sessionId, events: rowsOf, waiting, moment };
-    rows.push(await describe(deps, turn === undefined ? one : { ...one, turn }));
-  }
+  const rows = await describeAll(deps, grouped, { turns, hosted, runs, waiting, moment });
   rows.push(...desktopRows(deps, since.toISOString(), agent));
   // Work happening now first, so "which one is working" reads off the top.
   return rows.sort(
@@ -149,6 +146,38 @@ export async function sessionsTool(
         Number(a.state === SESSION_STATE.WORKING) ||
       b.lastActive.localeCompare(a.lastActive),
   );
+}
+
+/** What is known of every session beside its own rows, read once for all of them. */
+interface Known {
+  turns: ReadonlyMap<string, SessionTurn>;
+  hosted: ReadonlyMap<string, string>;
+  runs: ReadonlyMap<string, RunTerminal>;
+  waiting: readonly PendingApproval[];
+  moment: Date;
+}
+
+/** One row per session, leaving out the voice's own brain. */
+async function describeAll(
+  deps: SessionToolDeps,
+  grouped: ReadonlyMap<string, MemnoxEvent[]>,
+  { turns, hosted, runs, waiting, moment }: Known,
+): Promise<({ lastActive: string; state: SessionState } & Record<string, unknown>)[]> {
+  const rows = [];
+  for (const [sessionId, events] of grouped) {
+    const turn = newestTurn(turns, hosted, sessionId);
+    if (isOperator(events, turn)) continue;
+    const run = runs.get(sessionId);
+    const one = {
+      sessionId,
+      events,
+      waiting,
+      moment,
+      ...(run === undefined ? {} : { run }),
+    };
+    rows.push(await describe(deps, turn === undefined ? one : { ...one, turn }));
+  }
+  return rows;
 }
 
 /** Sessions in the Codex app and Claude desktop, which no hook reports, read from what the apps keep. */
@@ -231,11 +260,13 @@ interface OneSession {
   waiting: readonly PendingApproval[];
   moment: Date;
   turn?: SessionTurn;
+  /** The `memnox run` that launched it, for a session whose agent has fired no hook yet. */
+  run?: RunTerminal;
 }
 
 async function describe(
   deps: SessionToolDeps,
-  { sessionId, events, waiting, moment, turn }: OneSession,
+  { sessionId, events, waiting, moment, turn, run }: OneSession,
 ): Promise<{ lastActive: string; state: SessionState } & Record<string, unknown>> {
   const summary = summarizeSession(events);
   const [task, pause, host, helpers] = await Promise.all([
@@ -247,7 +278,7 @@ async function describe(
   const last = events[events.length - 1]?.at;
   const activeAt = latestOf([summary?.ended, last, turn?.promptAt, turn?.endedAt]);
   // Being opened is not work, so it dates the session without making it look busy.
-  const lastActive = activeAt === '' ? (host?.seenAt ?? '') : activeAt;
+  const lastActive = activeAt === '' ? (host?.seenAt ?? run?.startedAt ?? '') : activeAt;
   const subagents = summarizeSubagents(helpers, moment);
   const thinking =
     turn !== undefined &&
@@ -255,15 +286,17 @@ async function describe(
     !(await turnOverByTranscript(deps.home, sessionId, moment));
   const quietMs = activeAt === '' ? Infinity : moment.getTime() - Date.parse(activeAt);
   const busy = thinking || subagents.working.length > 0;
-  const pid = host === null ? {} : { pid: host.pid };
+  const pid =
+    host !== null ? { pid: host.pid } : run === undefined ? {} : { pid: run.pid };
+  const repositories = repositoriesOf(events);
   return {
     session: sessionId,
-    agent: namedAgent(events) ?? summary?.agent ?? turn?.agent ?? 'unknown',
+    agent: namedAgent(events) ?? summary?.agent ?? turn?.agent ?? run?.agent ?? 'unknown',
     ...(task === null ? {} : { task: task.statement }),
     // The mission stays the task; what the person asked last sits beside it.
     ...(task?.latestAsk === undefined ? {} : { lastAsk: task.latestAsk }),
-    repositories: repositoriesOf(events),
-    started: summary?.started ?? events[0]?.at ?? turn?.promptAt ?? '',
+    repositories: repositories.length > 0 || run === undefined ? repositories : [run.cwd],
+    started: summary?.started ?? events[0]?.at ?? turn?.promptAt ?? run?.startedAt ?? '',
     lastActive,
     quietForMinutes: msToMinutes(moment.getTime() - Date.parse(lastActive)),
     state: stateOf({
@@ -281,6 +314,8 @@ async function describe(
     waitingOnYou: waiting.filter((each) => each.request.sessionId === sessionId).length,
     ...(pause === null ? {} : { paused: pause.reason }),
     ...runningIn(host),
+    // Before its first hook only the run knows the app its tab is in.
+    ...(host === null && run?.app !== undefined ? { runningIn: run.app } : {}),
     ...(helpers.length === 0 ? {} : { subagents }),
     ...(sessionId === UNNAMED_SESSION ? { notAnAgent: LOCAL_WORK } : {}),
   };
@@ -320,6 +355,26 @@ async function addJustOpened(
     if (agent !== undefined && host.agent !== agent) continue;
     if (processAlive(host.pid)) grouped.set(host.sessionId, []);
   }
+}
+
+/**
+ * A session `memnox run` launched whose agent has fired no hook yet: its run is noted before the
+ * agent starts and lives as long as it, so a session started a moment ago is counted at once.
+ */
+async function addJustLaunched(
+  home: string,
+  grouped: Map<string, MemnoxEvent[]>,
+  agent: string | undefined,
+  since: string,
+): Promise<Map<string, RunTerminal>> {
+  const runs = new Map<string, RunTerminal>();
+  for (const run of await new RunTerminals(home).all()) {
+    if (run.startedAt < since || !processAlive(run.pid)) continue;
+    if (agent !== undefined && run.agent !== agent) continue;
+    runs.set(run.sessionId, run);
+    if (!grouped.has(run.sessionId)) grouped.set(run.sessionId, []);
+  }
+  return runs;
 }
 
 /**

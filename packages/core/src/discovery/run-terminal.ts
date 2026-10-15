@@ -44,6 +44,11 @@ export class RunTerminals {
     return this.records.remove(idFor(sessionId));
   }
 
+  /** Every run noted and not yet forgotten, so a session is listed before its agent's first hook. */
+  all(): Promise<RunTerminal[]> {
+    return this.records.all();
+  }
+
   /** The newest run started in this folder or under it since a moment, or null when none was. */
   async startedIn(folder: string, since: string): Promise<RunTerminal | null> {
     const found = (await this.records.all())
