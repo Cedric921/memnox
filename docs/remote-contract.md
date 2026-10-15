@@ -266,7 +266,10 @@ name, until }`, and the Mac island shows "Driven from <name>" for its whole leng
   an `ask` from it is in flight, and for 30 seconds after its last turn or its stream ended, so a
   follow up and what the agent raises from that turn stay on the phone. iOS drops the socket
   within seconds of the app leaving the front, so a live stream means the app is open, and the
-  Mac never wakes on its name said to an open phone. When several phones qualify, the one active
+  Mac never wakes on its name said to an open phone. The relay never says a phone's socket went
+  away, so a phone session that sends no frame for 90 seconds is closed with a `close` frame: an
+  open app asks for its sessions every few seconds and opens a fresh one, and a suspended one
+  gives the voice back after the grace and can be woken again. When several phones qualify, the one active
   most recently holds it. A revoked phone gives the voice back at once. A phone whose app leaves
   the screen sends `voice-release` unless its person kept alerts on the phone, and the voice is
   back on the Mac at once, with what still waits asked again there; a new `subscribe`, a

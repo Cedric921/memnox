@@ -48,6 +48,13 @@ import { PhoneWakes } from './wake';
 /** Often enough that a phone is woken while its person can still answer. */
 const WAKE_INTERVAL_MS = 5_000;
 
+/**
+ * An open phone asks for its sessions every few seconds, and the relay never says when iOS suspended
+ * it, so a session this long without a frame is a phone gone: its stream would otherwise hold the
+ * voice off the Mac, and keep the phone from being woken, until the relay itself dropped.
+ */
+export const SILENT_PHONE_MS = 90_000;
+
 /** What the endpoint needs of the voice surface, so neither builds the other. */
 export interface RemoteVoice {
   respond(peer: Peer, request: DaemonRequest, principal?: RemotePrincipal): Promise<void>;
@@ -86,6 +93,8 @@ export class RemoteEndpoint {
   readonly drives: DriveGrants;
   private link: RelayLink | null = null;
   private readonly sessions = new Map<string, RemoteSession>();
+  /** When each mailbox last carried a frame from its device. */
+  private readonly heardAt = new Map<string, string>();
   private readonly wakes = new PhoneWakes();
   private wakeTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -146,6 +155,7 @@ export class RemoteEndpoint {
   receive(mailbox: string, payload: Buffer): void {
     const pairing = this.pairings.forMailbox(mailbox);
     if (pairing !== null) return pairing.receive(payload);
+    this.heardAt.set(mailbox, this.deps.now());
     void this.sessionFor(mailbox).then((session) => session.receive(payload));
   }
 
@@ -389,11 +399,28 @@ export class RemoteEndpoint {
     if (this.wakeTimer !== null) return;
     const feed = new WaitingFeed(this.deps.home);
     this.wakeTimer = setInterval(() => {
+      // First, so a phone gone quiet counts as closed and is woken in the same pass.
+      this.endSilent();
       void this.wakePhones(feed).catch((err: unknown) =>
         this.deps.log(`could not wake a phone: ${String(err)}`),
       );
     }, this.deps.wakeIntervalMs ?? WAKE_INTERVAL_MS);
     this.wakeTimer.unref();
+  }
+
+  /** Closes each phone session silent past the limit, telling the phone so one only quiet opens afresh; how many. */
+  endSilent(moment: string = this.deps.now()): number {
+    let ended = 0;
+    for (const session of this.sessions.values()) {
+      if (session.destroyed || session.device?.kind !== DEVICE_KIND.PHONE) continue;
+      const heard = this.heardAt.get(session.mailbox);
+      if (heard !== undefined && Date.parse(moment) - Date.parse(heard) < SILENT_PHONE_MS)
+        continue;
+      this.deps.log(`${session.device.name} went quiet, so its session is closed`);
+      session.destroy();
+      ended += 1;
+    }
+    return ended;
   }
 
   /** One pass of the wake check, public so a test runs it without a timer. */

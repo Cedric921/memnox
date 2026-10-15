@@ -19,7 +19,7 @@ import {
 } from '@memnox/core';
 import type { Peer } from '../src/daemon/socket-write';
 import { VoiceSurface } from '../src/daemon/voice-surface';
-import { RemoteEndpoint } from '../src/remote/endpoint';
+import { RemoteEndpoint, SILENT_PHONE_MS } from '../src/remote/endpoint';
 import { FRAME, frame } from '../src/remote/framing';
 import { loadNoise } from '../src/remote/noise';
 import type { QrPayload } from '../src/remote/pairing';
@@ -40,6 +40,10 @@ import {
  */
 
 const NOW = '2026-10-05T10:00:00.000Z';
+
+function later(ms: number): string {
+  return new Date(Date.parse(NOW) + ms).toISOString();
+}
 
 /** One sample of 16 bit mono PCM at 24000 Hz, as the Mac's Kokoro would answer a line. */
 const ONE_SAMPLE_WAV = Buffer.from(
@@ -698,6 +702,22 @@ describe('a phone with its app open', () => {
 
     await through(at, { id: 45, method: DAEMON_METHOD.SUBSCRIBE });
     expect(at.voice.hold.holder()?.deviceId).toBe(at.deviceId);
+    at.voice.close();
+  });
+
+  it('lets a phone gone quiet go, since the relay never says a suspended app left, and the voice comes home', async () => {
+    const at = await paired();
+    await through(at, { id: 46, method: DAEMON_METHOD.SUBSCRIBE });
+    const ended = vi.spyOn(at.voice.hold, 'unsubscribed');
+
+    expect(at.endpoint.endSilent(later(SILENT_PHONE_MS - 1_000))).toBe(0);
+    expect(ended).not.toHaveBeenCalled();
+
+    const before = at.relay.payloads(MAILBOX).length;
+    expect(at.endpoint.endSilent(later(SILENT_PHONE_MS + 1_000))).toBe(1);
+    expect(ended).toHaveBeenCalledWith(at.deviceId);
+    // Told, so a phone that was only quiet opens a fresh session and takes the voice back.
+    expect(at.relay.payloads(MAILBOX).slice(before)).toContainEqual(frame(FRAME.CLOSE));
     at.voice.close();
   });
 
