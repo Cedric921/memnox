@@ -1,7 +1,7 @@
 {
   "name": "@memnox/proxy",
   "version": "0.13.15",
-  "description": "Transparent MCP proxy — stdio or remote HTTP — that routes every tools/call through the Memnox runtime before it reaches the server.",
+  "description": "Transparent MCP proxy, over stdio or remote HTTP, that routes every tools/call through the Memnox runtime before it reaches the server.",
   "keywords": [
     "mcp",
     "firewall",
