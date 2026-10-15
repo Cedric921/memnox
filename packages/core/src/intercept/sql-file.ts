@@ -2,7 +2,7 @@
  * The one part of the SQL check that reads a file: the statements behind `psql -f`. Kept
  * apart from `sql.ts` so the statement check itself stays pure and loads where no disk is.
  */
-import { readFileSync, statSync } from 'node:fs';
+import { closeSync, fstatSync, openSync, readFileSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 
 /** Flags whose value is a file of statements, per client. */
@@ -27,12 +27,17 @@ export function fileStatementIn(
   const path = valueAfter(args, flags);
   if (path === undefined || path === '-') return null;
   const absolute = isAbsolute(path) ? path : join(env['PWD'] ?? process.cwd(), path);
+  let fd: number | undefined;
   try {
-    if (statSync(absolute).size > MOST_STATEMENT_BYTES) return null;
-    return readFileSync(absolute, 'utf8');
+    // One open file for the size and the read, so the file cannot be swapped between the two.
+    fd = openSync(absolute, 'r');
+    if (fstatSync(fd).size > MOST_STATEMENT_BYTES) return null;
+    return readFileSync(fd, 'utf8');
   } catch {
     // A file that will not read is one nothing here can vouch for.
     return null;
+  } finally {
+    if (fd !== undefined) closeSync(fd);
   }
 }
 

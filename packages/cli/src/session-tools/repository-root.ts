@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 
 /**
@@ -40,15 +40,26 @@ const BRANCH_REF = 'ref: refs/heads/';
 const GITDIR_LINE = /^gitdir:\s*(.+)$/m;
 
 /**
+ * Where a repository's git folder is: `.git` itself, or the folder a worktree's `.git` file names.
+ * Read straight away rather than checked first, so it cannot change between the two.
+ */
+function gitDirOf(marker: string): string | undefined {
+  try {
+    return GITDIR_LINE.exec(readFileSync(marker, 'utf8'))?.[1]?.trim();
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'EISDIR') return marker;
+    throw err;
+  }
+}
+
+/**
  * The branch a repository has checked out, read from its HEAD on the disk, since a card polled
  * every few seconds should not start git for it; null when detached or unreadable.
  */
 export function branchAt(root: string): string | null {
   try {
     const marker = join(root, GIT_MARKER);
-    const pointer = statSync(marker).isFile()
-      ? GITDIR_LINE.exec(readFileSync(marker, 'utf8'))?.[1]?.trim()
-      : marker;
+    const pointer = gitDirOf(marker);
     if (pointer === undefined) return null;
     const head = readFileSync(join(resolve(root, pointer), 'HEAD'), 'utf8').trim();
     return head.startsWith(BRANCH_REF) ? head.slice(BRANCH_REF.length) : null;
