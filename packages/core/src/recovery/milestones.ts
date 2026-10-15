@@ -18,6 +18,17 @@ import {
 } from './milestone';
 import { REWIND_REFUSAL, RewindRefused, type GitPort, type WorktreePort } from './ports';
 
+/**
+ * Who signs a milestone commit. It is Memnox's own object under `refs/memnox/`, never in the
+ * person's history, and git refuses `commit-tree` outright on a machine with no identity set.
+ */
+const MILESTONE_IDENTITY: Readonly<Record<string, string>> = {
+  GIT_AUTHOR_NAME: 'Memnox',
+  GIT_AUTHOR_EMAIL: 'milestone@memnox.invalid',
+  GIT_COMMITTER_NAME: 'Memnox',
+  GIT_COMMITTER_EMAIL: 'milestone@memnox.invalid',
+};
+
 /** An ignored file bigger than this is build output or data, never something to put back. */
 const MOST_IGNORED_BYTES = 1024 * 1024;
 
@@ -140,13 +151,16 @@ export class Milestones {
       ...(request.note === undefined ? {} : { note: request.note }),
     };
     const parent = await this.head();
-    const commit = await this.git.run([
-      'commit-tree',
-      tree,
-      ...(parent === null ? [] : ['-p', parent]),
-      '-m',
-      encodeMessage(record),
-    ]);
+    const commit = await this.git.run(
+      [
+        'commit-tree',
+        tree,
+        ...(parent === null ? [] : ['-p', parent]),
+        '-m',
+        encodeMessage(record),
+      ],
+      MILESTONE_IDENTITY,
+    );
 
     const id = milestoneIdFor(request.at, commit);
     await this.git.run(['update-ref', refFor(id), commit]);
