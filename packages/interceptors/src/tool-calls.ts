@@ -8,6 +8,7 @@ import {
   HTTP_METHOD,
   HTTP_METHOD_ARGUMENT,
   isWorkspaceTool,
+  mcpToolParts,
   ownToolDeclaration,
   TOOL_CLASS,
   type ToolClass,
@@ -113,7 +114,6 @@ const PATH_KEYS: readonly string[] = [
 ];
 
 /** Claude Code, Codex and Gemini CLI spell an MCP tool `mcp__<server>__<tool>`. */
-const MCP_TOOL = /^mcp__(.+?)__(.+)$/;
 const MCP_PREFIX = 'mcp';
 
 /** A URL inside free text, which is where Gemini's fetch tool carries its address. */
@@ -215,9 +215,9 @@ function requestsFor(
   base: PathBase,
   declared: ToolDeclarations,
 ): ToolRequest[] | null {
-  const mcp = MCP_TOOL.exec(tool);
+  const mcp = mcpToolParts(tool);
   if (mcp !== null) {
-    const [server, name] = [mcp[1] ?? '', mcp[2] ?? ''];
+    const { server, name } = mcp;
     return isWorkspaceTool(server, name, projectServers(base.cwd))
       ? null
       : mcpRequests(server, name, input, declared);

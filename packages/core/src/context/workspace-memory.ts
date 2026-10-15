@@ -4,6 +4,7 @@
  * ranks it, so the choosing happens here, by shared words, with every match naming its words.
  */
 
+import { withoutTrailing } from '../domain/plain-text';
 import { MOST_DECISIONS_PER_WRITE } from './context.constants';
 
 /** One settled thing, as the control plane's `GET :ws/memory` sends it. */
@@ -285,5 +286,5 @@ function singular(word: string): string {
 }
 
 function normalPath(path: string): string {
-  return path.replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/+$/, '');
+  return withoutTrailing(path.replace(/\\/g, '/').replace(/^\.\//, ''), '/');
 }

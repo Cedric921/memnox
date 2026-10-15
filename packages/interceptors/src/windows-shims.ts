@@ -2,6 +2,7 @@
  * The `.cmd` files that put the interceptor in front of a binary on Windows, where a
  * `#!/bin/sh` script runs only inside Git Bash and cmd.exe and PowerShell look for PATHEXT.
  */
+import { withoutTrailing } from '@memnox/core';
 
 /** What a Windows shim starts: this node and the two entry points, by absolute path. */
 export interface WindowsShimEntry {
@@ -24,19 +25,12 @@ function batchLiteral(text: string): string {
   return text.replaceAll('%', '%%');
 }
 
-/** A directory without the backslashes it ends on, by a loop rather than a pattern that could backtrack. */
-function withoutTrailingBackslashes(directory: string): string {
-  let end = directory.length;
-  while (end > 0 && directory[end - 1] === '\\') end -= 1;
-  return directory.slice(0, end);
-}
-
 /**
  * Our directory taken off PATH in both spellings, with and without the trailing backslash,
  * so the fallback finds the real binary rather than this file again. Substitution ignores case.
  */
 function pathWithout(directory: string): string[] {
-  const dir = batchLiteral(withoutTrailingBackslashes(directory));
+  const dir = batchLiteral(withoutTrailing(directory, '\\'));
   return [
     'set "PATH=;%PATH%;"',
     `set "PATH=%PATH:;${dir};=;%"`,

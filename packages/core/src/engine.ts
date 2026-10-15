@@ -6,6 +6,7 @@
 export * from './domain/action-event';
 export * from './domain/redact';
 export * from './domain/digest';
+export * from './domain/plain-text';
 export * from './event/event';
 export * from './constants/action.constants';
 export * from './constants/decision.constants';

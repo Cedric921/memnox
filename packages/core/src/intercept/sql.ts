@@ -229,12 +229,38 @@ const MONGO_RULES: readonly {
   },
 ];
 
+/**
+ * Every string in one quote emptied to a pair of quotes, a backslash escaping the next character,
+ * in one pass. A quote with no close is left as written, and so is the rest after it, since the
+ * same scan from any later quote would find no close either.
+ */
+function emptiedStrings(text: string, quote: string): string {
+  let out = '';
+  let at = 0;
+  while (at < text.length) {
+    const open = text.indexOf(quote, at);
+    if (open === -1) break;
+    let close = -1;
+    for (let next = open + 1; next < text.length; next += 1) {
+      if (text[next] === '\\') next += 1;
+      else if (text[next] === quote) {
+        close = next;
+        break;
+      }
+    }
+    if (close === -1) break;
+    out += `${text.slice(at, open)}${quote}${quote}`;
+    at = close + 1;
+  }
+  return out + text.slice(at);
+}
+
 /** mongosh takes JavaScript rather than SQL, so it is read by its method names instead. */
 export function inspectMongo(raw: string): SqlFinding {
-  const script = raw
-    .replace(/'(?:[^'\\]|\\.)*'/g, "''")
-    .replace(/"(?:[^"\\]|\\.)*"/g, '""')
-    .replace(/\/\/[^\n]*/g, ' ');
+  const script = emptiedStrings(emptiedStrings(raw, "'"), '"').replace(
+    /\/\/[^\n]*/g,
+    ' ',
+  );
   const statement = /\.(\w+)\s*\(/.exec(script)?.[1] ?? 'unknown';
   // First match wins, most dangerous first, as the SQL rules are ordered.
   const rule = MONGO_RULES.find((candidate) => candidate.pattern.test(script));
