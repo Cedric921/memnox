@@ -76,8 +76,9 @@ export interface GuardPolicy {
   allowWrite: readonly string[];
 }
 
+/** A path as a profile string: backslashes first, so one at the end cannot turn the closing quote into text. */
 function quote(path: string): string {
-  return `"${path.replace(/"/g, '\\"')}"`;
+  return `"${path.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 }
 
 /**
