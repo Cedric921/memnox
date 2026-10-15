@@ -1,6 +1,6 @@
 {
   "name": "memnox",
-  "version": "0.13.14",
+  "version": "0.13.15",
   "description": "Your agents can already do the work. Memnox makes it safe to let them do it without you: one boundary of allow, ask and deny over every agent on your machine.",
   "keywords": [
     "ai-agents",
