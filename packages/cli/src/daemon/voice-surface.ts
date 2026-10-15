@@ -347,13 +347,9 @@ export class VoiceSurface {
   /** An agent's question, read out with its choices, or nothing once it is answered or gone. */
   private async questionFor(subject: string, agentName?: string): Promise<string | null> {
     const question = await new AgentQuestions(this.deps.home).read(subject);
-    return question === null
-      ? null
-      : questionBrief(
-          question,
-          agentName ?? question.agent,
-          await howToAddress(this.deps.home),
-        );
+    if (question === null) return null;
+    const address = await howToAddress(this.deps.home);
+    return questionBrief(question, agentName ?? question.agent, address);
   }
 
   private async briefFor(request: DaemonRequest): Promise<string | null> {
@@ -373,9 +369,8 @@ export class VoiceSurface {
       return this.questionFor(request.subject ?? '', event?.agentName);
     if (request.briefing === BRIEFING.NOTICE && request.subject !== undefined) {
       const notice = this.notices.recent(request.subject) ?? askingIn(event);
-      return notice === null
-        ? null
-        : noticeBrief(notice, await howToAddress(this.deps.home));
+      if (notice === null) return null;
+      return noticeBrief(notice, await howToAddress(this.deps.home));
     }
     if (request.briefing === BRIEFING.HELD && request.subject !== undefined) {
       const held = event ?? (await this.feed.held(request.subject, this.deps.now()));
