@@ -133,8 +133,9 @@ async function answered(
   const pairingId = begun.pairing?.id ?? '';
   await settle(() => at.relay.up);
   const phone = new Phone(at.relay);
+  const before = at.relay.payloads(MAILBOX).length;
   phone.startPairing(Buffer.from(qr.secret, 'base64'));
-  const reply = at.relay.payloads(MAILBOX).at(-1) ?? Buffer.alloc(0);
+  const reply = await handshakeReply(at.relay, before);
   const said = phone.finishPairing(reply, kind === 'desktop' ? 'Studio' : 'iPhone', kind);
   expect(said.machine).toBe('Studio Mac');
   expect(said.runtimeStatic?.toString('base64')).toBe(qr.runtimeNoiseStatic);
@@ -346,6 +347,20 @@ async function paired(): Promise<
   return { ...at, phone, runtimeStatic, deviceId: accepted.device?.id ?? '' };
 }
 
+/** The runtime's handshake reply, the first to arrive after `before`, waited for rather than assumed there. */
+async function handshakeReply(relay: MemoryRelay, before: number): Promise<Buffer> {
+  const reply = (): Buffer | undefined =>
+    relay
+      .payloads(MAILBOX)
+      .slice(before)
+      .find((each) => each[0] === FRAME.HANDSHAKE);
+  // It waits on reads from disk, which a loaded runner can take longer than the usual turns over.
+  await settle(() => reply() !== undefined, HANDSHAKE_TURNS);
+  const found = reply();
+  if (found === undefined) throw new Error('the runtime never answered the handshake');
+  return found;
+}
+
 async function open(
   relay: MemoryRelay,
   phone: Phone,
@@ -353,16 +368,7 @@ async function open(
 ): Promise<void> {
   const before = relay.payloads(MAILBOX).length;
   phone.startSession(runtimeStatic);
-  const handshake = (): Buffer | undefined =>
-    relay
-      .payloads(MAILBOX)
-      .slice(before)
-      .find((each) => each[0] === FRAME.HANDSHAKE);
-  // The reply waits on reads from disk, which a loaded runner can take longer than the usual turns over.
-  await settle(() => handshake() !== undefined, HANDSHAKE_TURNS);
-  const reply = handshake();
-  if (reply === undefined) throw new Error('the runtime never answered the handshake');
-  phone.finishSession(reply);
+  phone.finishSession(await handshakeReply(relay, before));
 }
 
 /** What the phone hears after sending one request through its tunnel. */
