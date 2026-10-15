@@ -38,6 +38,16 @@ describe('a tool call as the actions a rule is written against', () => {
     expect(actions).toEqual(['mcp.stripe.create_refund', 'mcp.create_refund']);
   });
 
+  it('splits an MCP name at the first separator, and a hostile one at once', () => {
+    const actions = requestsFor('mcp__github__repos__list', {}).map(
+      (each) => each.action,
+    );
+    expect(actions).toEqual(['mcp.github.repos__list', 'mcp.repos__list']);
+    // The shape CodeQL found could make a backtracking pattern slow, split like any other name.
+    const hostile = `mcp__a__${'a__a'.repeat(50_000)}`;
+    expect(requestsFor(hostile, {})[0]?.action).toBe(`mcp.a.${'a__a'.repeat(50_000)}`);
+  });
+
   it('reads a DELETE with no WHERE inside a shell command as unbounded', () => {
     const [request] = requestsFor('Bash', {
       command: 'psql $DATABASE_URL -c "DELETE FROM orders"',

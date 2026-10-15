@@ -200,8 +200,9 @@ const CONFIG_EXTENSIONS: readonly string[] = [
   '.env',
 ];
 /** A source file that draws on screen says so in its imports, which sit in the first lines. */
-const DRAWS =
-  /^\s*import\s+(SwiftUI|AppKit|UIKit|Cocoa|MetalKit)\b|from\s+['"](react|react-dom|vue|svelte)['"]/m;
+const DRAWS_IN_SWIFT = /^\s*import\s+(?:SwiftUI|AppKit|UIKit|Cocoa|MetalKit)\b/m;
+/** Anywhere on a line, since `from 'react'` closes an import that opened earlier on it. */
+const DRAWS_IN_SCRIPT = /\bfrom\s+['"](?:react|react-dom|vue|svelte)['"]/;
 const HEAD_BYTES = 4_096;
 
 /** What kind of file it is, from its name and, for source, the frameworks it imports. */
@@ -214,7 +215,10 @@ export function kindOf(path: string): FileKind {
   if (INTERFACE_EXTENSIONS.includes(ext)) return FILE_KIND.INTERFACE;
   if (DOCS_EXTENSIONS.includes(ext)) return FILE_KIND.DOCS;
   if (CONFIG_EXTENSIONS.includes(ext)) return FILE_KIND.CONFIG;
-  return DRAWS.test(headOf(path)) ? FILE_KIND.INTERFACE : FILE_KIND.CODE;
+  const head = headOf(path);
+  return DRAWS_IN_SWIFT.test(head) || DRAWS_IN_SCRIPT.test(head)
+    ? FILE_KIND.INTERFACE
+    : FILE_KIND.CODE;
 }
 
 function headOf(path: string): string {

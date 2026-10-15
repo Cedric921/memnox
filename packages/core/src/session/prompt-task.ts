@@ -33,7 +33,18 @@ const NOT_THEIR_WORDS =
   /^(\d{4}-\d{2}-\d{2}[T ]\d|<\/?[a-z_-]+|\[(image|pasted)|```|\$ |>)/i;
 
 /** Quotes and code marks somebody typed around a paste, which are not part of the ask. */
-const WRAPPING = /^[`'"\s]+|[`'"\s]+$/g;
+const WRAPPING = new Set(['`', "'", '"']);
+
+/** A line without its wrapping and spaces at either end, by a loop rather than a pattern that could backtrack. */
+function unwrapped(line: string): string {
+  const wraps = (char: string | undefined): boolean =>
+    char !== undefined && (WRAPPING.has(char) || char.trim() === '');
+  let start = 0;
+  let end = line.length;
+  while (start < end && wraps(line[start])) start += 1;
+  while (end > start && wraps(line[end - 1])) end -= 1;
+  return line.slice(start, end);
+}
 
 /** Enough letters to be a sentence somebody typed rather than a stray mark. */
 const MOST_WORDS_NEEDED = 3;
@@ -45,7 +56,7 @@ const MOST_WORDS_NEEDED = 3;
 export function statementOfPrompt(prompt: string): string {
   const lines = prompt
     .split('\n')
-    .map((each) => each.replace(WRAPPING, '').trim())
+    .map((each) => unwrapped(each).trim())
     .filter((each) => each !== '' && !NOT_THEIR_WORDS.test(each));
   const line =
     lines.find((each) => (each.match(/[a-z]{2,}/gi) ?? []).length >= MOST_WORDS_NEEDED) ??

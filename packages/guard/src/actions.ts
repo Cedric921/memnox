@@ -22,7 +22,17 @@ const SEARCH_TOOLS: readonly string[] = ['WebSearch'];
 const PATH_KEYS: readonly string[] = ['file_path', 'notebook_path', 'path'];
 
 /** Claude's spelling of an MCP tool, `mcp__<server>__<tool>`. */
-const MCP_TOOL = /^mcp__(.+?)__(.+)$/;
+/** An MCP tool's name: `mcp__<server>__<tool>`, the server ending at the first separator after it starts. */
+const MCP_PREFIX = 'mcp__';
+const MCP_SEPARATOR = '__';
+
+/** The server and tool an MCP name carries, split by index rather than a pattern that could backtrack. */
+function mcpParts(tool: string): [string, string] | null {
+  if (!tool.startsWith(MCP_PREFIX) || tool.includes('\n')) return null;
+  const split = tool.indexOf(MCP_SEPARATOR, MCP_PREFIX.length + 1);
+  if (split === -1 || split + MCP_SEPARATOR.length >= tool.length) return null;
+  return [tool.slice(MCP_PREFIX.length, split), tool.slice(split + MCP_SEPARATOR.length)];
+}
 const URL_IN_TEXT = /https?:\/\/[^\s"'<>]+/;
 
 /** A tool a framework calls by its own name, with no server: named under `tool.`. */
@@ -39,8 +49,8 @@ export function requestsFor(
   input: Readonly<Record<string, unknown>>,
   place: CallPlace = {},
 ): ActionRequest[] {
-  const mcp = MCP_TOOL.exec(tool);
-  if (mcp !== null) return mcpRequests(mcp[1] ?? '', mcp[2] ?? '', input);
+  const mcp = mcpParts(tool);
+  if (mcp !== null) return mcpRequests(mcp[0], mcp[1], input);
   if (SHELL_TOOLS.includes(tool)) return shellRequests(textOf(input, ['command']) ?? '');
   const path = textOf(input, PATH_KEYS);
   if (READ_TOOLS.includes(tool)) {

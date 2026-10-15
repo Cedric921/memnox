@@ -24,12 +24,19 @@ function batchLiteral(text: string): string {
   return text.replaceAll('%', '%%');
 }
 
+/** A directory without the backslashes it ends on, by a loop rather than a pattern that could backtrack. */
+function withoutTrailingBackslashes(directory: string): string {
+  let end = directory.length;
+  while (end > 0 && directory[end - 1] === '\\') end -= 1;
+  return directory.slice(0, end);
+}
+
 /**
  * Our directory taken off PATH in both spellings, with and without the trailing backslash,
  * so the fallback finds the real binary rather than this file again. Substitution ignores case.
  */
 function pathWithout(directory: string): string[] {
-  const dir = batchLiteral(directory.replace(/\\+$/, ''));
+  const dir = batchLiteral(withoutTrailingBackslashes(directory));
   return [
     'set "PATH=;%PATH%;"',
     `set "PATH=%PATH:;${dir};=;%"`,

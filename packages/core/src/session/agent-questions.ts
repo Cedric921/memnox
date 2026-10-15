@@ -61,17 +61,23 @@ export function fullyAnswered(question: AgentQuestion): boolean {
   );
 }
 
+/** The marks a spoken answer may end on, which never decide which option it names. */
+const CLOSING_MARKS = new Set(['.', '!', '?']);
+
+/** A sentence without the marks it ends on, by a loop rather than a pattern that could backtrack. */
+function withoutClosingMarks(text: string): string {
+  let end = text.length;
+  while (end > 0 && CLOSING_MARKS.has(text[end - 1] ?? '')) end -= 1;
+  return text.slice(0, end);
+}
+
 /**
  * What was said as the answer to one question: an option's label when it names one, ignoring
  * case and a trailing full stop, and otherwise the words themselves, which the picker takes
  * as its "other" answer.
  */
 export function answerFor(item: AgentQuestionItem, said: string): string {
-  const plain = (text: string): string =>
-    text
-      .toLowerCase()
-      .replace(/[.!?]+$/, '')
-      .trim();
+  const plain = (text: string): string => withoutClosingMarks(text.toLowerCase()).trim();
   const picked = item.options.find((option) => plain(option.label) === plain(said));
   return picked?.label ?? said.trim();
 }
