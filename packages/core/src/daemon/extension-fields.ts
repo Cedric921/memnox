@@ -1,3 +1,4 @@
+import type { AgentQuestionItem } from '../session/agent-questions';
 import type { FilesRequestFields, FilesResponseFields } from './files';
 import type { HomeResponseFields } from './home';
 import type { InterceptRequestFields, InterceptResponseFields } from './intercept';
@@ -30,6 +31,18 @@ interface WorkRequestFields {
   edited?: string;
 }
 
+interface QuestionRequestFields {
+  /** On CONFIRM of an agent's question: which of its questions the answer is for, from one. */
+  questionNumber?: number;
+}
+
+interface QuestionEventFields {
+  /** On a question NOTICE: what the agent asked with its choices, so a notch or a phone offers them as taps. */
+  questions?: AgentQuestionItem[];
+  /** On a question NOTICE: what is already picked, by question text, so a surface asks only what is left. */
+  answers?: Record<string, string>;
+}
+
 interface AccountRequestFields {
   /** On PERSON_SIGN_IN: the Mac app's own waiting device code, so one approval signs both in. */
   companionOf?: string;
@@ -54,6 +67,7 @@ export interface ExtensionRequestFields
     TeamRequestFields,
     WorkRequestFields,
     AccountRequestFields,
+    QuestionRequestFields,
     InterceptRequestFields {}
 
 export interface ExtensionResponseFields
@@ -65,4 +79,4 @@ export interface ExtensionResponseFields
     InterceptResponseFields {}
 
 export interface ExtensionEventFields
-  extends RemoteEventFields, TeamEventFields, WorkEventFields {}
+  extends RemoteEventFields, TeamEventFields, WorkEventFields, QuestionEventFields {}

@@ -56,7 +56,7 @@ export interface RemotePrincipal {
   driving: boolean;
 }
 
-interface ConfirmInput {
+export interface ConfirmInput {
   subject: string;
   answer: string;
   signature?: string;
@@ -76,7 +76,7 @@ const STARTED = 'started';
 const LET_THROUGH = 'let-through';
 
 /** A Mac proposal confirmed hands back what to show on the Mac and which device asked for it. */
-type ConfirmResult =
+export type ConfirmResult =
   | { ok: true; outcome: string; release?: { event: DaemonEvent; deviceId: string } }
   | { ok: false; error: string; refused?: true };
 

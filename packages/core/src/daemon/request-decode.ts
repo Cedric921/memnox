@@ -23,6 +23,7 @@ const FIELD_TYPES: Readonly<Record<string, 'string' | 'number' | 'boolean'>> = {
   signature: 'string',
   // A phone's rewritten words reach the confirm from afar, so anything but text is refused before it is trimmed.
   edited: 'string',
+  questionNumber: 'number',
   point: 'string',
   said: 'string',
   finished: 'boolean',

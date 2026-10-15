@@ -33,7 +33,8 @@ import {
   isVoiceAgentMethod,
   type VoiceAgentRoster,
 } from './voice-agent-calls';
-import { confirmAnswer, type RemotePrincipal } from './confirm';
+import type { RemotePrincipal } from './confirm';
+import { answerWaiting } from './confirm-question';
 import { followUpAnswer, followUpDeps } from './follow-up';
 import { answerMachine, isMachineMethod, type MachineSignIns } from './machine-calls';
 import { answerPerson, isPersonMethod, type PersonSignIns } from './person-calls';
@@ -287,21 +288,12 @@ export class VoiceSurface {
     request: DaemonRequest,
     principal?: RemotePrincipal,
   ): Promise<DaemonResponse> {
-    if (request.subject === undefined || request.answer === undefined) {
-      return {
-        id: request.id,
-        ok: false,
-        error: 'confirm needs a subject and an answer',
-      };
-    }
-    const result = await confirmAnswer(this.deps.home, {
-      subject: request.subject,
-      answer: request.answer,
-      at: this.deps.now(),
-      ...(request.signature === undefined ? {} : { signature: request.signature }),
-      ...(request.edited === undefined ? {} : { edited: request.edited }),
-      ...(principal === undefined ? {} : { principal }),
-    });
+    const result = await answerWaiting(
+      this.deps.home,
+      request,
+      this.deps.now(),
+      principal,
+    );
     if (!result.ok) {
       const refused =
         result.refused === true ? { outcome: 'refused', reason: result.error } : {};

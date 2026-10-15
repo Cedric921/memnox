@@ -245,6 +245,8 @@ export class WaitingFeed {
       at: question.askedAt,
       expiresAt: question.expiresAt,
       sessionId: question.sessionId,
+      questions: question.questions,
+      ...(question.answers === undefined ? {} : { answers: question.answers }),
       ...(task === null ? {} : { task: task.statement }),
       ...(task?.latestAsk === undefined ? {} : { lastAsk: task.latestAsk }),
       ...(host?.cwd === undefined ? {} : { place: basename(host.cwd) }),
