@@ -1,14 +1,14 @@
-import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { mkdir, mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { setTimeout as sleep } from 'node:timers/promises';
 import { afterEach, describe, expect, it } from 'vitest';
 import { DisplayRequests, SessionHosts } from '@memnox/core';
 import { showPane, type PaneSeams } from '../src/session-tools/multiplexer';
 import { callOperatorTool } from '../src/session-tools/operator-tools';
 import type { SessionToolDeps } from '../src/session-tools/read-tools';
 import type { RewindSeams } from '../src/session-tools/rewind-tool';
+import { onATerminal, releaseTerminal } from './terminal-harness';
 
 const NOW = new Date('2026-10-09T12:00:00.000Z');
 const SEAMS = {} as RewindSeams;
@@ -90,15 +90,20 @@ describe('starting a session wherever they name', () => {
   });
 
   it('asks the Mac to open another terminal app on the repository', async () => {
-    const deps = await depsAt({
-      findApp: (name) => (name === 'Ghostty' ? '/System/Applications/Utilities' : null),
-    });
+    // A folder this test makes, so the app is installed wherever the suite runs.
+    const base = await depsAt();
+    const ghostty = join(base.home, 'Ghostty.app');
+    await mkdir(ghostty);
+    const deps = {
+      ...base,
+      findApp: (name: string) => (name === 'Ghostty' ? ghostty : null),
+    };
     expect(await started(deps, { terminal: 'Ghostty' })).toMatchObject({ started: true });
     const [request] = await new DisplayRequests(deps.home).open(NOW.toISOString());
     expect(request).toMatchObject({
       display: 'launch',
       via: 'terminal-app',
-      appPath: '/System/Applications/Utilities',
+      appPath: ghostty,
     });
   });
 
@@ -118,28 +123,7 @@ describe('starting a session wherever they name', () => {
   });
 });
 
-/** A process on a terminal of its own, as an agent in a pane or a tab is. */
-let held: ChildProcess | null = null;
-async function onATerminal(): Promise<{ pid: number; tty: string }> {
-  held = spawn('script', ['-q', '/dev/null', 'sleep', '30'], { stdio: 'ignore' });
-  for (let look = 0; look < 40; look += 1) {
-    await sleep(50);
-    const child = execFileSync('pgrep', ['-P', String(held.pid)], { encoding: 'utf8' })
-      .trim()
-      .split('\n')[0];
-    if (child === undefined || child === '') continue;
-    const tty = execFileSync('ps', ['-o', 'tty=', '-p', child], {
-      encoding: 'utf8',
-    }).trim();
-    return { pid: Number(child), tty };
-  }
-  throw new Error('the process on a terminal never started');
-}
-
-afterEach(() => {
-  held?.kill();
-  held = null;
-});
+afterEach(releaseTerminal);
 
 describe('closing a session wherever it runs', () => {
   it('ends the agent in an editor panel, and records it as closed', async () => {

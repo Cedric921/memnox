@@ -1,13 +1,12 @@
-import { spawn, execFileSync, type ChildProcess } from 'node:child_process';
 import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { setTimeout as sleep } from 'node:timers/promises';
 import { afterEach, describe, expect, it } from 'vitest';
 import { DisplayRequests, SessionHosts, SessionTurns } from '@memnox/core';
 import { callOperatorTool } from '../src/session-tools/operator-tools';
 import type { SessionToolDeps } from '../src/session-tools/read-tools';
 import type { RewindSeams } from '../src/session-tools/rewind-tool';
+import { onATerminal, releaseTerminal } from './terminal-harness';
 
 const NOW = new Date('2026-10-09T12:00:00.000Z');
 const SEAMS = {} as RewindSeams;
@@ -30,24 +29,12 @@ function depsAt(home: string, outcome: 'typed' | 'failed'): SessionToolDeps {
   };
 }
 
-/** A process on a terminal of its own, as an agent in a tab is, so its device is read for real. */
-let held: ChildProcess | null = null;
+/** An agent on a terminal of its own, as one in a tab is, so its device is read for real. */
 async function agentOnATerminal(): Promise<number> {
-  held = spawn('script', ['-q', '/dev/null', 'sleep', '30'], { stdio: 'ignore' });
-  for (let look = 0; look < 40; look += 1) {
-    await sleep(50);
-    const child = execFileSync('pgrep', ['-P', String(held.pid)], { encoding: 'utf8' })
-      .trim()
-      .split('\n')[0];
-    if (child !== undefined && child !== '') return Number(child);
-  }
-  throw new Error('the process on a terminal never started');
+  return (await onATerminal()).pid;
 }
 
-afterEach(() => {
-  held?.kill();
-  held = null;
-});
+afterEach(releaseTerminal);
 
 describe('stopping an agent by voice', () => {
   it('presses Escape in its own terminal and records its turn as over', async () => {

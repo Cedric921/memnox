@@ -1,8 +1,6 @@
-import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { setTimeout as sleep } from 'node:timers/promises';
 import { afterEach, describe, expect, it } from 'vitest';
 import { SessionHosts, SessionTurns, SpokenInstructions } from '@memnox/core';
 import { sendInstructionTool } from '../src/session-tools/instruct-tools';
@@ -10,6 +8,7 @@ import { paneOn, typeIntoPane, type PaneSeams } from '../src/session-tools/multi
 import { callOperatorTool } from '../src/session-tools/operator-tools';
 import type { SessionToolDeps } from '../src/session-tools/read-tools';
 import type { RewindSeams } from '../src/session-tools/rewind-tool';
+import { onATerminal, releaseTerminal } from './terminal-harness';
 
 const NOW = new Date('2026-10-09T12:00:00.000Z');
 
@@ -65,28 +64,7 @@ describe('a tmux or WezTerm pane', () => {
   });
 });
 
-/** A process on a terminal of its own, as an agent in a pane is, so its device is read for real. */
-let held: ChildProcess | null = null;
-async function onATerminal(): Promise<{ pid: number; tty: string }> {
-  held = spawn('script', ['-q', '/dev/null', 'sleep', '30'], { stdio: 'ignore' });
-  for (let look = 0; look < 40; look += 1) {
-    await sleep(50);
-    const child = execFileSync('pgrep', ['-P', String(held.pid)], { encoding: 'utf8' })
-      .trim()
-      .split('\n')[0];
-    if (child === undefined || child === '') continue;
-    const tty = execFileSync('ps', ['-o', 'tty=', '-p', child], {
-      encoding: 'utf8',
-    }).trim();
-    return { pid: Number(child), tty };
-  }
-  throw new Error('the process on a terminal never started');
-}
-
-afterEach(() => {
-  held?.kill();
-  held = null;
-});
+afterEach(releaseTerminal);
 
 async function inAPane(
   screen: string,
