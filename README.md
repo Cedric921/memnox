@@ -129,6 +129,45 @@ So it pushes a branch and opens a PR. You typed one prompt. Every one of those a
 came back inside the conversation, and each is in the record when you ask the agent
 "why was that refused?"
 
+## On your Mac and your iPhone
+
+<p align="center">
+  <img src="assets/readme/memnox-mac-and-iphone.svg" width="100%" alt="Claude Code works in a terminal on a Mac until a production deploy needs a person. The Memnox island grows out of the notch to ask, the same question appears on the iPhone lock screen, Face ID allows it, and both say it was allowed once.">
+</p>
+
+The terminal is not the only place a question can reach you. Two open source apps sit on
+top of this runtime and give it a face and a voice, and neither holds a rule of its own:
+the daemon decides, and the apps show, speak, listen and sign.
+
+- **[Memnox for macOS](https://github.com/Memnox/memnox-macos)** lives in the notch. The
+  island grows out of it to listen, to answer out loud, to show every working session
+  with its latest steps, and to ask about a held call with Deny, Allow this session and
+  Allow once. Every allow that reaches outside the session is signed after Touch ID.
+- **[Memnox for iPhone](https://github.com/Memnox/memnox-ios)** lives in the Dynamic
+  Island and on the lock screen. It pairs with the Mac once, then carries the same held
+  calls over an end to end encrypted Noise tunnel, and signs every remote yes after Face ID.
+
+<table>
+<tr>
+<td width="64%" valign="top"><img src="assets/readme/memnox-notch.svg" width="100%" alt="The Memnox island on a Mac grows out of the notch to listen to a question, answers it out loud, shows every working session with its latest steps, then asks before Codex runs a migration and settles green once it is allowed."></td>
+<td width="36%" valign="top"><img src="assets/readme/memnox-iphone.svg" width="100%" alt="On an iPhone, a held call shows in the Dynamic Island as the orb and an amber count, opens with Deny and Allow, Allow goes through Face ID, and the island then carries the voice."></td>
+</tr>
+</table>
+
+<p align="center">
+  <img src="assets/readme/memnox-tools.svg" width="100%" alt="On the Mac, Maya says tell #eng the deploy is out and thank Bo; the island drafts a Slack message as Maya to #eng, she sends it with Touch ID and it lands in the channel. On the iPhone, an email reply drafted on Gmail is sent with Face ID.">
+</p>
+
+Both apps can also work in your own Slack, Gmail, GitHub, Linear, Google Docs and Notion.
+A message or a reply arrives as a draft with the account, the recipients and the exact
+words, and the daemon sends it in your name only after a Send signed with Touch ID or
+Face ID.
+
+A held call is one question wherever it is asked. The terminal, `memnox approve`, the
+notch and the phone all answer the same call, and whichever answers first releases the
+agent. [docs/remote-contract.md](docs/remote-contract.md) is the wire spec for pairing,
+the relay and every remote method.
+
 ## How it reaches each agent
 
 Each agent's own hook asks Memnox before every tool call: a file read or write, a shell
@@ -637,7 +676,7 @@ test, and `pnpm format && pnpm typecheck && pnpm test && pnpm deadcode` has to p
 
 ### Working on it with the Mac app
 
-The Mac app in `memnox-voice` installs and runs this runtime itself, and where it gets it
+The Mac app in `memnox-macos` installs and runs this runtime itself, and where it gets it
 from is chosen when the app is built. Keep the two checkouts side by side:
 
 ```sh
