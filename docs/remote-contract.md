@@ -160,7 +160,7 @@ answered `outcome: 'refused'`.
 | `voice-choice`                | `voice?`                              | sets the Kokoro voice when `voice` is present; always answers `voice`                                                                                                                                               |
 | `drive` (remote, needs `mac`) | `until?`, `signature?`                | `outcome: 'driving'` with `until`, or `'stopped'` when `until` is absent, or `refused`                                                                                                                              |
 | `voice-release` (`see`)       | none                                  | `ok: true`; the phone's app left the screen, so the voice goes back to the Mac at once; unsigned because it only gives power up                                                                                     |
-| `follow-up` (`steer`)         | `sessionId`, `said`, `signature`      | `outcome: 'queued'`, `'typed'` or `'later'`, or `refused` with `reason`; `said` reaches the session as it is, signed over `memnox-follow-up:v1:<sessionId>:<said>`                                                    |
+| `follow-up` (`steer`)         | `sessionId`, `said`, `signature`      | `outcome: 'queued'`, `'typed'` or `'later'`, or `refused` with `reason`; `said` reaches the session as it is, signed over `memnox-follow-up:v1:<sessionId>:<said>`                                                  |
 | `files-list` (remote, `see`)  | `path?`                               | `path`, `files: FileEntry[]`, or `refused` with `reason`; see below                                                                                                                                                 |
 | `speak` (remote, `ask`)       | `line`, `voice?`, `speed?`            | streams `audio: { rate, samples, last }` on the request's id until `last` is true, or `refused` with `reason`; see below                                                                                            |
 
@@ -200,15 +200,15 @@ on the Mac changes.
 
 ## Capabilities and the remote allowlist
 
-| Capability | Methods and answers it covers                                                                                                                  | Phone default                             |
-| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
+| Capability | Methods and answers it covers                                                                                                                                   | Phone default                             |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
 | `see`      | `ping`, `sessions-list`, `session-view`, `waiting`, `subscribe`, `trace`, `voice-agents`, `voice-choice` without `voice`, `files-list`, `home`, `voice-release` | on                                        |
-| `ask`      | `ask`, `cancel`, `warm`, `brief`, `speak`, `hand-over`                                                                                         | on                                        |
-| `answer`   | `confirm` on a held call or an `answer` proposal                                                                                               | on, a yes is signed                       |
-| `steer`    | `confirm` on a stop, freeze or resume proposal, and `follow-up`, which is signed                                                               | on, a yes is signed                       |
-| `rules`    | `confirm` on a rule proposal                                                                                                                   | off                                       |
-| `rewind`   | `confirm` on a rewind proposal                                                                                                                 | off                                       |
-| `mac`      | `drive`, and `confirm` on a proposal for something only the Mac can do (open a folder, file or app, bring a window forward, type, click)       | off, turned on from the Mac with Touch ID |
+| `ask`      | `ask`, `cancel`, `warm`, `brief`, `speak`, `hand-over`                                                                                                          | on                                        |
+| `answer`   | `confirm` on a held call or an `answer` proposal                                                                                                                | on, a yes is signed                       |
+| `steer`    | `confirm` on a stop, freeze or resume proposal, and `follow-up`, which is signed                                                                                | on, a yes is signed                       |
+| `rules`    | `confirm` on a rule proposal                                                                                                                                    | off                                       |
+| `rewind`   | `confirm` on a rewind proposal                                                                                                                                  | off                                       |
+| `mac`      | `drive`, and `confirm` on a proposal for something only the Mac can do (open a folder, file or app, bring a window forward, type, click)                        | off, turned on from the Mac with Touch ID |
 
 A device's `ping` answer carries `capabilities`, the list it holds on this machine, so it never
 offers a choice that would be refused. A device that reads none from an older runtime assumes
@@ -270,9 +270,11 @@ name, until }`, and the Mac island shows "Driven from <name>" for its whole leng
   most recently holds it. A revoked phone gives the voice back at once. A phone whose app leaves
   the screen sends `voice-release` unless its person kept alerts on the phone, and the voice is
   back on the Mac at once, with what still waits asked again there; a new `subscribe`, a
-  `subscribe` again on the same stream, an `ask` or a `drive` takes it back. A `start` display
-  (`launch`, or `app` for a start) never reaches a phone: a session is started at the Mac. The
-  daemon decides this and the apps only follow it:
+  `subscribe` again on the same stream, an `ask` or a `drive` takes it back. A session is only
+  ever started at the Mac, so `propose_start` and `start_session` refuse a question from a phone,
+  and a `launch` show, or an `app` show that opens a start or a new chat, raised for a phone is
+  refused rather than proposed, released or driven. The daemon decides this and the apps only
+  follow it:
   - While a phone holds the voice, every event to every subscriber, the Mac app and the phones
     alike, carries `heardOn: { deviceId, name }`. That phone speaks it and the Mac shows it
     without a sound.
