@@ -283,10 +283,22 @@ function agentLine(at: string, block: unknown): ConversationLine[] {
   return [];
 }
 
+/** A tag the host wraps around what it adds, with everything inside it. */
+const HOST_TAG = /<([a-z_-]+)[^>]*>[\s\S]*?<\/\1>/gi;
+
+/** Taken off until none is left, so a tag inside another cannot survive the one pass that removed its outside. */
+function withoutHostTags(said: string): string {
+  let text = said;
+  for (let before = ''; before !== text;) {
+    before = text;
+    text = text.replace(HOST_TAG, '');
+  }
+  return text;
+}
+
 /** What the person typed, without the tags and reminders the host wraps around it. */
 function ownWords(said: string): string {
-  return said
-    .replace(/<([a-z_-]+)[^>]*>[\s\S]*?<\/\1>/gi, '')
+  return withoutHostTags(said)
     .split('\n')
     .map((line) => line.trim())
     .filter((line) => line !== '' && !line.startsWith('<'))

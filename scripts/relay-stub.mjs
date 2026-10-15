@@ -21,8 +21,12 @@ const tokens = new Map();
 const mailboxes = new Map();
 const machines = new Set();
 
+// What a client sent is logged with its control characters escaped, so a mailbox id cannot forge a line.
+const loggable = (part) =>
+  String(part).replace(/[\u0000-\u001f\u007f]/g, (char) => JSON.stringify(char).slice(1, -1));
+
 function log(...parts) {
-  console.log(new Date().toISOString(), ...parts);
+  console.log(new Date().toISOString(), ...parts.map(loggable));
 }
 
 function json(response, status, body) {
