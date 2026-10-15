@@ -17,6 +17,8 @@
     "format": "prettier --write \"packages/*/src/**/*.ts\" \"packages/*/test/**/*.ts\"",
     "format:check": "prettier --check \"packages/*/src/**/*.ts\" \"packages/*/test/**/*.ts\"",
     "deadcode": "knip",
+    "verify": "pnpm run format:check && pnpm run typecheck && pnpm run build && pnpm run test && pnpm run deadcode",
+    "verify:linux": "sh scripts/verify-linux.sh",
     "changeset": "changeset",
     "version": "changeset version && node scripts/sync-cli-version.mjs",
     "release": "pnpm build && changeset publish",

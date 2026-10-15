@@ -36,12 +36,15 @@ in `ARCHITECTURE.md`.
 ## Before you open a pull request
 
 ```sh
-pnpm format && pnpm typecheck && pnpm test && pnpm deadcode
+pnpm format          # writes the formatting, then
+pnpm verify          # what CI runs, in its order: format check, typecheck, build, test, deadcode
+pnpm verify:linux    # the same inside a Linux container, with Docker running
 ```
 
-All four, clean. CI runs them on Ubuntu and macOS against Node 22 and 24, plus a
+All clean. CI runs them on Ubuntu and macOS against Node 22 and 24, plus a
 publish dry run, because a shim that works on one platform and not the other is the bug
-that matrix exists to catch.
+that matrix exists to catch. `verify:linux` is that Ubuntu leg on your own machine, as a
+user who is not root, and `NODE_VERSION=22 pnpm verify:linux` is the other Node.
 
 - Unit tests for new logic; an integration test when a command or a flag moves.
 - `docs/` updated when a user-visible command, flag, file or path changes.
