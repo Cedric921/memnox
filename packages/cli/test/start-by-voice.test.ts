@@ -421,7 +421,7 @@ describe('showing a session the voice just started', () => {
 });
 
 describe('a start asked through a phone', () => {
-  it('proposes nothing and starts nothing, so the brain offers a follow up instead', async () => {
+  it('starts at once with no read back, since the yes is the Face ID the phone asks for', async () => {
     const deps = await depsAt();
     await repositoryAt(deps, 'memnox-runtime');
     const moment = deps.now().toISOString();
@@ -430,16 +430,14 @@ describe('a start asked through a phone', () => {
     const proposed = (await callOperatorTool(deps, SEAMS, 'propose_start', {
       repository: 'memnox-runtime',
       task: 'fix the failing test',
-    })) as Record<string, unknown> & { said: string };
-    expect(proposed).toMatchObject({ proposed: false });
-    expect(proposed.said).toContain('only ever started at the Mac');
-    expect(proposed.said).toContain('follow up');
+    })) as Record<string, unknown> & { start: string; said: string };
+    expect(proposed).toMatchObject({ proposed: true });
+    expect(proposed.said).toContain('Face ID');
+    expect(proposed.said).toContain('start_session with this id now');
 
-    const started = await callOperatorTool(deps, SEAMS, 'start_session', {
-      start: 'stt_any',
-    });
-    expect(started).toMatchObject({ started: false });
-    expect(await new DisplayRequests(deps.home).open(moment)).toEqual([]);
+    await callOperatorTool(deps, SEAMS, 'start_session', { start: proposed.start });
+    const [launch] = await new DisplayRequests(deps.home).open(moment);
+    expect(launch).toMatchObject({ display: 'launch' });
   });
 
   it('starts again as before once the person asks at the Mac', async () => {

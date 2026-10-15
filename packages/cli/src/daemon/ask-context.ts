@@ -47,7 +47,7 @@ export const FINISHED_NOTE =
 /** Said ahead of a phone's question, so the brain never offers a start the tools would refuse. */
 export function phoneContext(fromPhone: boolean): string {
   return fromPhone
-    ? '[Memnox, not the person] They are speaking through their phone, away from the Mac, where a new session is never started.'
+    ? '[Memnox, not the person] They are speaking through their phone, away from the Mac, so a new session they ask for waits on their Face ID there.'
     : '';
 }
 

@@ -239,7 +239,7 @@ describe('the capability table', () => {
     ).toBe(false);
   });
 
-  it('never lets a phone sign or drive a show that starts a session, which is done at the Mac', () => {
+  it('lets a phone sign a show that starts a session, and never drive one', () => {
     const show = {
       kind: 'show',
       subject: 'dsp_1',
@@ -260,7 +260,7 @@ describe('the capability table', () => {
     for (const event of [launch, appStart, newChat]) {
       expect(startsSession(event), event.display).toBe(true);
       const mac = { kind: PROPOSAL_KIND.MAC, deviceId: 'dev_1', event };
-      expect(proposalCapability(mac)).toBeNull();
+      expect(proposalCapability(mac)).toBe(REMOTE_CAPABILITY.MAC);
       expect(driveCovers(mac, 'dev_1')).toBe(false);
     }
     expect(startsSession(typed)).toBe(false);

@@ -19,11 +19,7 @@ import {
   type DeviceRecord,
   type DisplayKind,
 } from '@memnox/core';
-import {
-  NOT_ALLOWED_ON_MAC,
-  OPEN_THE_MAC,
-  START_AT_THE_MAC,
-} from '../src/daemon/done-lines';
+import { NOT_ALLOWED_ON_MAC, OPEN_THE_MAC } from '../src/daemon/done-lines';
 import { heardRemotely, markNeedsMac, OriginRouter } from '../src/daemon/origin-routing';
 import { askedFromPhone } from '../src/daemon/asked-from';
 import type { Peer } from '../src/daemon/socket-write';
@@ -190,7 +186,7 @@ describe('a phone asking for something on the Mac', () => {
     expect(at.told.at(-1)?.done?.text).toMatch(/^Typed it into /);
   });
 
-  it('never starts a session for a phone, even one that drives the Mac and may act on it', async () => {
+  it('holds a session start for the Face ID of a phone that may act on the Mac, even one that drives', async () => {
     const at = await rig(
       phone([...PHONE_DEFAULT_CAPABILITIES, REMOTE_CAPABILITY.MAC]),
       true,
@@ -200,18 +196,25 @@ describe('a phone asking for something on the Mac', () => {
     const launch = await at.show(DISPLAY.LAUNCH);
     const appStart = { ...(await at.show(DISPLAY.APP)), sessionId: 'stt_1' };
 
-    const claimed = await at.router.claim([launch, appStart], [mac]);
+    await at.router.claim([launch, appStart], [mac]);
 
-    expect(claimed.has(launch.subject) && claimed.has(appStart.subject)).toBe(true);
     expect(mac.lines).toEqual([]);
-    expect(await new Proposals(at.home).open(SHOWN)).toEqual([]);
-    expect(at.told).toEqual([
-      { id: 0, ok: true, done: { text: START_AT_THE_MAC } },
-      { id: 0, ok: true, done: { text: START_AT_THE_MAC } },
+    const proposals = await new Proposals(at.home).open(SHOWN);
+    expect(proposals.map((each) => each.change.kind)).toEqual([
+      PROPOSAL_KIND.MAC,
+      PROPOSAL_KIND.MAC,
     ]);
     const deliveries = new DisplayRequests(at.home);
-    expect((await deliveries.deliveryOf(launch.subject))?.outcome).toBe('failed');
-    expect((await deliveries.deliveryOf(appStart.subject))?.outcome).toBe('failed');
+    expect((await deliveries.deliveryOf(launch.subject))?.outcome).toBe('waiting');
+    expect((await deliveries.deliveryOf(appStart.subject))?.outcome).toBe('waiting');
+  });
+
+  it('refuses a session start from a phone that may not act on the Mac', async () => {
+    const at = await rig();
+    at.router.asked('dev_phone', ASKED);
+    await at.router.claim([await at.show(DISPLAY.LAUNCH)], [new Lines()]);
+    expect(at.told).toEqual([{ id: 0, ok: true, done: { text: NOT_ALLOWED_ON_MAC } }]);
+    expect(await new Proposals(at.home).open(SHOWN)).toEqual([]);
   });
 
   it('still types into a chat already open in an app for a phone that drives', async () => {

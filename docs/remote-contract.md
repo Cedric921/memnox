@@ -270,11 +270,11 @@ name, until }`, and the Mac island shows "Driven from <name>" for its whole leng
   most recently holds it. A revoked phone gives the voice back at once. A phone whose app leaves
   the screen sends `voice-release` unless its person kept alerts on the phone, and the voice is
   back on the Mac at once, with what still waits asked again there; a new `subscribe`, a
-  `subscribe` again on the same stream, an `ask` or a `drive` takes it back. A session is only
-  ever started at the Mac, so `propose_start` and `start_session` refuse a question from a phone,
-  and a `launch` show, or an `app` show that opens a start or a new chat, raised for a phone is
-  refused rather than proposed, released or driven. The daemon decides this and the apps only
-  follow it:
+  `subscribe` again on the same stream, an `ask` or a `drive` takes it back. A phone may start a
+  session only with Face ID: from a phone `propose_start` skips the spoken read back, and a
+  `launch` show, or an `app` show that opens a start or a new chat, raised for it becomes a `mac`
+  proposal that phone signs, which needs `mac` and is never released by a drive. The daemon
+  decides this and the apps only follow it:
   - While a phone holds the voice, every event to every subscriber, the Mac app and the phones
     alike, carries `heardOn: { deviceId, name }`. That phone speaks it and the Mac shows it
     without a sound.
@@ -305,6 +305,25 @@ when it asks the voice, and carries out the answer itself.
   signed over `memnox-confirm:v1:<callId>:<answer>` to `POST /v1/workspaces/:ws/me/held/:id`;
   a no unsigned. Then it confirms the proposal here: a yes signed as every remote yes is, a no
   with no signature. Declining the proposal sends nothing to the workspace.
+
+## Answering an agent's own question with a tap
+
+When an agent opens its own picker (Claude Code's `AskUserQuestion`) while somebody can answer,
+the hook holds the picker for 45 seconds and the question waits on the person like a held call.
+
+- The feed carries it as a `notice` with `notice: "question"`, a subject starting `aqn_`, and
+  `questions: [{ question, header?, options: [{ label, description? }], multiSelect }]`. Once
+  some are picked, `answers` holds them by question text, so a surface asks only what is left.
+- A tap answers one question with `confirm` and `{ subject, answer, questionNumber }`, where
+  `answer` is the option's label (several labels joined by `, ` for a `multiSelect`, or the
+  person's own words) and `questionNumber` counts from one and defaults to the first. The
+  outcome is `answered`.
+- It needs no signature on the Mac or from a phone, because it is the person's choice going to
+  their own agent, which is ruled on as ever when it acts. A phone needs `answer`.
+- Once every question has an answer the agent carries on and the daemon sends `settled`. Where
+  nobody answers in time, the picker opens on screen as it always did.
+- The voice answers the same question by name through its `answer_question` tool, so a spoken
+  pick and a tapped one land in the same place.
 
 ## The home every surface opens on
 

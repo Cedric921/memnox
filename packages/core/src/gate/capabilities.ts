@@ -98,7 +98,7 @@ export const MAC_DISPLAYS: readonly DisplayKind[] = [
 /** Of those, what only reads or tidies, so it runs under `see` with no proposal and no signature. */
 export const MAC_READS: readonly DisplayKind[] = [DISPLAY.LOOK, DISPLAY.DISMISS];
 
-/** A show that starts a new session, which is done at the Mac, so no phone may ever ask for one, sign one or drive one. */
+/** A show that starts a new session, which a phone may ask for only with Face ID, never under a drive. */
 export function startsSession(
   event: Pick<DaemonEvent, 'display' | 'sessionId' | 'via'>,
 ): boolean {
@@ -129,8 +129,7 @@ export function proposalCapability(change: ProposedChange): RemoteCapability | n
   if (change.kind === PROPOSAL_KIND.RESUME) return REMOTE_CAPABILITY.STEER;
   if (change.kind === PROPOSAL_KIND.RULES) return REMOTE_CAPABILITY.RULES;
   if (change.kind === PROPOSAL_KIND.REWIND) return REMOTE_CAPABILITY.REWIND;
-  if (change.kind === PROPOSAL_KIND.MAC)
-    return startsSession(change.event) ? null : REMOTE_CAPABILITY.MAC;
+  if (change.kind === PROPOSAL_KIND.MAC) return REMOTE_CAPABILITY.MAC;
   // Saying something as the person is answering for them, so a phone allowed to answer may sign it.
   if (change.kind === PROPOSAL_KIND.WORK || change.kind === PROPOSAL_KIND.ACCOUNT)
     return REMOTE_CAPABILITY.ANSWER;

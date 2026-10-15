@@ -138,6 +138,8 @@ function startedAs(
 ): Record<string, unknown> {
   if (seen === true) return { started: true, said: started };
   if (delivery === null) return { started: true, said: UNCONFIRMED };
+  if (delivery.outcome === DELIVERY.WAITING)
+    return { started: false, waiting: true, said: AWAITING_FACE_ID };
   if (wentIn(delivery.outcome))
     return seen === false
       ? { started: true, confirmed: false, said: NOT_SEEN }
@@ -149,6 +151,8 @@ function startedAs(
   };
 }
 
+const AWAITING_FACE_ID =
+  'It waits for their Face ID on the card their phone now shows, and the Mac opens the tab the moment they approve. Say only that it is on their phone to approve, in a few words; never that it is starting or started.';
 const UNCONFIRMED =
   'Handed to the Mac to open a tab and start it, and neither the Mac nor the agent has said it is running yet. Say you asked for it and it has not come up yet; never that it is starting or working.';
 const NOT_SEEN =

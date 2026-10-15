@@ -19,13 +19,7 @@ import {
   type DisplayKind,
 } from '@memnox/core';
 import { displayName, readNames } from '../agents/names';
-import {
-  doneText,
-  macRationale,
-  NOT_ALLOWED_ON_MAC,
-  OPEN_THE_MAC,
-  START_AT_THE_MAC,
-} from './done-lines';
+import { doneText, macRationale, NOT_ALLOWED_ON_MAC, OPEN_THE_MAC } from './done-lines';
 import { write, type Peer } from './socket-write';
 import { settled } from './waiting-feed';
 
@@ -238,15 +232,15 @@ export class OriginRouter {
     deviceId: string,
     mac: readonly Peer[],
   ): Promise<void> {
-    // Never proposed, released or driven: a phone's question may follow a session up but never start one.
-    if (startsSession(event))
-      return this.refuse(event, deviceId, START_AT_THE_MAC, 'sessions start at the Mac');
     const device = await new Devices(this.deps.home).find(deviceId);
     if (device === null || mac.length === 0) {
       return this.refuse(event, deviceId, OPEN_THE_MAC, 'the Mac app is not open');
     }
     const reads = event.display !== undefined && MAC_READS.includes(event.display);
-    if (reads || this.deps.driving(deviceId)) return this.release(event, deviceId, mac);
+    // A new session always waits on Face ID, since a drive grant never covers starting one.
+    const signed = startsSession(event);
+    if (!signed && (reads || this.deps.driving(deviceId)))
+      return this.release(event, deviceId, mac);
     if (!holds(device, REMOTE_CAPABILITY.MAC)) {
       return this.refuse(
         event,

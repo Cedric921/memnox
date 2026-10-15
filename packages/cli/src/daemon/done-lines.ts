@@ -1,3 +1,4 @@
+import { basename } from 'node:path';
 import { DELIVERY, DISPLAY, type DaemonEvent } from '@memnox/core';
 
 /**
@@ -11,9 +12,6 @@ export const OPEN_THE_MAC = 'Open Memnox on your Mac to do that';
 /** Said when the phone was never allowed to act on the Mac. */
 export const NOT_ALLOWED_ON_MAC =
   'This phone may not act on your Mac yet. Allow it from the Mac with Touch ID first';
-
-/** Said when a phone's question would start a session, which is only ever done at the Mac. */
-export const START_AT_THE_MAC = 'New sessions are started at your Mac';
 
 /** How the Mac said a look ended, beside the deliveries a typed instruction has. */
 export const SEEN = 'seen';
@@ -30,6 +28,7 @@ export function doneText(event: DaemonEvent, agentName: string, outcome: string)
   if (event.display === DISPLAY.OPEN || event.display === DISPLAY.FOCUS) {
     return `Brought ${agentName} forward`;
   }
+  if (event.display === DISPLAY.LAUNCH) return `Started ${agentName} on your Mac`;
   if (event.display === DISPLAY.CLOSE) return `Closed ${agentName}`;
   if (event.display === DISPLAY.INTERRUPT) return `Stopped ${agentName}`;
   if (event.display === DISPLAY.FOLDER) return 'Opened the folder on your Mac';
@@ -42,6 +41,11 @@ export function doneText(event: DaemonEvent, agentName: string, outcome: string)
 export function macRationale(event: DaemonEvent, agentName: string): string {
   if (event.display === DISPLAY.TYPE || event.display === DISPLAY.PREFILL) {
     return `Type into ${agentName} on your Mac: ${event.summary}`;
+  }
+  if (event.display === DISPLAY.LAUNCH) {
+    const cwd = event.host?.cwd;
+    const where = cwd === undefined ? '' : ` in ${basename(cwd)}`;
+    return `Start ${agentName}${where} on your Mac`;
   }
   if (event.display === DISPLAY.CLOSE) return `Close ${agentName} on your Mac`;
   if (event.display === DISPLAY.INTERRUPT) return `Stop ${agentName} on your Mac`;

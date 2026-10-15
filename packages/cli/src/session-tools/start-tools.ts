@@ -43,14 +43,15 @@ import { APP_BUNDLE_SUFFIX, SAID, TOOL_ARG } from './session-tools.constants';
 /** Long enough for any task said in one breath, short enough that the typed line stays one line. */
 const MOST_TASK_CHARS = 400;
 
-/** A session is started at the Mac, so a question asked through a phone proposes nothing. */
+/** Through a phone the read back is the Face ID card it signs, so the brain starts it at once. */
 export async function proposeStartTool(
   deps: SessionToolDeps,
   args: ToolArgs,
 ): Promise<unknown> {
-  if (await askedFromPhone(deps.home, deps.now()))
-    return { proposed: false, said: START_AT_THE_MAC };
-  return proposeStart(deps, args);
+  const proposed = await proposeStart(deps, args);
+  if (!(await askedFromPhone(deps.home, deps.now()))) return proposed;
+  const result = proposed as Record<string, unknown>;
+  return result.proposed === false ? result : { ...result, said: START_FROM_PHONE };
 }
 
 async function proposeStart(deps: SessionToolDeps, args: ToolArgs): Promise<unknown> {
@@ -373,17 +374,11 @@ function noRepository(known: readonly string[]): Record<string, unknown> {
   };
 }
 
-/** Refused through a phone as well, so a start proposed at the Mac is never begun from afar. */
+/** Through a phone the Mac opens nothing until that phone signs, which the daemon's routing holds it for. */
 export async function startSessionTool(
   deps: SessionToolDeps,
   args: ToolArgs,
 ): Promise<unknown> {
-  if (await askedFromPhone(deps.home, deps.now()))
-    return { started: false, said: START_AT_THE_MAC };
-  return startSession(deps, args);
-}
-
-async function startSession(deps: SessionToolDeps, args: ToolArgs): Promise<unknown> {
   const id = textArg(args, 'start');
   const moment = deps.now().toISOString();
   const start =
@@ -449,8 +444,8 @@ function placeOf(
   };
 }
 
-const START_AT_THE_MAC =
-  'They are speaking through their phone, and a new session is only ever started at the Mac, so nothing was proposed or started. Say so in one short sentence, and offer to send it as a follow up to a session already open, by name when one fits, as one question; on a yes call propose_instruction and send_instruction. Never offer to start it later or another way.';
+const START_FROM_PHONE =
+  'They are speaking through their phone, where the yes to a new session is their Face ID on the card the phone shows, never a spoken one. Call start_session with this id now, in this same reply, without reading it back and without a word before it.';
 const TOO_LONG =
   'That task is too long to type as one line. Ask them for it in a sentence or two, and propose it again.';
 
