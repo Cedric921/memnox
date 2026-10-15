@@ -1,6 +1,6 @@
 ---
 '@memnox/core': patch
-'@memnox/cli': patch
+'memnox': patch
 '@memnox/proxy': patch
 '@memnox/interceptors': patch
 ---
