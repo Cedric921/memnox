@@ -92,7 +92,7 @@ export function readOpeningAsk(path: string): string | null {
   return openingAskIn(headOf(path));
 }
 
-export function openingAskIn(raw: string): string | null {
+function openingAskIn(raw: string): string | null {
   return everyLineIn(raw).find((line) => line.who === SPEAKER.PERSON)?.text ?? null;
 }
 

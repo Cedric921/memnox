@@ -17,7 +17,7 @@ const NAMING_KEY =
   /^(id|number|key|identifier|name|title|full_name|login|by|state|status|html_url|url|permalink|web_url|email|subject|isPullRequest|draft)$/i;
 
 /** A list made to fit, and the fields every item lost on the way. */
-export interface Fitted {
+interface Fitted {
   value: unknown;
   leftOut: string[];
 }
@@ -81,7 +81,7 @@ function listsIn(value: unknown): unknown[][] {
 }
 
 /** A tool as the voice reads it: what it does and the inputs it needs, without the examples and titles of its schema. */
-export interface VoiceTool {
+interface VoiceTool {
   slug: string;
   workClass: PersonalTool['workClass'];
   does?: string;

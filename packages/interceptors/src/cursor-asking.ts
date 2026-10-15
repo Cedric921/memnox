@@ -73,7 +73,7 @@ async function postCursorAsking(
 }
 
 /** The Shell entries Cursor allows and denies, the person's and the project's together. */
-export async function cursorRules(
+async function cursorRules(
   home: string,
   cwd: string | undefined,
 ): Promise<{ allow: string[]; deny: string[] }> {

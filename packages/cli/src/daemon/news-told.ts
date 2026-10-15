@@ -23,7 +23,7 @@ function isNews(event: DaemonEvent): boolean {
 }
 
 /** A held call or an agent's question, which waits on the person's answer; a proposal is left out, since the Mac declines one nobody there asked for. */
-export function waitsOnAnswer(event: DaemonEvent): boolean {
+function waitsOnAnswer(event: DaemonEvent): boolean {
   if (event.kind === DAEMON_EVENT.HELD) return true;
   return (
     event.kind === DAEMON_EVENT.NOTICE &&

@@ -88,7 +88,7 @@ function isDelivery(value: string | undefined): value is Delivery {
 }
 
 /** The phone reporting a page, and whether that page was sent to it. */
-export interface PhoneReport {
+interface PhoneReport {
   name: string;
   sentToIt: boolean;
 }

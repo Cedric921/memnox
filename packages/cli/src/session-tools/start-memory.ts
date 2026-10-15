@@ -24,7 +24,7 @@ export const CORRECTION_MS = 2 * 60 * 1_000;
 /** Enough starts to show any from the last hour, few enough that the file stays small. */
 const MOST_STARTS_KEPT = 20;
 
-export interface ProposedFolder {
+interface ProposedFolder {
   repository: string;
   /** How it was chosen when it was a guess, so a guess carried over is still read back. */
   from?: string;
@@ -50,7 +50,7 @@ export async function proposedFolderSince(
 }
 
 /** Where a start went, under every id the voice may later name it by. */
-export interface StartedPlace {
+interface StartedPlace {
   /** The start's own id and the id of the request that opened it. */
   ids: string[];
   agent: string;
@@ -68,10 +68,7 @@ export async function noteStarted(home: string, place: StartedPlace): Promise<vo
   );
 }
 
-export async function startedPlace(
-  home: string,
-  id: string,
-): Promise<StartedPlace | null> {
+async function startedPlace(home: string, id: string): Promise<StartedPlace | null> {
   const kept = await readJsonArray<StartedPlace>(join(home, MEMNOX_HOME, STARTED_FILE));
   return kept.find((each) => each.ids.includes(id)) ?? null;
 }
