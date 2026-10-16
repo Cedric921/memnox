@@ -1,13 +1,12 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, realpathSync } from 'node:fs';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
-import { createRequire } from 'node:module';
 import { platform, userInfo } from 'node:os';
 import { delimiter, dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { MEMNOX_HOME } from '@memnox/core';
 import { interceptorDirFor } from '@memnox/interceptors';
 import { describeError } from '../cli-errors';
+import { chooseNode } from '../node-choice';
 import {
   registerTask,
   removeTask,
@@ -80,62 +79,13 @@ export function serviceState(
  * a global install leaves behind, because a service file naming `~/.local/bin/memnox`
  * stops working the moment the package manager replaces that link.
  */
-function resolveCommandParts(): { node: string; entry: string } {
+function resolveCommandParts(pick: (entry: string) => string = chooseNode): {
+  node: string;
+  entry: string;
+} {
   const given = process.argv[1] ?? '';
   const entry = given === '' ? given : realpathSync(given);
-  return { node: entry === '' ? process.execPath : nodeForDaemon(entry), entry };
-}
-
-/** Long enough for a node to start the CLI or open a database, short enough that a hung one is passed over. */
-const NODE_CHECK_MS = 10_000;
-/** Opens the daemon's database module in memory, which fails at once under a node it was not built for. */
-const OPENS_DATABASE =
-  "const Database = require(process.argv[1]); new Database(':memory:').close();";
-
-/**
- * A node on this machine that really runs the daemon: the one installing first, then each on the PATH.
- * Whatever ran the install is not always it, since an app such as Hermes puts its own node first on the
- * PATH, and the daemon's database module only loads under a node it suits, or it dies at every start.
- */
-function nodeForDaemon(entry: string): string {
-  const database = databaseModule();
-  const candidates = [process.execPath, ...nodesOnPath()];
-  return candidates.find((node) => runsDaemon(node, entry, database)) ?? process.execPath;
-}
-
-function nodesOnPath(): string[] {
-  const found = (process.env['PATH'] ?? '')
-    .split(delimiter)
-    .filter((dir) => dir !== '')
-    .map((dir) => join(dir, 'node'))
-    .filter((path) => existsSync(path))
-    .map((path) => realpathSync(path));
-  return [...new Set(found)];
-}
-
-/** Where the database module the daemon loads lives, found from the core package that depends on it. */
-function databaseModule(): string | null {
-  try {
-    const core = fileURLToPath(import.meta.resolve('@memnox/core'));
-    return createRequire(core).resolve('better-sqlite3');
-  } catch {
-    return null;
-  }
-}
-
-function runsDaemon(node: string, entry: string, database: string | null): boolean {
-  try {
-    execFileSync(node, [entry, '--version'], { stdio: 'ignore', timeout: NODE_CHECK_MS });
-    if (database !== null) {
-      execFileSync(node, ['-e', OPENS_DATABASE, database], {
-        stdio: 'ignore',
-        timeout: NODE_CHECK_MS,
-      });
-    }
-    return true;
-  } catch {
-    return false;
-  }
+  return { node: entry === '' ? process.execPath : pick(entry), entry };
 }
 
 /**
@@ -155,8 +105,8 @@ function escapeXml(text: string): string {
   return text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
 }
 
-function plistFor(home: string): string {
-  const { node, entry } = resolveCommandParts();
+function plistFor(home: string, seams: ServiceSeams): string {
+  const { node, entry } = resolveCommandParts(seams.node);
   const log = join(home, MEMNOX_HOME, 'daemon.log');
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -182,8 +132,8 @@ function plistFor(home: string): string {
 `;
 }
 
-function unitFor(home: string): string {
-  const { node, entry } = resolveCommandParts();
+function unitFor(home: string, seams: ServiceSeams): string {
+  const { node, entry } = resolveCommandParts(seams.node);
   return `[Unit]
 Description=Memnox daemon: holds the rules and pulls what the workspace publishes
 
@@ -320,6 +270,8 @@ interface ServiceSeams {
   loaded?: () => boolean;
   /** Injected, so a test on a Mac installs what Windows would. */
   platform?: NodeJS.Platform;
+  /** The Node the service runs on, injected so a test starts no Node to find one. */
+  node?: (entry: string) => string;
 }
 
 /** A Scheduled Task's launcher, then the task: the file is the install, as everywhere else. */
@@ -329,7 +281,7 @@ async function installWindowsTask(
   seams: ServiceSeams,
 ): Promise<InstallResult> {
   await mkdir(dirname(state.path), { recursive: true });
-  const { node, entry } = resolveCommandParts();
+  const { node, entry } = resolveCommandParts(seams.node);
   const log = join(home, MEMNOX_HOME, 'daemon.log');
   await writeFile(
     state.path,
@@ -354,9 +306,13 @@ export async function installService(
   // A loaded daemon keeps running whatever it started on, so it is stopped first to come back on this build.
   const stopped = (seams.loaded ?? isLabelLoaded)() ? (seams.unload ?? unload)() : null;
   await mkdir(dirname(state.path), { recursive: true });
-  await writeFile(state.path, os === MACOS ? plistFor(home) : unitFor(home), {
-    mode: SERVICE_FILE_MODE,
-  });
+  await writeFile(
+    state.path,
+    os === MACOS ? plistFor(home, seams) : unitFor(home, seams),
+    {
+      mode: SERVICE_FILE_MODE,
+    },
+  );
   const warning = stopped ?? (seams.load ?? load)(state.path);
   // A user unit stops with the last login otherwise, which on a server reached over SSH is the first logout.
   const linger = os === MACOS ? null : (seams.linger ?? keepAfterLogout)();
