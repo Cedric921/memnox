@@ -701,3 +701,7 @@ restarts on the new code.
 ## Licence
 
 Apache-2.0. See [LICENSE](LICENSE).
+
+The Memnox name, the logo and the pictures are not under the Apache License: they are reserved, as
+[LICENSE-ASSETS.md](LICENSE-ASSETS.md) explains. Shipping your own fork? Give it your own name. The
+official package is the one Memnox publishes to npm as `memnox`.
