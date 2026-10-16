@@ -18,8 +18,8 @@ import { foundTools, readBack } from './personal-fit';
 import { textArg, type SessionToolDeps, type ToolArgs } from './read-tools';
 
 /**
- * The person's own tools, in their own name: reads run at once, a tool still to sign in to shows its
- * icon in the notch, and anything sent is drawn as its tool draws it and waits on Touch ID.
+ * The person's own tools, in their own name: reads run at once, a tool still to sign in to opens its
+ * sign in in front of them, and anything sent is drawn as its tool draws it and waits on Touch ID.
  */
 
 /** Long enough to read the draft and reach for the key, short enough that nobody confirms a stale one. */
@@ -84,7 +84,7 @@ async function carryingOnAlready(
   }
 }
 
-/** The notch shows the icon of each tool still to sign in to; a tap opens that tool's own sign in. */
+/** Each tool still to sign in to: the Mac opens its sign in in the browser at once, and the phone shows its icon. */
 async function showSignIns(
   deps: SessionToolDeps,
   { first, again, said }: SignInsWanted,
@@ -159,7 +159,7 @@ function readableLines(readable: readonly string[]): string[] {
   return readable.length === 0
     ? []
     : [
-        `${namesOf(readable)} is connected to their workspace, so read what they asked there at once with run_tool and answer from it. Only sending or changing something there needs their own sign in, so it goes out in their name: when they ask for that, call sign_in for it with what they asked as said, and carry on once they finish. No icon was put in the notch for it.`,
+        `${namesOf(readable)} is connected to their workspace, so read what they asked there at once with run_tool and answer from it. Only sending or changing something there needs their own sign in, so it goes out in their name: when they ask for that, call sign_in for it with what they asked as said, and carry on once they finish. No sign in was opened for it.`,
       ];
 }
 
@@ -168,12 +168,12 @@ function signInLines(first: readonly string[], again: readonly string[]): string
     ...(first.length === 0
       ? []
       : [
-          `They have not signed in to ${namesOf(first)} yet, so nothing there can be done in their name. Its icon is in the notch: one tap signs them in, once, and you carry on with what they asked as soon as they have. Say that in a sentence and stop.`,
+          `They have not signed in to ${namesOf(first)} yet, so nothing there can be done in their name. Its sign in is now open in front of them, in the browser on the Mac or as an icon on the phone: they sign in once, and you carry on with what they asked as soon as they have. Say that in a sentence and stop.`,
         ]),
     ...(again.length === 0
       ? []
       : [
-          `Their ${namesOf(again)} sign in reached somebody else's account, so nothing runs there. Its icon is in the notch to sign in again with their own.`,
+          `Their ${namesOf(again)} sign in reached somebody else's account, so nothing runs there. Its sign in is open in front of them to sign in again with their own.`,
         ]),
   ];
 }
@@ -373,14 +373,14 @@ async function theirAccountFor(
   if (checked === undefined) {
     return {
       done: false,
-      said: 'They have not signed in to that tool. Run find_tool for it, which puts its icon in the notch.',
+      said: 'They have not signed in to that tool. Run find_tool for it, which opens its sign in in front of them.',
     };
   }
   if (checked.check !== WORK_ACCOUNT_CHECK.MISMATCH) return checked;
   await showSignIns(deps, { first: [], again: [checked.toolkit] });
   return {
     done: false,
-    said: `Their ${nameOf(checked.toolkit)} sign in reached somebody else's account, so nothing was written down. Its icon is in the notch to sign in again.`,
+    said: `Their ${nameOf(checked.toolkit)} sign in reached somebody else's account, so nothing was written down. Its sign in is open in front of them to sign in again.`,
   };
 }
 

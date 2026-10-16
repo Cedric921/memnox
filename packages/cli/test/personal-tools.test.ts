@@ -105,7 +105,7 @@ async function depsAt(seen: Seen, world: World = {}): Promise<SessionToolDeps> {
 }
 
 describe("the person's own tools by voice", () => {
-  it('puts the icon of each tool still to sign in to in the notch', async () => {
+  it('opens the sign in of each tool still to sign in to in front of them', async () => {
     const deps = await depsAt(
       { ran: [] },
       { signInFirst: ['linear'], signInAgain: ['slack'] },
@@ -121,7 +121,7 @@ describe("the person's own tools by voice", () => {
       { toolkit: 'linear', url: 'https://consent/linear' },
       { toolkit: 'slack', url: 'https://consent/slack', again: true },
     ]);
-    expect(found.said).toContain('notch');
+    expect(found.said).toContain('sign in is now open in front of them');
   });
 
   it('says why a tool they named cannot be used rather than reaching for another', async () => {
