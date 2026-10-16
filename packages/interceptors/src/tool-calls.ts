@@ -5,8 +5,6 @@ import {
   ACTION,
   classifyToolCall,
   environmentOfArguments,
-  HTTP_METHOD,
-  HTTP_METHOD_ARGUMENT,
   isWorkspaceTool,
   mcpToolParts,
   ownToolDeclaration,
@@ -22,10 +20,16 @@ import {
   EDIT_HOST,
   GEMINI_EDIT_TOOLS,
   GEMINI_EVENT,
+  HERMES_EDIT_TOOLS,
+  HERMES_EVENT,
+  HERMES_PATCH_TOOL,
+  HERMES_PLUGIN_MARK,
   WINDSURF_EVENT,
   type EditHost,
 } from './agent-edits';
 import { patchEditsOf } from './codex-patch';
+import { OPENCLAW_EVENT } from './openclaw-payload';
+import { COPILOT_EVENT, DEVIN_EVENT, OPENCODE_EVENT } from './named-hosts';
 import { EDIT_HOOK_EVENT, EDIT_TOOLS } from './edit-hook';
 import {
   addedLines,
@@ -38,9 +42,10 @@ import {
   folderOf,
   sessionOf,
   type Delegation,
+  type EditIntent,
   type HookFields,
 } from './hook-payload';
-import { EGRESS_REQUEST_ACTION } from './tool-hook.constants';
+import { webRequests } from './web-requests';
 
 /**
  * What an agent's own tool is about to do, read out of its hook payload as the actions a
@@ -90,18 +95,25 @@ const READ_TOOLS: readonly string[] = [
 ];
 
 /** Tools that search under a folder, which is the working directory when none is named. */
-const SEARCH_TOOLS: readonly string[] = ['Grep', 'Glob', 'glob', 'search_file_content'];
+const SEARCH_TOOLS: readonly string[] = [
+  'Grep',
+  'Glob',
+  'glob',
+  'search_file_content',
+  'search_files',
+];
 
 /** Every file tool that writes, across the agents whose hooks are read here. */
 const WRITE_TOOLS: readonly string[] = [
-  ...EDIT_TOOLS,
-  ...GEMINI_EDIT_TOOLS,
-  ...CURSOR_EDIT_TOOLS,
+  ...new Set([
+    ...EDIT_TOOLS,
+    ...GEMINI_EDIT_TOOLS,
+    ...CURSOR_EDIT_TOOLS,
+    ...HERMES_EDIT_TOOLS,
+  ]),
 ];
 
-const FETCH_TOOLS: readonly string[] = ['WebFetch', 'web_fetch'];
-const WEB_SEARCH_TOOLS: readonly string[] = ['WebSearch', 'google_web_search'];
-const SHELL_TOOLS: readonly string[] = ['Bash', 'run_shell_command', 'shell'];
+const SHELL_TOOLS: readonly string[] = ['Bash', 'run_shell_command', 'shell', 'terminal'];
 
 /** Where a file tool names its path, first match wins. */
 const PATH_KEYS: readonly string[] = [
@@ -113,11 +125,20 @@ const PATH_KEYS: readonly string[] = [
   'target_file',
 ];
 
+/** The hosts whose own reply can put a question to their person. */
+const NATIVE_ASK: readonly string[] = [
+  EDIT_HOST.PRE_TOOL_USE,
+  EDIT_HOST.OPENCLAW,
+  EDIT_HOST.COPILOT,
+];
+
+/** Hermes asks its person only through Memnox's plugin, which marks what it sends; shell hooks cannot. */
+function isHermesPlugin(host: EditHost, hook: HookFields): boolean {
+  return host === EDIT_HOST.HERMES && hook[HERMES_PLUGIN_MARK] === true;
+}
+
 /** Claude Code, Codex and Gemini CLI spell an MCP tool `mcp__<server>__<tool>`. */
 const MCP_PREFIX = 'mcp';
-
-/** A URL inside free text, which is where Gemini's fetch tool carries its address. */
-const URL_IN_TEXT = /https?:\/\/[^\s"'<>]+/;
 
 /** Cursor reads an empty object as "no objection", and anything that is not JSON as a block. */
 const CURSOR_NO_OBJECTION = '{}';
@@ -142,6 +163,21 @@ export function toolCallOf(
   if (event === GEMINI_EVENT.BEFORE_TOOL) {
     return namedCall(hook, EDIT_HOST.GEMINI, home, declared);
   }
+  if (event === HERMES_EVENT.PRE_TOOL_CALL) {
+    return namedCall(hook, EDIT_HOST.HERMES, home, declared);
+  }
+  if (event === OPENCLAW_EVENT.BEFORE_TOOL) {
+    return namedCall(hook, EDIT_HOST.OPENCLAW, home, declared);
+  }
+  if (event === COPILOT_EVENT.PRE_TOOL) {
+    return namedCall(hook, EDIT_HOST.COPILOT, home, declared);
+  }
+  if (event === DEVIN_EVENT.PRE_TOOL) {
+    return namedCall(hook, EDIT_HOST.DEVIN, home, declared);
+  }
+  if (event === OPENCODE_EVENT.PRE_TOOL) {
+    return namedCall(hook, EDIT_HOST.OPENCODE, home, declared);
+  }
   // Cursor's `preToolUse` carries only its writes, whose go-ahead the lease answers.
   if (event === CURSOR_EVENT.PRE_TOOL_USE) {
     return namedCall(hook, EDIT_HOST.CURSOR, home, declared);
@@ -164,25 +200,45 @@ function namedCall(
   // Claude Code reads `ask` as a prompt for its person; whether one is there is the caller's.
   const base = {
     ...baseOf({ host, tool, hook, cwd }),
-    nativeAsk: host === EDIT_HOST.PRE_TOOL_USE,
+    nativeAsk: NATIVE_ASK.includes(host) || isHermesPlugin(host, hook),
   };
-  if (SHELL_TOOLS.includes(tool)) return shellCall(base, firstText(input, ['command']));
-  if (tool === CODEX_PATCH_TOOL) {
-    const files = patchEditsOf(hook) ?? [];
-    return withRequests(
-      base,
-      files.map((file) =>
-        fileRequest(
-          ACTION.FILESYSTEM_WRITE,
-          file.path,
-          { cwd, home },
-          addedLines(file.change),
-        ),
+  if (SHELL_TOOLS.includes(tool)) return shellCallIn(base, input, { cwd, home });
+  const patched = patchFiles(hook, host, tool);
+  if (patched !== null) {
+    const writes = patched.map((file) =>
+      fileRequest(
+        ACTION.FILESYSTEM_WRITE,
+        file.path,
+        { cwd, home },
+        addedLines(file.change),
       ),
     );
+    return withRequests(base, writes);
   }
   const requests = requestsFor(tool, input, { cwd, home }, declared);
   return requests === null ? null : withRequests(base, requests);
+}
+
+/** A command line, run where `workdir` says, which for Hermes is not always where it runs. */
+function shellCallIn(base: ToolCall, input: HookFields, at: PathBase): ToolCall | null {
+  const workdir = firstText(input, ['workdir']);
+  const where =
+    workdir === undefined ? base : { ...base, cwd: absolutePath(workdir, at) };
+  return shellCall(where, firstText(input, ['command']));
+}
+
+/** The files a patch tool writes: Codex's `apply_patch`, or Hermes's `patch` in its patch mode. */
+function patchFiles(hook: HookFields, host: EditHost, tool: string): EditIntent[] | null {
+  if (tool === CODEX_PATCH_TOOL) return patchEditsOf(hook) ?? [];
+  const patch = fieldsOf(hook['tool_input'])?.['patch'];
+  if (
+    host !== EDIT_HOST.HERMES ||
+    tool !== HERMES_PATCH_TOOL ||
+    typeof patch !== 'string'
+  ) {
+    return null;
+  }
+  return patchEditsOf({ ...hook, tool_input: { command: patch } }) ?? [];
 }
 
 /** Where a relative path is relative to, and whose home `~` means. */
@@ -242,8 +298,8 @@ function requestsFor(
       ),
     ];
   }
-  if (FETCH_TOOLS.includes(tool)) return [fetchRequest(input)];
-  if (WEB_SEARCH_TOOLS.includes(tool)) return [searchRequest(input)];
+  const web = webRequests(tool, input);
+  if (web !== undefined) return web;
   return null;
 }
 
@@ -303,47 +359,6 @@ function flatArguments(input: HookFields): Record<string, string> {
       typeof value === 'string' ? value : JSON.stringify(value),
     ]),
   );
-}
-
-/** A fetch by its host, which is what a network rule names; the URL is inspected too. */
-function fetchRequest(input: HookFields): ToolRequest {
-  const text = firstText(input, ['url', 'prompt']) ?? '';
-  const found = URL_IN_TEXT.exec(text);
-  const url = found === null ? undefined : found[0];
-  const host = url === undefined ? undefined : hostOf(url);
-  return {
-    action: EGRESS_REQUEST_ACTION,
-    ...(host === undefined ? {} : { target: host }),
-    class: TOOL_CLASS.READ,
-    // A fetch only ever reads, so a rule about changing a host lets it through.
-    arguments: {
-      [HTTP_METHOD_ARGUMENT]: HTTP_METHOD.GET,
-      ...(url === undefined ? {} : { url }),
-    },
-  };
-}
-
-/** A web search names no host, so only a rule over every request reaches it. */
-function searchRequest(input: HookFields): ToolRequest {
-  const query = firstText(input, ['query']);
-  return {
-    action: EGRESS_REQUEST_ACTION,
-    class: TOOL_CLASS.READ,
-    arguments: {
-      [HTTP_METHOD_ARGUMENT]: HTTP_METHOD.GET,
-      ...(query === undefined ? {} : { query }),
-    },
-  };
-}
-
-function hostOf(url: string): string | undefined {
-  try {
-    const host = new URL(url).hostname;
-    return host === '' ? undefined : host;
-  } catch {
-    // Not a URL after all, so there is no host to name and none is guessed.
-    return undefined;
-  }
 }
 
 interface BaseInput {

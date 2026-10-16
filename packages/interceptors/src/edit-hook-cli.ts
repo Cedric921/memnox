@@ -30,7 +30,12 @@ import { keepBeforeShell, takeOwedReport } from './shell-written';
 import { fieldsOf } from './hook-payload';
 import { answerPause } from './edit-pause';
 import { keepSessionSummary } from './session-summary-row';
-import { answeredSessionStart, beforePause, replyInSession } from './in-session';
+import {
+  answeredApproval,
+  answeredSessionStart,
+  beforePause,
+  replyInSession,
+} from './in-session';
 import { log, readStdin } from './seam-runtime';
 import { noteSessionHost } from './session-host-note';
 import { clearTerminalQuestion, noteTerminalQuestion } from './terminal-question';
@@ -39,6 +44,10 @@ import { sessionEventOf } from './session-events';
 import { answerToolCall, failedToolAnswer, type ToolAnswer } from './tool-hook';
 import { DEFAULT_AGENT_NAME, TOOL_POLICY_FLAG } from './tool-hook.constants';
 import { refusalReply, type ToolReply } from './tool-policy';
+import { canonicalPayload, isOpenClawPayload } from './openclaw-payload';
+import { isBorrowedClaudeHook } from './borrowed-hook';
+import { HERMES_PLUGIN_MARK } from './agent-edits';
+import { HOST_EVENT_FLAG, isCopilotPayload, namedHostPayload } from './named-hosts';
 
 /**
  * The hook an editor runs before a tool call and when a session ends: with `--policy` it
@@ -55,15 +64,14 @@ let received: unknown = null;
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const context = contextFrom(args, process.env);
-  let payload: unknown;
-  try {
-    payload = JSON.parse(await readStdin());
-    received = payload;
-  } catch {
-    // Not a payload this hook was written for, so it says nothing about it.
-    return;
-  }
+  const payload = await readPayload(args, context);
+  // Not a payload this hook was written for, so it says nothing about it.
+  if (payload === null) return;
+  received = payload;
 
+  // Cursor running Claude Code's entry: Cursor's own entry rules on this call.
+  if (isBorrowedClaudeHook(payload, context.agent, process.env)) return;
+  if (await answeredApproval(payload, context)) return;
   const ended = endedSessionOf(payload);
   if (ended !== null) return releaseSession(ended, context);
   if (await nothingToRule(payload, context)) return;
@@ -91,6 +99,30 @@ async function main(): Promise<void> {
   if (pause === null) return;
   const said = await beforePause(payload, pause, context, process.env);
   process.stdout.write(await answerPause(pause, context, said));
+}
+
+/**
+ * The payload in the names every reader takes: OpenClaw's, Copilot's, Devin's and OpenCode's
+ * read into them, any other host's as it came. Null where stdin is not JSON.
+ */
+async function readPayload(
+  args: readonly string[],
+  context: EditHookContext,
+): Promise<unknown> {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(await readStdin());
+  } catch {
+    return null;
+  }
+  const hostEvent = flagValue(args, HOST_EVENT_FLAG);
+  return canonicalPayload(
+    namedHostPayload(raw, {
+      agent: context.agent,
+      env: process.env,
+      ...(hostEvent === null ? {} : { hostEvent }),
+    }),
+  );
 }
 
 /**
@@ -172,6 +204,11 @@ async function heldForFingerprint(
 function personThere(payload: unknown, agent: string): boolean {
   const hook = fieldsOf(payload);
   if (hook !== null && CURSOR_ASKING.includes(hook['hook_event_name'])) return true;
+  // OpenClaw's approval reaches its person, and blocks the call where it has nowhere to;
+  // Copilot asks at its terminal and refuses an ask in autopilot.
+  if (isOpenClawPayload(payload) || isCopilotPayload(payload)) return true;
+  // Hermes's approval reaches its person through Memnox's plugin, and fails closed where none.
+  if (hook?.[HERMES_PLUGIN_MARK] === true) return true;
   return agent === DEFAULT_AGENT_NAME && canAskPerson(payload);
 }
 
@@ -203,7 +240,12 @@ function contextFrom(args: readonly string[], env: NodeJS.ProcessEnv): EditHookC
 
 /** `--agent cursor`, where the installed command names one. */
 function agentFlag(args: readonly string[]): string | null {
-  const at = args.indexOf(AGENT_FLAG);
+  return flagValue(args, AGENT_FLAG);
+}
+
+/** The value after a flag, or null where the flag is absent or bare. */
+function flagValue(args: readonly string[], flag: string): string | null {
+  const at = args.indexOf(flag);
   if (at === -1) return null;
   const value = args[at + 1];
   return value === undefined || value.startsWith('-') ? null : value;

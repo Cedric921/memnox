@@ -22,6 +22,7 @@ import { EDIT_IDLE_MINUTES } from './edit-hook';
 import { markIfDue } from './edit-marks';
 import {
   activityOf,
+  readsNotesAt,
   SESSION_MOMENT,
   sessionAnswer,
   withDecisions,
@@ -107,9 +108,8 @@ async function notesAt(
   const inbox = new CloudNotes(home);
   // The holds are filed under the session `memnox run` set, where there is one.
   const holder = context.runSession ?? pause.sessionId;
-  // Windsurf reads nothing back, so a note collected
-  // here would be marked delivered and never seen.
-  if (pause.host === EDIT_HOST.WINDSURF) {
+  // A host that reads nothing back here would have a collected note marked delivered and never seen.
+  if (!readsNotesAt(pause.host, pause.moment)) {
     await keepHoldsAlive(holder, context);
     return [];
   }

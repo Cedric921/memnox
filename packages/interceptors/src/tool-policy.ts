@@ -22,7 +22,13 @@ import {
   type ToolClass,
 } from '@memnox/core';
 
-import { EDIT_HOST, type EditHost } from './agent-edits';
+import {
+  BLOCKING_HOSTS,
+  EDIT_HOST,
+  blockDecision,
+  copilotDenial,
+  type EditHost,
+} from './agent-edits';
 import { EDIT_HOOK_EVENT } from './edit-hook';
 import type { HookAuthorizer, HookVerdict } from './hook-authorizer';
 import { ShellSeam } from './shell-seam';
@@ -195,6 +201,10 @@ export function refusalReply(host: EditHost, reason: string): ToolReply {
   if (host === EDIT_HOST.WINDSURF) return { stderr: reason, exitCode: WINDSURF_BLOCK };
   const decision = DECISION_EFFECT.DENY;
   if (host === EDIT_HOST.GEMINI) return { stdout: JSON.stringify({ decision, reason }) };
+  if (BLOCKING_HOSTS.includes(host)) {
+    return { stdout: blockDecision(reason) };
+  }
+  if (host === EDIT_HOST.COPILOT) return { stdout: copilotDenial(reason) };
   if (host === EDIT_HOST.CURSOR) {
     const said = { permission: decision, user_message: reason, agent_message: reason };
     return { stdout: JSON.stringify(said) };
@@ -230,6 +240,8 @@ export function toolReply(
   const decision = asking ? DECISION_EFFECT.ASK : DECISION_EFFECT.DENY;
   if (call.host === EDIT_HOST.GEMINI)
     return { stdout: JSON.stringify({ decision, reason }) };
+  const named = namedHostReply(call.host, asking, reason);
+  if (named !== null) return named;
   if (call.host === EDIT_HOST.CURSOR) {
     const said = { permission: decision, user_message: reason, agent_message: reason };
     return { stdout: JSON.stringify(said) };
@@ -242,6 +254,35 @@ export function toolReply(
   // The host shows this to the person, so a held question never depends on the agent relaying it.
   const shown = held === null || asking ? {} : { systemMessage: heldNotice(held) };
   return { stdout: JSON.stringify({ hookSpecificOutput, ...shown }) };
+}
+
+/**
+ * The reply of a host that reads its own shape: Hermes and OpenClaw take an ask or a block
+ * from Memnox's plugins, Devin and OpenCode only a block, and Copilot its own decision.
+ */
+function namedHostReply(
+  host: EditHost,
+  asking: boolean,
+  reason: string,
+): ToolReply | null {
+  if (host === EDIT_HOST.HERMES || host === EDIT_HOST.OPENCLAW) {
+    return {
+      stdout: JSON.stringify({
+        decision: asking ? DECISION_EFFECT.ASK : 'block',
+        reason,
+      }),
+    };
+  }
+  if (host === EDIT_HOST.DEVIN || host === EDIT_HOST.OPENCODE) {
+    return { stdout: blockDecision(reason) };
+  }
+  if (host === EDIT_HOST.COPILOT) {
+    const permissionDecision = asking ? DECISION_EFFECT.ASK : DECISION_EFFECT.DENY;
+    return {
+      stdout: JSON.stringify({ permissionDecision, permissionDecisionReason: reason }),
+    };
+  }
+  return null;
 }
 
 /** Whether the host shows a person this ruling's question, rather than a refusal in its place. */
