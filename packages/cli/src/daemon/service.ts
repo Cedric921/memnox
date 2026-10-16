@@ -1,11 +1,20 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, realpathSync } from 'node:fs';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import { platform, userInfo } from 'node:os';
 import { delimiter, dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { MEMNOX_HOME } from '@memnox/core';
 import { interceptorDirFor } from '@memnox/interceptors';
 import { describeError } from '../cli-errors';
+import {
+  registerTask,
+  removeTask,
+  taskLauncherFor,
+  taskLauncherPath,
+  WINDOWS_MANAGER,
+} from './service-windows';
 
 /**
  * The daemon, started by the machine rather than a terminal somebody keeps open, or a
@@ -25,31 +34,44 @@ interface ServiceState {
   path: string;
   /** What the platform calls this, for the sentence a person reads. */
   manager: string;
+  /** Set under Task Scheduler, which starts it at logon and does not restart it after a crash. */
+  onlyAtLogon?: boolean;
 }
 
-/** The two platforms that ship a per-user service manager this can write a file for. */
+/** The platforms that ship a per-user service manager this can write a file for. */
 const MACOS = 'darwin';
 const LINUX = 'linux';
+const WINDOWS = 'win32';
 
 /** macOS means launchd and a plist; everything else supported means systemd and a unit. */
 function isMac(): boolean {
   return platform() === MACOS;
 }
 
-function servicePath(home: string): string {
-  return isMac()
+function servicePath(home: string, os: NodeJS.Platform): string {
+  if (os === WINDOWS) return taskLauncherPath(home);
+  return os === MACOS
     ? join(home, 'Library', 'LaunchAgents', `${SERVICE_LABEL}.plist`)
     : join(home, '.config', 'systemd', 'user', LINUX_UNIT);
 }
 
-export function serviceState(home: string): ServiceState {
-  const path = servicePath(home);
-  const supported = isMac() || platform() === LINUX;
+function managerOn(os: NodeJS.Platform): string {
+  if (os === WINDOWS) return WINDOWS_MANAGER;
+  return os === MACOS ? 'launchd' : 'systemd';
+}
+
+export function serviceState(
+  home: string,
+  os: NodeJS.Platform = platform(),
+): ServiceState {
+  const path = servicePath(home, os);
+  const supported = os === MACOS || os === LINUX || os === WINDOWS;
   return {
     supported,
     installed: supported && existsSync(path),
     path,
-    manager: isMac() ? 'launchd' : 'systemd',
+    manager: managerOn(os),
+    ...(os === WINDOWS ? { onlyAtLogon: true } : {}),
   };
 }
 
@@ -59,11 +81,61 @@ export function serviceState(home: string): ServiceState {
  * stops working the moment the package manager replaces that link.
  */
 function resolveCommandParts(): { node: string; entry: string } {
-  const entry = process.argv[1] ?? '';
-  return {
-    node: process.execPath,
-    entry: entry === '' ? entry : realpathSync(entry),
-  };
+  const given = process.argv[1] ?? '';
+  const entry = given === '' ? given : realpathSync(given);
+  return { node: entry === '' ? process.execPath : nodeForDaemon(entry), entry };
+}
+
+/** Long enough for a node to start the CLI or open a database, short enough that a hung one is passed over. */
+const NODE_CHECK_MS = 10_000;
+/** Opens the daemon's database module in memory, which fails at once under a node it was not built for. */
+const OPENS_DATABASE =
+  "const Database = require(process.argv[1]); new Database(':memory:').close();";
+
+/**
+ * A node on this machine that really runs the daemon: the one installing first, then each on the PATH.
+ * Whatever ran the install is not always it, since an app such as Hermes puts its own node first on the
+ * PATH, and the daemon's database module only loads under a node it suits, or it dies at every start.
+ */
+function nodeForDaemon(entry: string): string {
+  const database = databaseModule();
+  const candidates = [process.execPath, ...nodesOnPath()];
+  return candidates.find((node) => runsDaemon(node, entry, database)) ?? process.execPath;
+}
+
+function nodesOnPath(): string[] {
+  const found = (process.env['PATH'] ?? '')
+    .split(delimiter)
+    .filter((dir) => dir !== '')
+    .map((dir) => join(dir, 'node'))
+    .filter((path) => existsSync(path))
+    .map((path) => realpathSync(path));
+  return [...new Set(found)];
+}
+
+/** Where the database module the daemon loads lives, found from the core package that depends on it. */
+function databaseModule(): string | null {
+  try {
+    const core = fileURLToPath(import.meta.resolve('@memnox/core'));
+    return createRequire(core).resolve('better-sqlite3');
+  } catch {
+    return null;
+  }
+}
+
+function runsDaemon(node: string, entry: string, database: string | null): boolean {
+  try {
+    execFileSync(node, [entry, '--version'], { stdio: 'ignore', timeout: NODE_CHECK_MS });
+    if (database !== null) {
+      execFileSync(node, ['-e', OPENS_DATABASE, database], {
+        stdio: 'ignore',
+        timeout: NODE_CHECK_MS,
+      });
+    }
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -147,6 +219,24 @@ function load(path: string): string | null {
   }
 }
 
+/** Null once systemd keeps this user's services after logout, otherwise the one line that would. */
+function keepAfterLogout(): string | null {
+  const user = userInfo().username;
+  const enable = `sudo loginctl enable-linger ${user}`;
+  try {
+    const said = execFileSync('loginctl', ['show-user', user, '--property=Linger'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    if (said.trim() === 'Linger=yes') return null;
+    execFileSync('loginctl', ['enable-linger', user], { stdio: 'ignore' });
+    return null;
+  } catch {
+    // Not allowed without a password here, or no loginctl at all: the person runs it once.
+    return enable;
+  }
+}
+
 /**
  * Null when it is really stopped, otherwise why not. By label rather than by path, since
  * `bootout` takes a path only while the file is the one launchd loaded.
@@ -217,29 +307,63 @@ export interface InstallResult {
   state: ServiceState;
   /** Set when the file was written but the manager would not take it. */
   warning?: string;
+  /** On Linux, the command that keeps it running after the person logs out, when it could not be run here. */
+  linger?: string;
 }
 
 /** Injected, so a test never asks the real service manager to load the test runner. */
 interface ServiceSeams {
   load?: (path: string) => string | null;
+  linger?: () => string | null;
   unload?: () => string | null;
+  /** Whether the manager holds the daemon now, injected so a test never asks the real one. */
+  loaded?: () => boolean;
+  /** Injected, so a test on a Mac installs what Windows would. */
+  platform?: NodeJS.Platform;
+}
+
+/** A Scheduled Task's launcher, then the task: the file is the install, as everywhere else. */
+async function installWindowsTask(
+  state: ServiceState,
+  home: string,
+  seams: ServiceSeams,
+): Promise<InstallResult> {
+  await mkdir(dirname(state.path), { recursive: true });
+  const { node, entry } = resolveCommandParts();
+  const log = join(home, MEMNOX_HOME, 'daemon.log');
+  await writeFile(
+    state.path,
+    taskLauncherFor({ node, entry, log, path: installingPath(home) }),
+  );
+  const warning = (seams.load ?? registerTask)(state.path);
+  return {
+    state: { ...state, installed: true },
+    ...(warning === null ? {} : { warning }),
+  };
 }
 
 export async function installService(
   home: string,
   seams: ServiceSeams = {},
 ): Promise<InstallResult> {
-  const state = serviceState(home);
+  const os = seams.platform ?? platform();
+  const state = serviceState(home, os);
   if (!state.supported) return { state };
+  if (os === WINDOWS) return installWindowsTask(state, home, seams);
 
+  // A loaded daemon keeps running whatever it started on, so it is stopped first to come back on this build.
+  const stopped = (seams.loaded ?? isLabelLoaded)() ? (seams.unload ?? unload)() : null;
   await mkdir(dirname(state.path), { recursive: true });
-  await writeFile(state.path, isMac() ? plistFor(home) : unitFor(home), {
+  await writeFile(state.path, os === MACOS ? plistFor(home) : unitFor(home), {
     mode: SERVICE_FILE_MODE,
   });
-  const warning = (seams.load ?? load)(state.path);
+  const warning = stopped ?? (seams.load ?? load)(state.path);
+  // A user unit stops with the last login otherwise, which on a server reached over SSH is the first logout.
+  const linger = os === MACOS ? null : (seams.linger ?? keepAfterLogout)();
   return {
     state: { ...state, installed: true },
     ...(warning === null ? {} : { warning }),
+    ...(linger === null ? {} : { linger }),
   };
 }
 
@@ -253,11 +377,12 @@ export async function uninstallService(
   home: string,
   seams: ServiceSeams = {},
 ): Promise<UninstallResult> {
-  const state = serviceState(home);
+  const os = seams.platform ?? platform();
+  const state = serviceState(home, os);
   if (!state.installed) return { state };
 
   // Stopped before the file goes, or a running process is left that nothing admits to.
-  const warning = (seams.unload ?? unload)();
+  const warning = (seams.unload ?? (os === WINDOWS ? removeTask : unload))();
   await rm(state.path, { force: true });
   return {
     state: { ...state, installed: false },

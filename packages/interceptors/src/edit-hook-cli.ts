@@ -9,6 +9,7 @@ import {
   LeaseRegistry,
   protectionStopped,
   SESSION_VAR,
+  SessionHosts,
 } from '@memnox/core';
 
 import {
@@ -20,6 +21,7 @@ import {
   type AgentEdits,
 } from './agent-edits';
 import { claimAll, type EditHookContext } from './edit-claims';
+import { answerAgentQuestion } from './agent-question';
 import { answerPicker } from './held-picker';
 import { checkpointBeforeFirstWrite } from './checkpoint-seam';
 import { canAskPerson } from './edit-hook';
@@ -30,6 +32,9 @@ import { answerPause } from './edit-pause';
 import { keepSessionSummary } from './session-summary-row';
 import { answeredSessionStart, beforePause, replyInSession } from './in-session';
 import { log, readStdin } from './seam-runtime';
+import { noteSessionHost } from './session-host-note';
+import { clearTerminalQuestion, noteTerminalQuestion } from './terminal-question';
+import { noteCursorAsking } from './cursor-asking';
 import { sessionEventOf } from './session-events';
 import { answerToolCall, failedToolAnswer, type ToolAnswer } from './tool-hook';
 import { DEFAULT_AGENT_NAME, TOOL_POLICY_FLAG } from './tool-hook.constants';
@@ -61,10 +66,11 @@ async function main(): Promise<void> {
 
   const ended = endedSessionOf(payload);
   if (ended !== null) return releaseSession(ended, context);
-  // Stopped on purpose: no rule, lease or pause stands in the way until `memnox start`.
-  if (await protectionStopped(context.home)) return;
+  if (await nothingToRule(payload, context)) return;
+  await noteSessionHost(payload, context);
   if (await answeredSessionStart(payload, context, process.env)) return;
   if (await answeredPicker(payload, context)) return;
+  if (await answeredOutLoud(payload, context)) return;
 
   // The rules first, so nothing takes a lease on a write it was never allowed to make.
   const ruled = args.includes(TOOL_POLICY_FLAG)
@@ -80,6 +86,7 @@ async function main(): Promise<void> {
   // claim and a tool to record, so the claim goes first.
   const pause = sessionEventOf(payload);
   if (await answerEdits(payload, context)) return;
+  await noteCursorAsking(payload, reply !== null, context);
   emit(reply);
   if (pause === null) return;
   const said = await beforePause(payload, pause, context, process.env);
@@ -175,6 +182,9 @@ function emit(reply: ToolReply | null): void {
   if (reply.exitCode !== undefined) process.exitCode = reply.exitCode;
 }
 
+/** Claude Code names what started it here, which is how a panel session is told from a terminal one. */
+const ENTRYPOINT_VAR = 'CLAUDE_CODE_ENTRYPOINT';
+
 /**
  * Which agent this hook speaks for: the environment
  * `memnox run` sets, then its own `--agent` flag.
@@ -187,6 +197,7 @@ function contextFrom(args: readonly string[], env: NodeJS.ProcessEnv): EditHookC
     pid: process.pid,
     cwd: process.cwd(),
     now: () => new Date(),
+    ...(env[ENTRYPOINT_VAR] === undefined ? {} : { entrypoint: env[ENTRYPOINT_VAR] }),
   };
 }
 
@@ -203,6 +214,11 @@ function agentFlag(args: readonly string[]): string | null {
  * let go at once so nobody waits out a window.
  */
 async function releaseSession(ended: string, context: EditHookContext): Promise<void> {
+  // Closed by the person, so the voice, the cards and the waiting list stop tracking it at once.
+  await new SessionHosts(context.home).end(
+    context.runSession ?? ended,
+    context.now().toISOString(),
+  );
   await new LeaseRegistry(context.home).releaseSession(
     ended,
     context.now().toISOString(),
@@ -280,6 +296,46 @@ function personName(): string {
   } catch {
     return 'a person';
   }
+}
+
+/** An agent's own question, answered out loud when the voice is there to read it. */
+async function answeredOutLoud(
+  payload: unknown,
+  context: EditHookContext,
+): Promise<boolean> {
+  const reply = await answerAgentQuestion(payload, context).catch((err: unknown) => {
+    log(`agent question failed: ${String(err)}`);
+    return null;
+  });
+  if (reply === null) return false;
+  emit({ stdout: reply });
+  return true;
+}
+
+/**
+ * Stopped on purpose, so no rule, lease or pause stands in the way until `memnox start`; or the
+ * agent asking its person something in its terminal, which is news for the voice and no tool call.
+ */
+async function nothingToRule(
+  payload: unknown,
+  context: EditHookContext,
+): Promise<boolean> {
+  return (await protectionStopped(context.home)) || askedInTerminal(payload, context);
+}
+
+/** A question the agent asks in its terminal is posted for the voice; any other hook means it was answered. */
+async function askedInTerminal(
+  payload: unknown,
+  context: EditHookContext,
+): Promise<boolean> {
+  try {
+    if (await noteTerminalQuestion(payload, context)) return true;
+    await clearTerminalQuestion(payload, context);
+  } catch (err) {
+    // The voice reading it out is a convenience: the agent's own prompt is still on screen.
+    log(`terminal question failed: ${String(err)}`);
+  }
+  return false;
 }
 
 /** A held question asked in the host's own picker is answered here, and nowhere else. */

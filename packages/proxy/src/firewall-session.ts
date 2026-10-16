@@ -257,6 +257,7 @@ export class FirewallSession {
       // The server's tool, so a yes on one server is not a yes on another with the name.
       grantKey: `mcp.${this.deps.server ?? ''}.${call.name}`,
       ...(this.deps.server === undefined ? {} : { target: this.deps.server }),
+      ...(verdict.rule === undefined ? {} : { rule: verdict.rule }),
     };
 
     if (hold === undefined) {
@@ -270,7 +271,8 @@ export class FirewallSession {
     const result = await hold.hold(request);
     if (holdAllowed(result)) {
       this.deps.authorizer.personAllowed?.(call);
-      return { ...verdict, effect: DECISION_EFFECT.ALLOW, reason: 'a person allowed it' };
+      const who = result.by === undefined ? 'a person' : `a person, ${result.by},`;
+      return { ...verdict, effect: DECISION_EFFECT.ALLOW, reason: `${who} allowed it` };
     }
     return {
       ...verdict,

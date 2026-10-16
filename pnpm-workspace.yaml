@@ -1,5 +1,7 @@
 packages:
   - 'packages/*'
+  - 'native/noise'
+  - 'native/noise/npm/*'
 
 # better-sqlite3 is a native module and must compile; esbuild ships a platform binary.
 allowBuilds:

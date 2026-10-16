@@ -95,6 +95,12 @@ export interface PolicyDecision {
    * which is what makes redirection reliable enough for an agent to take.
    */
   alternative?: Alternative;
+  /**
+   * On an allow only: the ask rules, by name, it stands in for where both match, so a call a
+   * person has said yes to often enough stops asking. Never over a deny, and only within one
+   * layer, so nothing on this machine relaxes what the workspace asks.
+   */
+  relaxes?: string[];
 }
 
 export interface Policy {
@@ -106,6 +112,11 @@ export interface Policy {
   decision: PolicyDecision;
   /** Unset = every project, so a single-project deployment is unaffected. */
   project?: string;
+  /** Published by the workspace, so nothing on this machine may loosen it, `memnox allow` included. */
+  workspace?: boolean;
+  /** Who in the workspace approved it and when, so the reason an agent is given names a person and a day. */
+  decidedBy?: string;
+  decidedAt?: string;
 }
 
 export interface PolicyDocument {

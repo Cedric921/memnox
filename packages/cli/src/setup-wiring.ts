@@ -1,8 +1,8 @@
 import { execFileSync } from 'node:child_process';
 import { ownProcessEnv, rememberRepository } from '@memnox/core';
-import { installInterceptors, INTERCEPT_BINARY } from '@memnox/interceptors';
 import { wrapEveryServer } from './mcp/wrap-servers';
 import { installClaudeHook } from './protect/claude-hook';
+import { installOwnInterceptors } from './protect/interceptor-entry';
 import {
   installCodexHook,
   installCursorHook,
@@ -58,7 +58,7 @@ export interface Wiring {
 }
 
 export interface WiringSeams {
-  interceptors?: typeof installInterceptors;
+  interceptors?: typeof installOwnInterceptors;
   service?: typeof installService;
   /** Injected so a test writes no policy file under a real home. */
   rules?: (home: string) => Promise<number>;
@@ -95,10 +95,7 @@ export async function wireMachine(
   cwd: string,
   seams: WiringSeams = {},
 ): Promise<Wiring> {
-  const installed = await (seams.interceptors ?? installInterceptors)(
-    home,
-    INTERCEPT_BINARY,
-  );
+  const installed = await (seams.interceptors ?? installOwnInterceptors)(home);
   const rules = await (seams.rules ?? writeBaseline)(home);
   const retired = await (seams.retire ?? retireCopies)(home);
   const service = await (seams.service ?? installService)(home);

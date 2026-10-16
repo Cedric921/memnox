@@ -49,6 +49,13 @@ describe('what governs an agent is never the agent’s to change', () => {
     'uninstall',
     'rewind --last',
     'rewind --to ms_1',
+    'voice forget-key',
+    'voice forget-key --yes',
+    'pair',
+    'pair --name hostinger',
+    'devices grant dev_1 rules',
+    'signin',
+    'signout',
   ])('denies `memnox %s` typed by an agent', (line) => {
     const [binary, ...args] = ['memnox', ...line.split(' ')];
     const resolved = resolveAction(binary as string, args);
@@ -67,6 +74,9 @@ describe('what governs an agent is never the agent’s to change', () => {
     'report',
     'allow --list',
     'rewind --list',
+    'voice',
+    'devices',
+    'devices list',
   ])('lets `memnox %s` through, since it only reads', (line) => {
     expect(loosens(line)).toBe(false);
   });

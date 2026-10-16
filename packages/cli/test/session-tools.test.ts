@@ -153,7 +153,7 @@ async function call(
 }
 
 describe('the session tools', () => {
-  it('offers exactly why, status, replay, decisions, memory, brief, fingerprint and rewind', () => {
+  it('offers exactly why, status, replay, decisions, memory, brief, work, fingerprint and rewind', () => {
     expect(SESSION_TOOLS.map((tool) => tool.name)).toEqual([
       'why',
       'status',
@@ -161,6 +161,7 @@ describe('the session tools', () => {
       'decisions',
       'memory',
       'brief',
+      'work',
       'fingerprint',
       'rewind',
     ]);
@@ -386,6 +387,20 @@ describe('what the workspace settled, asked from the session', () => {
     ]);
     expect(read.facts[0]?.settled).toContain('confirmed by ada@acme.test');
     expect(read.withheld).toContain('2 fact(s)');
+  });
+
+  it('answers "all the decisions" with what it holds rather than with nothing, as in the voice log', async () => {
+    const answer = await call({ deps: depsFor(await connected()) }, 'memory', {
+      about: 'decisions',
+    });
+    const read = JSON.parse(answer.text) as {
+      facts: { statement: string; kind: string }[];
+      said: string;
+    };
+
+    expect(read.facts).toHaveLength(2);
+    expect(read.facts[0]?.kind).toBe('decision');
+    expect(read.said).toContain('sources');
   });
 
   it('says a machine that never pulled one holds none, rather than that nothing was settled', async () => {

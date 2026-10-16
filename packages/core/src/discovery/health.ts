@@ -28,7 +28,25 @@ export const CHECK_NAME = {
    * path and an unanswered question. None appears in `why`, and all four look alike.
    */
   HOLDS: 'holds',
+  /** Where Claude Code's hook lives, since one in the user's own file is one a local edit removes. */
+  HOOKS: 'hooks',
 } as const;
+
+/**
+ * Where the hook that rules on every tool call is installed. Managed settings are
+ * root-owned and outrank every file a session can write, so only there is it out of reach.
+ */
+export const HOOK_SEAT = {
+  /** The agent is not on this machine, so there is nothing to hook. */
+  ABSENT: 'absent',
+  NONE: 'none',
+  USER: 'user',
+  MANAGED: 'managed',
+  /** In both, so every call is ruled on twice and recorded twice. */
+  BOTH: 'both',
+} as const;
+
+export type HookSeat = (typeof HOOK_SEAT)[keyof typeof HOOK_SEAT];
 
 export type CheckName = (typeof CHECK_NAME)[keyof typeof CHECK_NAME];
 
@@ -105,6 +123,8 @@ export interface HealthFacts {
   heldLeases: number;
   /** Budgets with nothing left in the window. Every action they cover is refused. */
   spentBudgets: string[];
+  /** Where Claude Code's policy hook is installed. */
+  claudeHook: HookSeat;
 }
 
 /** What is being stopped for a reason that is not a rule, as one line rather than four empty rows. */
@@ -401,7 +421,49 @@ export function checkInstallation(facts: HealthFacts): HealthCheck[] {
     daemonCheck(facts),
     ledgerCheck(facts),
     holdsCheck(facts),
+    hooksCheck(facts),
   ];
+}
+
+function hooksCheck(facts: HealthFacts): HealthCheck {
+  switch (facts.claudeHook) {
+    case HOOK_SEAT.ABSENT:
+      return {
+        name: CHECK_NAME.HOOKS,
+        state: CHECK.OK,
+        detail: 'Claude Code is not on this machine',
+      };
+    case HOOK_SEAT.NONE:
+      return {
+        name: CHECK_NAME.HOOKS,
+        state: CHECK.INERT,
+        detail: 'Claude Code runs its tools with no Memnox hook in front of them',
+        fix: 'memnox protect --claude-hook',
+      };
+    case HOOK_SEAT.USER:
+      return {
+        name: CHECK_NAME.HOOKS,
+        state: CHECK.OK,
+        detail:
+          "Claude Code's hook is in your own settings, so a local edit can remove it; " +
+          '"memnox protect --managed" puts it where none can',
+      };
+    case HOOK_SEAT.MANAGED:
+      return {
+        name: CHECK_NAME.HOOKS,
+        state: CHECK.OK,
+        detail:
+          "Claude Code's hook is in managed settings, so no local config can remove it",
+      };
+    case HOOK_SEAT.BOTH:
+      return {
+        name: CHECK_NAME.HOOKS,
+        state: CHECK.BROKEN,
+        detail:
+          "Claude Code's hook is in managed and user settings, so every call is ruled on twice",
+        fix: 'memnox protect --managed',
+      };
+  }
 }
 
 /**

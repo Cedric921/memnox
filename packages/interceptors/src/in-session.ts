@@ -17,11 +17,13 @@ import {
   TASK_INTENT,
   taskFromPrompt,
   waitingOnDm,
+  SessionTurns,
 } from '@memnox/core';
 
 import { EDIT_HOST } from './agent-edits';
 import type { EditHookContext } from './edit-claims';
 import { log } from './seam-runtime';
+import { noteSubagent } from './subagent-note';
 import {
   answerSessionStart,
   decisionsAt,
@@ -137,7 +139,9 @@ export async function beforePause(
 ): Promise<string | null> {
   try {
     const sessionId = context.runSession ?? pause.sessionId;
+    await noteTurn(pause, context, sessionId);
     if (pause.moment === SESSION_MOMENT.AFTER_TOOL) {
+      await noteSubagent(payload, context, sessionId);
       await learnFromAnswer(payload, { ...context, env });
       await markIfInstructed(payload, context, env);
       const broken = await shellReport(payload, pause, context, sessionId);
@@ -157,6 +161,20 @@ export async function beforePause(
     log(`session context failed at a pause: ${String(err)}`);
     return null;
   }
+}
+
+/** When the person asked and when the agent handed back, which is how a finished turn is told from a long reply. */
+async function noteTurn(
+  pause: SessionEvent,
+  context: EditHookContext,
+  sessionId: string,
+): Promise<void> {
+  const turns = new SessionTurns(context.home);
+  const at = context.now().toISOString();
+  if (pause.moment === SESSION_MOMENT.PROMPT)
+    await turns.prompted(sessionId, context.agent, at);
+  if (pause.moment === SESSION_MOMENT.TURN_END)
+    await turns.ended(sessionId, context.agent, at);
 }
 
 /** A prompt is an answer to a held question, or a new ask read for its task and decisions. */

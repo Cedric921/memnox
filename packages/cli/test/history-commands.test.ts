@@ -1,14 +1,15 @@
-import { mkdtemp } from 'node:fs/promises';
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { Command } from 'commander';
 import { describe, expect, it } from 'vitest';
-import { SqliteEventStore, type MemnoxEvent } from '@memnox/core';
+import { orgPolicyPathFor, SqliteEventStore, type MemnoxEvent } from '@memnox/core';
 import { CliContext } from '../src/cli-context';
 import { RecordedOutput } from '../src/cli-output';
 import { plainStyle } from '../src/style';
 import { registerWhyCommand } from '../src/commands/why.command';
 import {
+  followTimeline,
   registerPurgeCommand,
   registerTimelineCommand,
 } from '../src/commands/timeline.command';
@@ -64,6 +65,40 @@ async function run(
 }
 
 describe('memnox why', () => {
+  it("names a workspace rule as the team's, with who decided it and when", async () => {
+    const home = await machine([
+      event({
+        id: 'w',
+        rule: { name: 'rule_push_main', layer: 'project', file: 'policy' },
+        bundleHash: 'b1',
+      }),
+    ]);
+    const org = orgPolicyPathFor(home);
+    await mkdir(dirname(org), { recursive: true });
+    await writeFile(
+      org,
+      JSON.stringify({
+        version: 1,
+        bundleHash: 'b2',
+        policies: [
+          {
+            name: 'rule_push_main',
+            workspace: true,
+            decidedBy: 'Ada',
+            decidedAt: '2026-09-01T09:00:00.000Z',
+          },
+        ],
+      }),
+    );
+    const out = await run(registerWhyCommand as Register, ['why'], home);
+
+    expect(out.text).toContain("rule_push_main  (the workspace's rule)");
+    expect(out.text).toContain(
+      'Ada on 2026-09-01, and the workspace has published newer rules since',
+    );
+    expect(out.text).not.toContain('declared in');
+  });
+
   it('explains the last thing that did not simply proceed', async () => {
     const home = await machine([
       event({ id: 'a', at: '2026-09-05T09:00:00.000Z', effect: 'allow' }),
@@ -280,5 +315,31 @@ describe('memnox purge', () => {
         await machine([old]),
       ),
     ).rejects.toThrow(/above zero/);
+  });
+});
+
+describe('memnox timeline --follow', () => {
+  it('prints each action once with its agent, read again and again until stopped', async () => {
+    const home = await machine([
+      event({ id: 'a', agent: 'hermes', operation: 'git.push', target: 'main' }),
+    ]);
+    const out = new RecordedOutput();
+    let reads = 0;
+
+    await followTimeline(
+      new CliContext(out, plainStyle),
+      {
+        home: () => home,
+        now: () => NOW,
+        rounds: 2,
+        wait: async () => {
+          reads += 1;
+        },
+      },
+      { limit: 50 },
+    );
+
+    expect(reads).toBe(1);
+    expect(out.text.match(/hermes .*git\.push main/g)).toHaveLength(1);
   });
 });

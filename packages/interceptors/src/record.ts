@@ -67,7 +67,9 @@ export function commandEventFor(input: RecordInput): MemnoxEvent {
     operation: outcome.action,
     class: classOf(outcome.class),
     effect: input.effect,
-    mode: ENFORCEMENT_MODE.ENFORCE,
+    // Absent is enforce: a row that cannot say why a deny ran must not read as observed.
+    mode: outcome.mode ?? ENFORCEMENT_MODE.ENFORCE,
+    ...(outcome.shadowEffect === undefined ? {} : { shadowEffect: outcome.shadowEffect }),
     reason: input.reason,
     // A digest, never the arguments: an argument list is where a secret would be.
     argsDigest: outcome.argsDigest,

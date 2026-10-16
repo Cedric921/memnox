@@ -72,8 +72,11 @@ small MCP server (`memnox-session`) it can ask Memnox through, and adds a `/fing
 command. Then you open Claude Code, Codex, Cursor, Gemini CLI or Windsurf the way you
 always do. There is nothing to launch and nothing to remember.
 
-Node 22 or newer, on macOS or Linux. On Windows, run it inside WSL, and
-[ADR 0001](docs/adr/0001-windows-support.md) says why.
+Node 22 or newer, on macOS or Linux, and on Windows either inside WSL or natively.
+Natively, the MCP proxy, the interceptors and Claude Code's hook govern agents on the
+Windows side, and there is no kernel guard yet, so WSL is still the stronger choice.
+`memnox doctor` says which agents are governed natively, and
+[ADR 0003](docs/adr/0003-native-windows.md) says what is and is not verified.
 
 ## What you get, inside every session
 
@@ -126,6 +129,45 @@ So it pushes a branch and opens a PR. You typed one prompt. Every one of those a
 came back inside the conversation, and each is in the record when you ask the agent
 "why was that refused?"
 
+## On your Mac and your iPhone
+
+<p align="center">
+  <img src="assets/readme/memnox-mac-and-iphone.svg" width="100%" alt="Claude Code works in a terminal on a Mac until a production deploy needs a person. The Memnox island grows out of the notch to ask, the same question appears on the iPhone lock screen, Face ID allows it, and both say it was allowed once.">
+</p>
+
+The terminal is not the only place a question can reach you. Two open source apps sit on
+top of this runtime and give it a face and a voice, and neither holds a rule of its own:
+the daemon decides, and the apps show, speak, listen and sign.
+
+- **[Memnox for macOS](https://github.com/Memnox/memnox-macos)** lives in the notch. The
+  island grows out of it to listen, to answer out loud, to show every working session
+  with its latest steps, and to ask about a held call with Deny, Allow this session and
+  Allow once. Every allow that reaches outside the session is signed after Touch ID.
+- **[Memnox for iPhone](https://github.com/Memnox/memnox-ios)** lives in the Dynamic
+  Island and on the lock screen. It pairs with the Mac once, then carries the same held
+  calls over an end to end encrypted Noise tunnel, and signs every remote yes after Face ID.
+
+<table>
+<tr>
+<td width="64%" valign="top"><img src="assets/readme/memnox-notch.svg" width="100%" alt="The Memnox island on a Mac grows out of the notch to listen to a question, answers it out loud, shows every working session with its latest steps, then asks before Codex runs a migration and settles green once it is allowed."></td>
+<td width="36%" valign="top"><img src="assets/readme/memnox-iphone.svg" width="100%" alt="On an iPhone, a held call shows in the Dynamic Island as the orb and an amber count, opens with Deny and Allow, Allow goes through Face ID, and the island then carries the voice."></td>
+</tr>
+</table>
+
+<p align="center">
+  <img src="assets/readme/memnox-tools.svg" width="100%" alt="On the Mac, Maya says tell #eng the deploy is out and thank Bo; the island drafts a Slack message as Maya to #eng, she sends it with Touch ID and it lands in the channel. On the iPhone, an email reply drafted on Gmail is sent with Face ID.">
+</p>
+
+Both apps can also work in your own Slack, Gmail, GitHub, Linear, Google Docs and Notion.
+A message or a reply arrives as a draft with the account, the recipients and the exact
+words, and the daemon sends it in your name only after a Send signed with Touch ID or
+Face ID.
+
+A held call is one question wherever it is asked. The terminal, `memnox approve`, the
+notch and the phone all answer the same call, and whichever answers first releases the
+agent. [docs/remote-contract.md](docs/remote-contract.md) is the wire spec for pairing,
+the relay and every remote method.
+
 ## How it reaches each agent
 
 Each agent's own hook asks Memnox before every tool call: a file read or write, a shell
@@ -157,6 +199,7 @@ with eight tools:
 | "Would `git push --force` be allowed here?" | `decisions` |
 | "What did we decide about retries, and who said so?" | `memory` |
 | "Brief me on `src/payments` before you start" | `brief` |
+| "Read the brief your task names" | `work` |
 | "Record how this repository's code is written" | `fingerprint` |
 | "Undo what you did this session" | `rewind` |
 
@@ -516,7 +559,7 @@ memnox rewind     # undo what an agent did to your files
 memnox doctor     # check the wiring, and prove it holds
 memnox stop       # turn protection off on purpose and on the record, e.g. --for 30m
 memnox start      # turn it back on, in the mode it was stopped in
-memnox update     # the latest version, with the wiring pointed at it
+memnox update     # the latest version, verified as built by this repository, with the wiring pointed at it
 ```
 
 `memnox help --all` lists every command.
@@ -631,6 +674,34 @@ to make each kind of change.
 [CONTRIBUTING.md](CONTRIBUTING.md) is how a change lands. Every change ships with a
 test, and `pnpm format && pnpm typecheck && pnpm test && pnpm deadcode` has to pass.
 
+### Working on it with the Mac app
+
+The Mac app in `memnox-macos` installs and runs this runtime itself, and where it gets it
+from is chosen when the app is built. Keep the two checkouts side by side:
+
+```sh
+cd packages/cli && npm link && cd ../..   # once: memnox on your PATH is this checkout
+cd ../memnox-macos && ./scripts/bundle.sh # builds this runtime, then the app against it
+open build/Memnox.app
+```
+
+- **Local**, the default. `bundle.sh` runs `pnpm install` and `pnpm build` here first, and
+  restarts the daemon on that build when `memnox` on your PATH is this checkout. The app
+  runs this checkout: it links it with `npm link` when `memnox` is some other copy, restarts
+  a daemon older than itself on this build, and never replaces it with the published
+  package. Set `MEMNOX_RUNTIME_DIR` when the checkout is not `../memnox-runtime`.
+- **npm**, for a release: `MEMNOX_RUNTIME_SOURCE=npm ./scripts/bundle.sh`. The app uses
+  the `memnox` already installed, installs `memnox@latest` from npm when there is none, and
+  runs `memnox update --yes` when the daemon is older than the app. So the version a
+  release app needs has to be published first.
+
+After a change here, `pnpm build` is enough: a running daemon notices it was rebuilt and
+restarts on the new code.
+
 ## Licence
 
 Apache-2.0. See [LICENSE](LICENSE).
+
+The Memnox name, the logo and the pictures are not under the Apache License: they are reserved, as
+[LICENSE-ASSETS.md](LICENSE-ASSETS.md) explains. Shipping your own fork? Give it your own name. The
+official package is the one Memnox publishes to npm as `memnox`.

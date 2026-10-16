@@ -26,6 +26,7 @@ import {
   type Alternative,
   type DecisionEffect,
   type HoldService,
+  Clashes,
 } from '@memnox/core';
 
 import {
@@ -246,6 +247,7 @@ export class ShellSeam {
       reason: ruling.verdict.reason,
       command: line,
       class: ruling.class,
+      ...(ruling.verdict.rule === undefined ? {} : { rule: ruling.verdict.rule }),
     };
     const result = await hold.hold(request);
     // One yes covered the whole line, so everything it asked about is learned.
@@ -318,13 +320,27 @@ export class ShellSeam {
         const intent = `${resolved.action} ${target ?? ''}`.trim();
         const verdict = await leases.gate.claim(scope, leases.holder, intent);
         if (proceeds(verdict)) continue;
-        return {
-          message: verdict.message ?? `${scope} is held by another agent.`,
-          exitCode: SHELL_EXIT_WITHHELD,
-        };
+        const message = verdict.message ?? `${scope} is held by another agent.`;
+        await this.noteClash(scope, verdict.asked ?? message);
+        return { message, exitCode: SHELL_EXIT_WITHHELD };
       }
     }
     return null;
+  }
+
+  /** Kept for the voice to tell the person; never in the way of the refusal itself. */
+  private async noteClash(what: string, said: string): Promise<void> {
+    const { home, leases } = this.deps;
+    if (home === undefined || leases === undefined) return;
+    await new Clashes(home)
+      .note({
+        at: new Date().toISOString(),
+        sessionId: leases.holder.sessionId,
+        agent: leases.holder.agent,
+        what,
+        said,
+      })
+      .catch(() => undefined);
   }
 
   private requestFor(

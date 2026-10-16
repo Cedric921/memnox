@@ -41,6 +41,8 @@ export const SURFACE_KIND = {
   DOCKER: 'docker',
   CLOUD: 'cloud',
   BROWSER: 'browser',
+  /** The screen, keyboard and mouse of this machine, which no seam here sits in front of. */
+  DESKTOP: 'desktop',
 } as const;
 
 export type SurfaceKind = (typeof SURFACE_KIND)[keyof typeof SURFACE_KIND];
@@ -228,6 +230,8 @@ export const CHANGE_SUBJECT = {
   RESOURCE: 'resource',
   /** A role, a hook or a federation link under something that runs other agents. */
   HARNESS: 'harness',
+  /** A command an agent now runs on its own event, which no permission prompt covers. */
+  HOOK: 'hook',
 } as const;
 
 export type ChangeSubject = (typeof CHANGE_SUBJECT)[keyof typeof CHANGE_SUBJECT];

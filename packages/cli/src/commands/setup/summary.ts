@@ -153,15 +153,23 @@ export function describeDaemon(wired: Wiring): string {
   return 'daemon not started';
 }
 
+/** Enough of a workspace id to tell two apart at a glance. */
+const ID_SHOWN = 8;
+
 /** Which control plane a record was written against, for the row that says so. */
 export function describePlane(record: {
   workspaceId?: string;
   baseUrl?: string;
 }): string {
+  // An id too long to read is shown by its start, since "your workspace" here would say the opposite of true.
+  const shown =
+    record.workspaceId === undefined ? undefined : workspaceShown(record.workspaceId);
   const which =
     record.workspaceId === undefined
       ? 'another workspace'
-      : workspaceShown(record.workspaceId);
+      : shown === record.workspaceId.trim()
+        ? `the workspace ${shown}`
+        : `another workspace, ${record.workspaceId.slice(0, ID_SHOWN)}`;
   return record.baseUrl === undefined
     ? `under ${which}`
     : `under ${which} at ${record.baseUrl}`;

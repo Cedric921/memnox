@@ -2,7 +2,13 @@ import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { HOLD_ANSWER, PendingApprovals, type HoldRequest } from '@memnox/core';
+import {
+  HOLD_ANSWER,
+  PendingApprovals,
+  SqliteEventStore,
+  type HoldRequest,
+} from '@memnox/core';
+import { applyAnswers } from '../src/sync/heartbeat-reply';
 
 const request: HoldRequest = {
   sessionId: 'ses_1',
@@ -59,6 +65,31 @@ describe('an answer from the workspace reaches the machine', () => {
     expect(second).not.toBeNull();
     expect(second !== null && 'alreadyAnswered' in second).toBe(true);
     expect((await approvals.read(pending.id))?.answeredBy).toBe('the terminal');
+  });
+
+  it("writes the person's answer into the ledger, naming who and that it came from the workspace", async () => {
+    const where = await home();
+    const approvals = new PendingApprovals(where);
+    const pending = await approvals.raise(request, NOW, 120_000);
+
+    await applyAnswers(
+      where,
+      approvals,
+      [{ id: pending.id, answer: 'once', by: 'Ada' }],
+      NOW,
+    );
+
+    const store = SqliteEventStore.forHome(where);
+    const rows = await store.query({ limit: 10 });
+    store.close();
+    expect(rows).toEqual([
+      expect.objectContaining({
+        actorType: 'human',
+        principal: 'Ada (the workspace)',
+        authorizedBy: 'Ada (the workspace)',
+        operation: 'vercel.deploy-production',
+      }),
+    ]);
   });
 
   it('has nothing to say about an id this machine never raised', async () => {

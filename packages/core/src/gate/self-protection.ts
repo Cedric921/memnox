@@ -36,6 +36,14 @@ const LOOSENING: readonly string[] = [
   'policy',
   // A rewind moves a person's files, so it is asked through the session tool, never run from a shell.
   'rewind',
+  // Clearing the confirmation key lets the next key to register confirm for the person.
+  'voice',
+  // A paired device answers held calls, so pairing one, or giving it more, is the person's alone.
+  'pair',
+  'devices',
+  // Signing in as a person lets this terminal answer in their name, which is theirs alone.
+  'signin',
+  'signout',
 ];
 
 /** Reads that share a subcommand with a loosening one. */
@@ -51,7 +59,11 @@ const READING: readonly string[] = [
   'agents list',
   'mcp list',
   'rewind --list',
+  'devices list',
 ];
+
+/** Subcommands that only read when nothing follows them, and loosen once anything does. */
+const BARE_READS: readonly string[] = ['mode', 'voice', 'devices'];
 
 const WRITES: readonly string[] = [ACTION.FILESYSTEM_WRITE, ACTION.FILESYSTEM_DELETE];
 
@@ -83,7 +95,7 @@ export function loosens(command: string): boolean {
   const subcommand = words[0] ?? '';
   if (!LOOSENING.includes(subcommand)) return false;
   const spoken = words.join(' ');
-  // `memnox mode` with no mode reads; `memnox mode off` does not.
-  if (subcommand === 'mode' && words.length === 1) return false;
+  // `memnox mode` with no mode reads; `memnox mode off` does not. `voice` likewise.
+  if (BARE_READS.includes(subcommand) && words.length === 1) return false;
   return !READING.some((read) => read !== 'mode' && spoken.startsWith(read));
 }

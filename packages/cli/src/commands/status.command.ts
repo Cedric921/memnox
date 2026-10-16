@@ -17,6 +17,8 @@ import {
   readProtectionStop,
   stopHasEnded,
   type Account,
+  type HomeReady,
+  type HomeWorking,
   type ProtectionStop,
   type ProbationEntry,
   type HealthFacts,
@@ -32,6 +34,8 @@ import { describeCount } from '../plural';
 import { readKept, type Kept } from '../keeper/kept';
 import { describeProbations } from '../probation-view';
 import { readDormantHere } from '../keeper/keep-dormant';
+import { readHome } from '../daemon/home-answer';
+import { SessionViews } from '../daemon/session-view';
 
 /** Whether anything is holding the boundary setup drew, as the screen says it. */
 const DAEMON_STATE = {
@@ -70,6 +74,14 @@ interface StatusDeps {
   home: () => string;
   project: () => string;
   read: (home: string, project: string) => Promise<MachineStatus>;
+  /** What is working and what could be handed over, the two home blocks status had no row for. */
+  ahead: (home: string) => Promise<Ahead>;
+}
+
+/** The home's working and ready blocks, as the Mac and the iPhone show them. */
+interface Ahead {
+  working: HomeWorking[];
+  ready?: HomeReady;
 }
 
 export function registerStatusCommand(
@@ -81,6 +93,7 @@ export function registerStatusCommand(
     home: homedir,
     project: () => process.cwd(),
     read: readStatus,
+    ahead: readAhead,
     ...overrides,
   };
   program
@@ -89,11 +102,14 @@ export function registerStatusCommand(
     .option('--json', 'machine-readable output')
     .action(async (options: { json?: boolean }) => {
       const status = await deps.read(deps.home(), deps.project());
+      const ahead = status.setUp
+        ? await deps.ahead(deps.home()).catch((): Ahead => ({ working: [] }))
+        : { working: [] };
       if (options.json === true) {
-        context.out.json(status);
+        context.out.json({ ...status, ...ahead });
         return;
       }
-      renderStatus(context, status);
+      renderStatus(context, status, ahead);
     });
 }
 
@@ -172,7 +188,40 @@ function workspaceOf(account: Account | null): string | null {
   return account === null ? null : account.workspaceId;
 }
 
-function renderStatus(context: CliContext, status: MachineStatus): void {
+async function readAhead(home: string): Promise<Ahead> {
+  const view = await readHome(home, {
+    views: new SessionViews(home),
+    now: new Date(),
+    status: (where) => readStatus(where, where),
+  });
+  return {
+    working: view.working,
+    ...(view.ready === undefined ? {} : { ready: view.ready }),
+  };
+}
+
+/** Who is working now, and the one thing the record says could stop asking. */
+function renderAhead(context: CliContext, ahead: Ahead): void {
+  const { flow } = context;
+  if (ahead.working.length > 0) {
+    flow.list(
+      'Working now',
+      ahead.working.map((each) => ({
+        text:
+          each.task === undefined ? each.agentName : `${each.agentName}: ${each.task}`,
+      })),
+    );
+  }
+  const ready = ahead.ready;
+  if (ready !== undefined) {
+    flow.step(
+      'Ready to hand over',
+      `${ready.action}: allowed ${ready.approvals} times, never refused. "memnox next --hand-over" lets it run without asking.`,
+    );
+  }
+}
+
+function renderStatus(context: CliContext, status: MachineStatus, ahead: Ahead): void {
   const { flow, style } = context;
   flow.open('memnox status');
   if (!status.setUp) {
@@ -185,6 +234,7 @@ function renderStatus(context: CliContext, status: MachineStatus): void {
     ...holdingRows(context, status),
     ...activityRows(context, status),
   ]);
+  renderAhead(context, ahead);
   if (status.stopped !== undefined) {
     flow.close(style.warn('Memnox protection is stopped on this machine.'));
     flow.hint('"memnox start" turns it back on.');

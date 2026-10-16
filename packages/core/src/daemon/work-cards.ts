@@ -1,0 +1,246 @@
+/**
+ * What the Mac draws for the person's own tools: the icons of the tools they still have to sign in
+ * to, and a draft of what is about to go out in their name, drawn the way that tool draws it, Slack
+ * as a message, GitHub as a review comment, Gmail as a mail, read whole before Touch ID sends it.
+ */
+
+/** A tool the person asked for and has not signed in to, with the page that signs them in. */
+export interface ToolSignIn {
+  toolkit: string;
+  url: string;
+  /** Signed in before as somebody else's account, so this is to sign in again with their own. */
+  again?: boolean;
+}
+
+/** A sign in that finished, or never did, as the notch and the voice are told of it. */
+export interface SignedIn {
+  toolkit: string;
+  /** The account it reached; absent on a sign in that never finished. */
+  account?: WorkAccount;
+  /** What the person asked for before they signed in, asked again so it carries on. */
+  resume?: string;
+  /** Where nothing ties the account to them: the proposal "that's me" confirms, and "not me" declines. */
+  confirm?: string;
+}
+
+/** Whether the account a sign in reached is known to be the person's own. */
+export const WORK_ACCOUNT_CHECK = {
+  MATCHED: 'matched',
+  UNVERIFIED: 'unverified',
+  MISMATCH: 'mismatch',
+  UNKNOWN: 'unknown',
+} as const;
+
+export type WorkAccountCheck =
+  (typeof WORK_ACCOUNT_CHECK)[keyof typeof WORK_ACCOUNT_CHECK];
+
+/** The account something goes out as, as the tool itself named it. */
+export interface WorkAccount {
+  /** The id the control plane checks the run against, so a sign in changed since is refused. */
+  key?: string;
+  handle?: string;
+  name?: string;
+  check: WorkAccountCheck;
+}
+
+/** What kind of thing is drafted, which decides how the card is laid out. */
+export const WORK_DRAFT_KIND = {
+  MESSAGE: 'message',
+  COMMENT: 'comment',
+  EMAIL: 'email',
+  ISSUE: 'issue',
+  OTHER: 'other',
+} as const;
+
+export type WorkDraftKind = (typeof WORK_DRAFT_KIND)[keyof typeof WORK_DRAFT_KIND];
+
+export interface WorkField {
+  name: string;
+  value: string;
+}
+
+/** Something about to go out in the person's name, as the Mac draws it before they confirm. */
+export interface WorkDraft {
+  toolkit: string;
+  tool: string;
+  kind: WorkDraftKind;
+  account?: WorkAccount;
+  /** Who it goes to: people, addresses or a channel. */
+  to?: string[];
+  /** Where it lands: `owner/repo#412`, an issue, a page. */
+  where?: string;
+  subject?: string;
+  body?: string;
+  /** Every other argument, as text, so nothing goes out that the card did not show. */
+  fields: WorkField[];
+}
+
+/** Read off the tool's own slug, first match wins, so a review comment is never drawn as a message. */
+const KIND_WORDS: ReadonlyArray<[WorkDraftKind, readonly string[]]> = [
+  [WORK_DRAFT_KIND.COMMENT, ['COMMENT', 'REVIEW', 'REACTION']],
+  [WORK_DRAFT_KIND.EMAIL, ['EMAIL', 'MAIL', 'DRAFT']],
+  [WORK_DRAFT_KIND.ISSUE, ['ISSUE', 'TICKET', 'TASK']],
+  [WORK_DRAFT_KIND.MESSAGE, ['MESSAGE', 'CHAT', 'POST', 'DM', 'REPLY']],
+];
+
+const BODY_KEYS = [
+  'text',
+  'body',
+  'message',
+  'markdown',
+  'markdown_text',
+  'content',
+  'comment',
+];
+const SUBJECT_KEYS = ['subject', 'title'];
+const TO_KEYS = [
+  'to',
+  'recipient_email',
+  'recipient',
+  'recipients',
+  'channel',
+  'channel_id',
+  'user',
+  'users',
+  'cc',
+];
+const REPO_KEYS = ['owner', 'repo'];
+const NUMBER_KEYS = ['pull_number', 'issue_number', 'number'];
+const PLACE_KEYS = [
+  'issue_id',
+  'issueId',
+  'page_id',
+  'document_id',
+  'thread_id',
+  'thread_ts',
+];
+
+/** Long enough to read an argument whole on a card, never a wall of JSON. */
+const FIELD_TEXT_LIMIT = 300;
+
+/** What the card shows beside the arguments: whose account it goes out as and who it goes to by name. */
+export interface WorkDraftExtras {
+  account?: WorkAccount;
+  toName?: string;
+}
+
+/** The draft of one tool call, laid out from its slug and arguments, with nothing left off. */
+export function workDraftOf(
+  toolkit: string,
+  tool: string,
+  args: Record<string, unknown>,
+  { account, toName }: WorkDraftExtras = {},
+): WorkDraft {
+  const used = new Set<string>();
+  const body = firstOf(args, BODY_KEYS, used);
+  const subject = firstOf(args, SUBJECT_KEYS, used);
+  const ids = TO_KEYS.flatMap((key) => {
+    const value = textOf(args[key]);
+    if (value === undefined) return [];
+    used.add(key);
+    return value.split(', ');
+  });
+  // The name alone where the brain found one, since a Slack id like U0B3QDB89Q9 tells a person nothing.
+  const to = toName === undefined || ids.length === 0 ? ids : [toName];
+  const where = placeOf(args, used);
+  const fields = restOf(args, used);
+  return {
+    toolkit,
+    tool,
+    kind: kindOf(tool),
+    ...(account === undefined ? {} : { account }),
+    ...(to.length === 0 ? {} : { to }),
+    ...(where === undefined ? {} : { where }),
+    ...(subject === undefined ? {} : { subject }),
+    ...(body === undefined ? {} : { body }),
+    fields,
+  };
+}
+
+/**
+ * The arguments with the person's own words in place of the body the card showed, or null where the body
+ * is not plain text or there is none, so an edit never lands in an argument the card did not draw as words.
+ */
+export function editedArguments(argumentsText: string, edited: string): string | null {
+  let args: unknown;
+  try {
+    args = JSON.parse(argumentsText);
+  } catch {
+    // Arguments are checked as JSON before they are proposed, so this is a record written by hand.
+    return null;
+  }
+  if (args === null || typeof args !== 'object' || Array.isArray(args)) return null;
+  const record = args as Record<string, unknown>; // narrowed to a plain object just above
+  const key = BODY_KEYS.find((each) => textOf(record[each]) !== undefined);
+  if (key === undefined || typeof record[key] !== 'string') return null;
+  return JSON.stringify({ ...record, [key]: edited });
+}
+
+/** The first of these arguments that holds anything, marked as shown. */
+function firstOf(
+  args: Record<string, unknown>,
+  keys: readonly string[],
+  used: Set<string>,
+): string | undefined {
+  for (const key of keys) {
+    const value = textOf(args[key]);
+    if (value !== undefined) {
+      used.add(key);
+      return value;
+    }
+  }
+  return undefined;
+}
+
+/** Every argument the card has not shown yet, as text. */
+function restOf(args: Record<string, unknown>, used: ReadonlySet<string>): WorkField[] {
+  return Object.entries(args)
+    .filter(([name]) => !used.has(name))
+    .flatMap(([name, value]) => {
+      const text = textOf(value);
+      return text === undefined ? [] : [{ name, value: text.slice(0, FIELD_TEXT_LIMIT) }];
+    });
+}
+
+function kindOf(tool: string): WorkDraftKind {
+  const words = tool.toUpperCase().split('_');
+  for (const [kind, markers] of KIND_WORDS) {
+    if (markers.some((marker) => words.includes(marker))) return kind;
+  }
+  return WORK_DRAFT_KIND.OTHER;
+}
+
+/** `owner/repo#412` where a repository and a number are given, else the first place named. */
+function placeOf(args: Record<string, unknown>, used: Set<string>): string | undefined {
+  const [owner, repo] = REPO_KEYS.map((key) => textOf(args[key]));
+  const number = NUMBER_KEYS.map((key) => textOf(args[key])).find(
+    (each) => each !== undefined,
+  );
+  if (owner !== undefined && repo !== undefined) {
+    REPO_KEYS.forEach((key) => used.add(key));
+    NUMBER_KEYS.forEach((key) => used.add(key));
+    return number === undefined ? `${owner}/${repo}` : `${owner}/${repo}#${number}`;
+  }
+  for (const key of PLACE_KEYS) {
+    const value = textOf(args[key]);
+    if (value !== undefined) {
+      used.add(key);
+      return value;
+    }
+  }
+  return undefined;
+}
+
+function textOf(value: unknown): string | undefined {
+  if (typeof value === 'string') return value.trim() === '' ? undefined : value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (Array.isArray(value)) {
+    const parts = value.flatMap((each) => {
+      const text = textOf(each);
+      return text === undefined ? [] : [text];
+    });
+    return parts.length === 0 ? undefined : parts.join(', ');
+  }
+  if (value !== null && typeof value === 'object') return JSON.stringify(value);
+  return undefined;
+}

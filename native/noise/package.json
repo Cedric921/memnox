@@ -1,0 +1,37 @@
+{
+  "name": "@memnox/noise",
+  "version": "0.1.0",
+  "description": "The Noise layer the Memnox runtime and the iPhone share, a napi binding over snow.",
+  "license": "Apache-2.0",
+  "type": "commonjs",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "files": [
+    "index.js",
+    "index.d.ts"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "sh scripts/build-node.sh",
+    "build:debug": "sh scripts/build-node.sh debug",
+    "build:xcframework": "sh scripts/build-xcframework.sh",
+    "test": "cargo test --features ffi && node --test test/"
+  },
+  "optionalDependencies": {
+    "@memnox/noise-darwin-arm64": "workspace:*",
+    "@memnox/noise-darwin-x64": "workspace:*",
+    "@memnox/noise-linux-x64-gnu": "workspace:*",
+    "@memnox/noise-linux-arm64-gnu": "workspace:*"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Memnox/memnox.git",
+    "directory": "native/noise"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}

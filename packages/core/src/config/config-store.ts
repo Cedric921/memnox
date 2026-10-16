@@ -9,6 +9,10 @@ import {
   type MemnoxConfig,
 } from './config';
 import { writeAtomic } from '../store/atomic-file';
+import {
+  APPROVAL_ROUTE,
+  type ApprovalRoute,
+} from '../constants/approval-route.constants';
 
 /** Where this machine's own settings live, named here so nothing spells the path twice. */
 export function configPathFor(home: string): string {
@@ -28,6 +32,15 @@ export async function loadOrCreateConfig(home: string): Promise<MemnoxConfig> {
     // First run: the file does not exist yet, which is the one silent case here.
     await saveConfig(home, DEFAULT_CONFIG);
     return { ...DEFAULT_CONFIG };
+  }
+}
+
+/** Where questions go, from `config.toml`; in the session where nothing says otherwise. */
+export async function readApprovalRoute(home: string): Promise<ApprovalRoute> {
+  try {
+    return parseConfig(await readFile(configPathFor(home), 'utf8')).approvals;
+  } catch {
+    return APPROVAL_ROUTE.SESSION;
   }
 }
 

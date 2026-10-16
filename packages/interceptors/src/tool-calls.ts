@@ -8,6 +8,7 @@ import {
   HTTP_METHOD,
   HTTP_METHOD_ARGUMENT,
   isWorkspaceTool,
+  mcpToolParts,
   ownToolDeclaration,
   TOOL_CLASS,
   type ToolClass,
@@ -31,10 +32,12 @@ import {
   changeIn,
   CODEX_PATCH_TOOL,
   cwdOf,
+  delegationOf,
   fieldsOf,
   firstText,
   folderOf,
   sessionOf,
+  type Delegation,
   type HookFields,
 } from './hook-payload';
 import { EGRESS_REQUEST_ACTION } from './tool-hook.constants';
@@ -73,6 +76,8 @@ export interface ToolCall {
   nativeAsk: boolean;
   /** What this event reads as a go-ahead, where silence would be read as a refusal. */
   allowReply?: string;
+  /** The helper the agent handed this call to, where the host names one. */
+  delegation?: Delegation;
 }
 
 /** Tools that read one file or folder by path. */
@@ -109,7 +114,6 @@ const PATH_KEYS: readonly string[] = [
 ];
 
 /** Claude Code, Codex and Gemini CLI spell an MCP tool `mcp__<server>__<tool>`. */
-const MCP_TOOL = /^mcp__(.+?)__(.+)$/;
 const MCP_PREFIX = 'mcp';
 
 /** A URL inside free text, which is where Gemini's fetch tool carries its address. */
@@ -211,9 +215,9 @@ function requestsFor(
   base: PathBase,
   declared: ToolDeclarations,
 ): ToolRequest[] | null {
-  const mcp = MCP_TOOL.exec(tool);
+  const mcp = mcpToolParts(tool);
   if (mcp !== null) {
-    const [server, name] = [mcp[1] ?? '', mcp[2] ?? ''];
+    const { server, name } = mcp;
     return isWorkspaceTool(server, name, projectServers(base.cwd))
       ? null
       : mcpRequests(server, name, input, declared);
@@ -357,7 +361,13 @@ function baseOf(input: BaseInput): ToolCall {
     ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
     requests: [],
     nativeAsk: false,
+    ...delegated(input.hook),
   };
+}
+
+function delegated(hook: HookFields): { delegation?: Delegation } {
+  const delegation = delegationOf(hook);
+  return delegation.subagent === undefined ? {} : { delegation };
 }
 
 function withRequests(base: ToolCall, requests: ToolRequest[]): ToolCall | null {

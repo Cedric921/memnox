@@ -23,6 +23,7 @@ export async function memoryTool(
   deps: SessionToolDeps,
   args: ToolArgs,
 ): Promise<unknown> {
+  await deps.refreshMemory?.();
   const memory = await readWorkspaceMemoryCached(deps.home);
   if (memory === null) return { connected: false, said: NOT_CONNECTED };
   const about = textArg(args, 'about');
@@ -34,11 +35,18 @@ export async function memoryTool(
     words,
     paths: words.filter((word) => word.includes('/') || /\.\w+$/.test(word)),
   });
-  return answerOf(
-    memory,
-    found.slice(0, MOST_FACTS_ANSWERED).map((each) => each.fact),
-    about,
-  );
+  if (found.length > 0 || memory.facts.length === 0) {
+    return answerOf(
+      memory,
+      found.slice(0, MOST_FACTS_ANSWERED).map((each) => each.fact),
+      about,
+    );
+  }
+  // "Summarise our decisions" names no subject a fact holds, and answering it with nothing told a workspace with decisions it had none.
+  return {
+    ...answerOf(memory, newestFacts(memory, MOST_FACTS_ANSWERED), 'the newest'),
+    said: `Nothing it holds names "${about}", so these are the newest of the ${memory.facts.length} it holds. Conversations and tickets are not here: look in sources before saying the workspace has nothing about it.`,
+  };
 }
 
 /**
@@ -73,9 +81,12 @@ function answerOf(
   return {
     about,
     from: `what this machine pulled from the workspace at ${memory.syncedAt}`,
+    held: memory.facts.length,
     facts: facts.map(factRow),
     ...(facts.length === 0
-      ? { said: 'The workspace has settled nothing about this.' }
+      ? {
+          said: 'The workspace has settled nothing about this. Conversations and tickets are not here: look in sources before saying the workspace has nothing about it.',
+        }
       : {}),
     ...(memory.withheld > 0
       ? { withheld: `${memory.withheld} fact(s) this machine is not cleared to read` }
@@ -87,9 +98,37 @@ function answerOf(
 function factRow(fact: WorkspaceFact): Record<string, unknown> {
   return {
     statement: fact.statement,
+    kind: fact.kind,
     about: fact.subject,
     ...(fact.scope === undefined ? {} : { scope: fact.scope }),
     ...(fact.principal === undefined ? {} : { names: fact.principal }),
     settled: factOrigin(fact),
+  };
+}
+
+/**
+ * Said wherever it explains an empty answer, since nothing else would ever tell them. Either side may be the
+ * stale one, so both are named with the step that moves each, rather than calling this Mac the wrong one.
+ */
+export function twoWorkspaces(machineWorkspace: string | null): string {
+  const here = machineWorkspace ?? 'the workspace this Mac is in';
+  return `This Mac is in ${here}, and their own sign in, which their accounts and tools go through, is in a different workspace. Say both plainly. When ${here} is theirs, running memnox signin and approving it there moves their sign in to it; otherwise memnox login, approved in their own workspace, moves this Mac. Never say which one is wrong unless they told you.`;
+}
+
+/** The settled facts with the workspace's name, and a word when this Mac is enrolled in another one. */
+export async function workspaceMemoryTool(
+  deps: SessionToolDeps,
+  args: ToolArgs,
+): Promise<unknown> {
+  const [answer, name, elsewhere] = await Promise.all([
+    memoryTool(deps, args),
+    deps.workspaceName?.() ?? null,
+    deps.personElsewhere?.() ?? false,
+  ]);
+  // memoryTool always answers with an object; it is typed unknown only because tools answer anything.
+  return {
+    ...(name === null ? {} : { workspace: name }),
+    ...(answer as object),
+    ...(elsewhere ? { elsewhere: twoWorkspaces(name) } : {}),
   };
 }

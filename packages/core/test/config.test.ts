@@ -57,6 +57,7 @@ describe('the config file', () => {
       noticeUnusual: false,
       noticeWarmupDays: 0,
       approvals: 'both' as const,
+      uploadPaths: 'hashed' as const,
     };
     expect(parseConfig(renderConfig(config))).toEqual(config);
   });
@@ -64,6 +65,12 @@ describe('the config file', () => {
   it('reads the DM-only route an earlier build wrote as both, since the session is always asked', () => {
     expect(parseConfig('approvals = "dm"\n').approvals).toBe('both');
     expect(parseConfig('approvals = "email"\n').approvals).toBe('session');
+  });
+
+  it('keeps paths as written unless hashing was chosen, and refuses a word it does not know', () => {
+    expect(DEFAULT_CONFIG.uploadPaths).toBe('full');
+    expect(parseConfig('uploadPaths = "hashed"\n').uploadPaths).toBe('hashed');
+    expect(parseConfig('uploadPaths = "nothing"\n').uploadPaths).toBe('full');
   });
 
   it('ignores comments, blank lines and section headers', () => {

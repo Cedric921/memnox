@@ -1,4 +1,6 @@
-import { basename } from 'node:path';
+import { win32 } from 'node:path';
+
+import { WINDOWS } from './windows-exec';
 
 /**
  * What a shell was asked to do. `memnox run` sets this binary as `SHELL`, and an agent's
@@ -95,19 +97,46 @@ export const REAL_SHELL_VAR = 'MEMNOX_REAL_SHELL';
  */
 export const FALLBACK_SHELL = '/bin/sh';
 
+/** Where Claude Code is told Git Bash lives on Windows, and so the shell its lines are written for. */
+export const GIT_BASH_VAR = 'CLAUDE_CODE_GIT_BASH_PATH';
+
+/** Git for Windows' default install, which is where Claude Code looks when nothing says otherwise. */
+export const WINDOWS_FALLBACK_SHELL = 'C:\\Program Files\\Git\\bin\\bash.exe';
+
 /**
  * Never this binary: `memnox run` overwrites `SHELL`,
  * so reading it back would exec the wrapper for ever.
  */
-export function realShell(env: NodeJS.ProcessEnv, self: string): string {
+export function realShell(
+  env: NodeJS.ProcessEnv,
+  self: string,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  if (platform === WINDOWS) return realWindowsShell(env, self);
   for (const candidate of [env[REAL_SHELL_VAR], env['SHELL']]) {
     if (isOtherShell(candidate, self)) return candidate;
   }
   return FALLBACK_SHELL;
 }
 
+/**
+ * Git Bash, because the lines an agent sends are bash. An MSYS path such as the SHELL
+ * Git Bash exports is skipped, since Node on Windows cannot start one.
+ */
+function realWindowsShell(env: NodeJS.ProcessEnv, self: string): string {
+  for (const candidate of [env[REAL_SHELL_VAR], env[GIT_BASH_VAR], env['SHELL']]) {
+    if (isOtherShell(candidate, self) && !candidate.startsWith('/')) return candidate;
+  }
+  return WINDOWS_FALLBACK_SHELL;
+}
+
 function isOtherShell(candidate: string | undefined, self: string): candidate is string {
   return (
-    candidate !== undefined && candidate !== '' && basename(candidate) !== basename(self)
+    candidate !== undefined && candidate !== '' && stemOf(candidate) !== stemOf(self)
   );
+}
+
+/** The name without its directory or a Windows extension, so `memnox-shell.cmd` is still us. */
+function stemOf(path: string): string {
+  return win32.basename(path).replace(/\.(?:cmd|bat|exe|ps1)$/i, '');
 }

@@ -7,6 +7,7 @@ import {
   upcomingRegion,
   WHOLE_FILE,
   type WrittenRegion,
+  Clashes,
 } from '@memnox/core';
 
 import {
@@ -48,6 +49,8 @@ export interface EditHookContext {
   pid: number;
   cwd: string;
   now: () => Date;
+  /** What the agent says started it, such as `claude-vscode` for an editor's panel; absent where it says nothing. */
+  entrypoint?: string;
 }
 
 /**
@@ -104,7 +107,20 @@ async function claimOne(
     region: () => (written ? regionWritten(edit, context) : regionOfEdit(edit, context)),
   });
   if (leases === undefined) return null;
-  return claimEdit(edit, leases);
+  const refused = await claimEdit(edit, leases);
+  if (refused !== null) {
+    // Kept for the voice to tell the person; never in the way of the refusal itself.
+    await new Clashes(context.home)
+      .note({
+        at: context.now().toISOString(),
+        sessionId: leases.holder.sessionId,
+        agent: leases.holder.agent,
+        what: fileOf(edit, context),
+        said: refused.asked ?? refused.reason,
+      })
+      .catch(() => undefined);
+  }
+  return refused;
 }
 
 /**

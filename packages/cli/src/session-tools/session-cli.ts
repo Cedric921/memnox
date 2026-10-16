@@ -14,9 +14,29 @@ import {
 } from '@memnox/core';
 
 import { readStatus } from '../commands/status.command';
-import { fetchBrief } from '../sync/memory';
+import { fetchBrief, refreshMemory } from '../sync/memory';
+import {
+  readSource,
+  personElsewhere,
+  readPeople,
+  readSources,
+  readWorkspaceName,
+} from '../sync/workspace-reads';
+import {
+  findPersonalTools,
+  personalAccounts,
+  runPersonalTool,
+  signInLink,
+  signInPersonal,
+  signOutOf,
+  readWorkspaceGithub,
+  workspaceRepositories,
+} from '../sync/personal-work';
 import type { SessionToolDeps } from './read-tools';
 import type { RewindSeams } from './rewind-tool';
+import { awaitSessionStart } from './await-start';
+import { awaitDelivery } from './instruct-tools';
+import { OPERATOR_CATALOGUE } from './operator-tools';
 import { serveSession } from './session-server';
 
 /** Whose sessions to read when the launch line names nobody. */
@@ -79,6 +99,32 @@ function depsFor(argv: readonly string[], env: NodeJS.ProcessEnv): SessionToolDe
     readStatus,
     milestonesAt,
     brief: (resources, repository) => fetchBrief(homedir(), resources, repository),
+    refreshMemory: () => refreshMemory(homedir()),
+    sources: (query) => readSources(homedir(), query),
+    people: (name) => readPeople(homedir(), name),
+    personElsewhere: () => personElsewhere(homedir()),
+    source: (link) => readSource(homedir(), link),
+    workspaceName: () => readWorkspaceName(homedir()),
+    personalWork: {
+      find: (what, toolkit) => findPersonalTools(homedir(), what, toolkit),
+      run: (tool, argumentsText) => runPersonalTool(homedir(), tool, argumentsText),
+      signIn: (toolkit) => signInPersonal(homedir(), toolkit),
+      link: (toolkit) => signInLink(homedir(), toolkit),
+      accounts: () => personalAccounts(homedir()),
+      repositories: (all) => workspaceRepositories(homedir(), all),
+      github: (read) => readWorkspaceGithub(homedir(), read),
+      signOut: (toolkit) => signOutOf(homedir(), toolkit),
+    },
+    delivered: (requestId, waitMs) => awaitDelivery(homedir(), requestId, waitMs),
+    startSeen: (repository, since) => awaitSessionStart(homedir(), repository, since),
+  };
+}
+
+function seamsFor(env: NodeJS.ProcessEnv): Omit<RewindSeams, 'confirm'> {
+  return {
+    build: milestonesIn,
+    unattended: () => isUnattended(env),
+    terminal: hasTerminal,
   };
 }
 
@@ -87,15 +133,27 @@ export function runSessionServer(
   argv: readonly string[],
   env: NodeJS.ProcessEnv,
 ): Promise<void> {
-  const seams: Omit<RewindSeams, 'confirm'> = {
-    build: milestonesIn,
-    unattended: () => isUnattended(env),
-    terminal: hasTerminal,
-  };
   return serveSession({
     input: process.stdin,
     output: process.stdout,
     deps: depsFor(argv, env),
-    seams,
+    seams: seamsFor(env),
+  });
+}
+
+/**
+ * `memnox-operator`: the same wire with the voice's tools, launched by the person's own
+ * agent CLI as the only tools it has, and never registered into a working agent's session.
+ */
+export function runOperatorServer(
+  argv: readonly string[],
+  env: NodeJS.ProcessEnv,
+): Promise<void> {
+  return serveSession({
+    input: process.stdin,
+    output: process.stdout,
+    deps: depsFor(argv, env),
+    seams: seamsFor(env),
+    catalogue: OPERATOR_CATALOGUE,
   });
 }

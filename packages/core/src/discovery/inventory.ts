@@ -1,6 +1,9 @@
+import { HOST_LOCATION, HOST_SIGNATURE } from './agent-host';
+import { APPROVAL_STATE } from './approval-posture';
 import { RESOURCE_KIND, SENSITIVITY } from './discovery.constants';
 import { classifyTool, TOOL_CLASS, type ToolClass, type ToolOverrides } from './classify';
 import { CHAIN_LINK } from './composition';
+import { INVENTORY_HOOK_SCHEMA } from './hooks';
 import { distinctTools } from './surface';
 import type { DiscoveryReport } from './discover';
 import { OUTBOUND_STATE, type NetworkProbe } from './network';
@@ -9,7 +12,7 @@ import { OUTBOUND_STATE, type NetworkProbe } from './network';
  * The scan's answer in one flat shape that leaves the process: what can act here and
  * what each thing reaches, as names, counts and fingerprints only.
  */
-export const INVENTORY_VERSION = 2;
+export const INVENTORY_VERSION = 4;
 
 export interface InventoryAgent {
   id: string;
@@ -18,6 +21,10 @@ export interface InventoryAgent {
   /** The files that proved it. A detection with no evidence is a guess. */
   configPaths: string[];
   clients: string[];
+  /** Whether it asks before acting, and the setting that says so. */
+  approval?: { state: string; setting?: string; declaredIn?: string };
+  /** The binary on PATH: where it lives and who signed it. Never its contents. */
+  host?: { path: string; location: string; signature: string; signer?: string };
 }
 
 export interface InventoryServer {
@@ -76,6 +83,21 @@ export interface InventoryHarness {
   evidence: string[];
 }
 
+/** A command an agent runs on its own event. The program by name, never the line. */
+export interface InventoryHook {
+  id: string;
+  host: string;
+  event: string;
+  matcher?: string;
+  program: string;
+  digest: string;
+  declaredIn: string;
+  plugin?: string;
+  gate: boolean;
+  feedsModel: boolean;
+  own: boolean;
+}
+
 /** A path a set of tools opens that none of them opens alone. */
 export interface InventoryChain {
   agentId: string;
@@ -100,6 +122,7 @@ export interface CapabilityInventory {
   harnesses: InventoryHarness[];
   /** Flat, so a consumer never has to walk a nesting to count the chains. */
   chains: InventoryChain[];
+  hooks: InventoryHook[];
 }
 
 const GIT_BINARIES = ['git', 'gh'];
@@ -118,6 +141,19 @@ export function inventoryOf(
       ...(agent.version === undefined ? {} : { version: agent.version }),
       configPaths: [...agent.configPaths],
       clients: [...agent.clients],
+      ...(agent.approval === undefined ? {} : { approval: { ...agent.approval } }),
+      ...(agent.host === undefined
+        ? {}
+        : {
+            host: {
+              path: agent.host.path,
+              location: agent.host.location,
+              signature: agent.host.signature.state,
+              ...(agent.host.signature.signer === undefined
+                ? {}
+                : { signer: agent.host.signature.signer }),
+            },
+          }),
     })),
     mcpServers: serversOf(report),
     tools: toolsOf(report, overrides),
@@ -138,6 +174,7 @@ export function inventoryOf(
       evidence: [...harness.evidence],
     })),
     chains: chainsOf(report),
+    hooks: report.hooks.map((hook) => ({ ...hook })),
   };
 }
 
@@ -228,7 +265,7 @@ function chainsOf(report: DiscoveryReport): InventoryChain[] {
  */
 export const CAPABILITY_INVENTORY_SCHEMA = {
   $schema: 'https://json-schema.org/draft/2020-12/schema',
-  $id: 'https://memnox.dev/schema/capability-inventory-v2.json',
+  $id: 'https://memnox.dev/schema/capability-inventory-v4.json',
   title: 'CapabilityInventory',
   type: 'object',
   required: [
@@ -244,6 +281,7 @@ export const CAPABILITY_INVENTORY_SCHEMA = {
     'network',
     'harnesses',
     'chains',
+    'hooks',
   ],
   additionalProperties: false,
   properties: {
@@ -261,6 +299,27 @@ export const CAPABILITY_INVENTORY_SCHEMA = {
           version: { type: 'string' },
           configPaths: { type: 'array', items: { type: 'string' } },
           clients: { type: 'array', items: { type: 'string' } },
+          approval: {
+            type: 'object',
+            required: ['state'],
+            additionalProperties: false,
+            properties: {
+              state: { enum: Object.values(APPROVAL_STATE) },
+              setting: { type: 'string' },
+              declaredIn: { type: 'string' },
+            },
+          },
+          host: {
+            type: 'object',
+            required: ['path', 'location', 'signature'],
+            additionalProperties: false,
+            properties: {
+              path: { type: 'string' },
+              location: { enum: Object.values(HOST_LOCATION) },
+              signature: { enum: Object.values(HOST_SIGNATURE) },
+              signer: { type: 'string' },
+            },
+          },
         },
       },
     },
@@ -407,5 +466,6 @@ export const CAPABILITY_INVENTORY_SCHEMA = {
         },
       },
     },
+    hooks: { type: 'array', items: INVENTORY_HOOK_SCHEMA },
   },
 } as const;

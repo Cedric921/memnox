@@ -86,6 +86,25 @@ const OUTSIDE_THIS_MACHINE: string[] = [
   ...[...LOCAL_NAMESPACES, 'package'].map((each) => `!${each}.*`),
 ];
 
+/** Where credentials sit on disk, as rule targets: what the first question denies an agent, and a phone never lists. */
+export const CREDENTIAL_PATHS: readonly string[] = [
+  // The directory too, or asking about `~/.aws` itself answers "no rule matched".
+  '**/.ssh',
+  '**/.ssh/**',
+  '**/.aws',
+  '**/.aws/**',
+  '**/.gcloud',
+  '**/.gcloud/**',
+  '**/.kube',
+  '**/.kube/**',
+  '**/.env',
+  '**/.env.*',
+  // A template holds names and no values, and reading it is how an agent learns the shape.
+  '!**/.env.example',
+  '!**/.env.sample',
+  '!**/.env.template',
+];
+
 export const DOMAIN_CHOICES: readonly DomainChoice[] = [
   {
     domain: POLICY_DOMAIN.FILESYSTEM,
@@ -94,22 +113,8 @@ export const DOMAIN_CHOICES: readonly DomainChoice[] = [
     because:
       'almost no task needs the key itself, and a leaked one is somebody’s weekend',
     actions: [ACTION.FILESYSTEM_READ, ACTION.ENVIRONMENT_READ],
-    // The directory too, or asking about `~/.aws` itself answers "no rule matched".
     targets: [
-      '**/.ssh',
-      '**/.ssh/**',
-      '**/.aws',
-      '**/.aws/**',
-      '**/.gcloud',
-      '**/.gcloud/**',
-      '**/.kube',
-      '**/.kube/**',
-      '**/.env',
-      '**/.env.*',
-      // A template holds names and no values, and reading it is how an agent learns the shape.
-      '!**/.env.example',
-      '!**/.env.sample',
-      '!**/.env.template',
+      ...CREDENTIAL_PATHS,
       // A variable printed is the same key read another way: `printenv`, `echo $STRIPE_KEY`.
       EVERY_VARIABLE,
       '*_KEY',

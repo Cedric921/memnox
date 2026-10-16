@@ -23,6 +23,8 @@ export function eventToRow(event: MemnoxEvent): EventRow {
     agent: event.agent,
     actorType: event.actorType,
     principal: event.principal ?? null,
+    subagent: event.subagent ?? null,
+    subagentType: event.subagentType ?? null,
     surface: event.surface,
     operation: event.operation,
     target: event.target ?? null,
@@ -92,6 +94,8 @@ function requiredFields(row: EventRow): MemnoxEvent {
 
 const OPTIONAL_TEXT = [
   'principal',
+  'subagent',
+  'subagentType',
   'target',
   'shadowEffect',
   'policyHash',
