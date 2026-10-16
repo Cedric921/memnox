@@ -1,36 +1,18 @@
 import { ENFORCEMENT_MODE } from '../constants/enforcement.constants';
+import { CHECK, CHECK_NAME, type CheckState, type HealthCheck } from './health.constants';
+import {
+  CODEX_HOOK_TRUST,
+  codexHooksCheck,
+  type CodexHookStanding,
+} from './codex-hook-trust';
+
+export * from './health.constants';
+export * from './codex-hook-trust';
 
 /**
  * Whether Memnox is wired to anything, as against installed, because every command runs
  * perfectly well on a machine where nothing is governed.
  */
-
-export const CHECK = {
-  OK: 'ok',
-  /** Working, but not doing the thing somebody installed it for. */
-  INERT: 'inert',
-  /** Broken in a way that stops governance. */
-  BROKEN: 'broken',
-} as const;
-
-export type CheckState = (typeof CHECK)[keyof typeof CHECK];
-
-export const CHECK_NAME = {
-  CONFIG: 'config',
-  RULES: 'rules',
-  INTERCEPTORS: 'interceptors',
-  PATH: 'path',
-  PROXY: 'proxy',
-  DAEMON: 'daemon',
-  LEDGER: 'ledger',
-  /**
-   * What stops work without a rule saying so: a paused session, a spent allowance, a held
-   * path and an unanswered question. None appears in `why`, and all four look alike.
-   */
-  HOLDS: 'holds',
-  /** Where Claude Code's hook lives, since one in the user's own file is one a local edit removes. */
-  HOOKS: 'hooks',
-} as const;
 
 /**
  * Where the hook that rules on every tool call is installed. Managed settings are
@@ -47,17 +29,6 @@ export const HOOK_SEAT = {
 } as const;
 
 export type HookSeat = (typeof HOOK_SEAT)[keyof typeof HOOK_SEAT];
-
-export type CheckName = (typeof CHECK_NAME)[keyof typeof CHECK_NAME];
-
-export interface HealthCheck {
-  name: CheckName;
-  state: CheckState;
-  /** What is true, in one line. */
-  detail: string;
-  /** The command that fixes it. Absent only when there is nothing to fix. */
-  fix?: string;
-}
 
 /**
  * What the caller found on the machine. Passed in rather than read, so every check
@@ -92,6 +63,8 @@ export interface HealthFacts {
   interceptorsExpected: string[];
   /** True when the interceptor directory is ahead of the real binaries on PATH. */
   interceptorDirFirstOnPath: boolean;
+  /** True when the login profile puts it first, so a PATH without it is a terminal older than the line. */
+  loginPathConfigured?: boolean;
   /**
    * Whether the binary every wrapper execs can be found, because without it each wrapped
    * command exits 127 and the agent is told `git: not found`.
@@ -125,6 +98,8 @@ export interface HealthFacts {
   spentBudgets: string[];
   /** Where Claude Code's policy hook is installed. */
   claudeHook: HookSeat;
+  /** Whether Codex runs Memnox's hooks, as Codex reports it. Absent reads as not asked. */
+  codexHooks?: CodexHookStanding;
 }
 
 /** What is being stopped for a reason that is not a rule, as one line rather than four empty rows. */
@@ -306,6 +281,15 @@ function pathCheck(facts: HealthFacts): HealthCheck {
       fix: 'memnox protect --interceptors',
     };
   }
+  if (!facts.interceptorDirFirstOnPath && facts.loginPathConfigured === true) {
+    return {
+      name: CHECK_NAME.PATH,
+      state: CHECK.INERT,
+      detail:
+        'your login profile puts the interceptors first, and this terminal started before it did',
+      fix: 'open a new terminal',
+    };
+  }
   if (!facts.interceptorDirFirstOnPath) {
     // Installed and unreachable is the worst of both: it looks governed and is not.
     return {
@@ -422,6 +406,7 @@ export function checkInstallation(facts: HealthFacts): HealthCheck[] {
     ledgerCheck(facts),
     holdsCheck(facts),
     hooksCheck(facts),
+    codexHooksCheck(facts.codexHooks ?? { trust: CODEX_HOOK_TRUST.ABSENT }),
   ];
 }
 
