@@ -4,6 +4,7 @@ import {
   HTTP,
   readAccount,
   secondsToMs,
+  type ToolConnection,
   type WorkAccount,
   type WorkAccountCheck,
 } from '@memnox/core';
@@ -328,6 +329,59 @@ export async function signOutOf(
     }
     return { ok: true, value: mine.length };
   });
+}
+
+/** One of the person's sign ins as the workspace lists it under `me/grants`. */
+interface PersonGrant {
+  id: string;
+  toolkit: string;
+  status?: string;
+  enabled?: boolean;
+}
+
+/** The cloud's word for a sign in that works right now. */
+const GRANT_ACTIVE = 'active';
+
+/** Said by the Mac's menu bar as it stands, so these are words for the person rather than for the voice. */
+const CONNECTIONS_NOT_SIGNED_IN =
+  'This Mac is not signed in as you yet, so your connected apps cannot be shown. Sign in under Account in the Memnox app, or run memnox signin in a terminal.';
+const CONNECTIONS_NOT_REACHABLE =
+  'Memnox Cloud could not be reached just now, so your connected apps cannot be shown.';
+
+/** The apps the person connected, one per toolkit, for the Mac to show. */
+export async function connectionsOf(
+  home: string,
+): Promise<PersonalAnswer<ToolConnection[]>> {
+  const person = await readPerson(home);
+  if (person === null) return { ok: false, said: CONNECTIONS_NOT_SIGNED_IN };
+  try {
+    const grants = await callCloud<PersonGrant[]>({
+      baseUrl: person.baseUrl,
+      path: workPath(person, 'grants'),
+      token: person.token,
+      timeoutMs: READ_TIMEOUT_MS,
+    });
+    if (grants.status !== HTTP.OK) return refusal(grants);
+    return { ok: true, value: connectionsFrom(listOf(grants.body)) };
+  } catch (err) {
+    if (err instanceof CloudUnreachable)
+      return { ok: false, said: CONNECTIONS_NOT_REACHABLE };
+    throw err;
+  }
+}
+
+/** One entry per toolkit, connected when any of its sign ins is active and enabled, sorted by toolkit. */
+export function connectionsFrom(grants: readonly PersonGrant[]): ToolConnection[] {
+  const byToolkit = new Map<string, boolean>();
+  for (const grant of grants) {
+    if (typeof grant.toolkit !== 'string' || grant.toolkit === '') continue;
+    const toolkit = grant.toolkit.toLowerCase();
+    const live = grant.status?.toLowerCase() === GRANT_ACTIVE && grant.enabled === true;
+    byToolkit.set(toolkit, (byToolkit.get(toolkit) ?? false) || live);
+  }
+  return [...byToolkit.entries()]
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .map(([toolkit, connected]) => ({ toolkit, connected }));
 }
 
 /** The account as a card names it, and the key a run is checked against. */

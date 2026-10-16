@@ -81,6 +81,8 @@ export const DAEMON_METHOD = {
   PERSON_SIGN_IN: 'person-sign-in',
   /** The Mac app signing the daemon's person out, revoking this terminal on the control plane. */
   PERSON_SIGN_OUT: 'person-sign-out',
+  /** The apps the person connected through the workspace, Gmail or Slack say, for the Mac's menu bar and notch. */
+  CONNECTIONS_LIST: 'connections-list',
   /** Whether this machine is connected to a workspace, which is what carries rules, memory and phones to it. */
   MACHINE: 'machine',
   /** The Mac app connecting this machine to a workspace: the device flow `memnox login` runs, polled behind the answer. */
@@ -192,6 +194,13 @@ export interface VoiceAgentStatus {
   chosen: boolean;
   /** What to install, or set up, when it is missing or cannot answer. */
   install: string;
+}
+
+/** One app the person connected through the workspace, by the cloud's lowercase toolkit slug. */
+export interface ToolConnection {
+  toolkit: string;
+  /** Whether any of their sign ins to it is active and enabled, rather than pending, expired, failed or turned off. */
+  connected: boolean;
 }
 
 /** A step the Mac timed, hung on the trace of the question it belongs to. */
@@ -392,6 +401,8 @@ export interface DaemonResponse extends ExtensionResponseFields {
   person?: PersonStanding;
   /** On MACHINE, MACHINE_SIGN_IN and MACHINE_SIGN_OUT: whether this machine is connected to a workspace. */
   machine?: MachineStanding;
+  /** On CONNECTIONS_LIST: one per app the person connected, by toolkit. */
+  connections?: ToolConnection[];
   /** On POLISH: the dictation as it should be typed. */
   polished?: string;
   /** On CONFIRM and REGISTER_KEY, what happened in a word or two; on PING, which memnox answered. */
