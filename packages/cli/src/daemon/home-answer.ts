@@ -44,6 +44,8 @@ export interface HomeStatus {
   waiting: number;
   agents: number;
   hooked: readonly string[];
+  /** Hookable agents found here and not hooked yet; an agent no hook exists for is never counted. */
+  unhooked: readonly string[];
   dormant: readonly unknown[];
 }
 
@@ -81,7 +83,7 @@ export async function readHome(home: string, input: HomeInput): Promise<HomeView
     today: todayOf(events, now),
     ...(ready === undefined ? {} : { ready: readyView(ready) }),
     notCovered: {
-      unprotected: Math.max(0, status.agents - status.hooked.length),
+      unprotected: status.unhooked.length,
       dormant: status.dormant.length,
     },
   };
