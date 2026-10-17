@@ -6,6 +6,7 @@ import { SessionHosts } from '@memnox/core';
 import {
   conversationIn,
   lastAnswerIn,
+  latestAskIn,
   sessionTranscript,
   turnOverIn,
 } from '../src/daemon/transcript';
@@ -55,6 +56,29 @@ describe('the conversation in a live session window', () => {
       { at: 't3', who: 'agent', text: 'I will add it to the cart page.' },
       { at: 't3', who: 'tool', text: 'Edit: Cart.tsx' },
     ]);
+  });
+});
+
+describe('what the person asked last', () => {
+  it('is their own latest words, never a helper report the agent marks as not theirs', () => {
+    const raw = [
+      line({ type: 'user', message: { content: 'make the modal draggable' } }),
+      line({
+        type: 'assistant',
+        message: { content: [{ type: 'text', text: 'On it.' }] },
+      }),
+      line({
+        type: 'user',
+        isMeta: true,
+        origin: { kind: 'peer' },
+        message: {
+          content:
+            'Another Claude session sent a message:\n<agent-message from="a1">\n[Subagent hand-back] The text below is the final report of a subagent.',
+        },
+      }),
+    ];
+    expect(latestAskIn(raw.join('\n'))).toBe('make the modal draggable');
+    expect(latestAskIn(line({ type: 'assistant', message: { content: [] } }))).toBeNull();
   });
 });
 

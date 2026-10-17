@@ -10,6 +10,7 @@ import {
   REPLAY_STEP,
   SessionHosts,
   SPEAKER,
+  statementOfPrompt,
   type CardExcerpt,
   type CardFile,
   type DisplayHost,
@@ -31,6 +32,8 @@ import { excerptOf, type ChangedFile } from '../session-tools/show-tool';
 import {
   readConversation,
   readLastAnswer,
+  latestPersonLine,
+  readLatestAsk,
   readOpeningAsk,
   sessionTranscript,
 } from './transcript';
@@ -136,12 +139,13 @@ export class SessionViews {
     const rows = (await sessionsTool(deps, { hours: '72' })) as SessionRow[];
     const row = rows.find((each) => each.session === sessionId);
     if (row === undefined) return null;
-    const [steps, code, names, host, lastSaid] = await Promise.all([
+    const [steps, code, names, host, lastSaid, latestAsk] = await Promise.all([
       this.steps(sessionId),
       this.changed(deps, sessionId),
       readNames(this.home),
       new SessionHosts(this.home).read(sessionId).catch(() => null),
       this.lastAnswer(sessionId).catch(() => null),
+      this.latestAsk(sessionId).catch(() => undefined),
     ]);
     // A session that only ran commands wrote nowhere, so the folder it was opened in names its repository.
     const opened = host?.cwd === undefined ? null : repositoryAround(host.cwd);
@@ -158,8 +162,22 @@ export class SessionViews {
       repository,
       branch,
       lastSaid,
+      latestAsk,
       conversation: await this.conversation(sessionId),
     });
+  }
+
+  /**
+   * What the person last typed, from the agent's own transcript, which marks a helper's report or a harness notice
+   * as not theirs; undefined where no transcript is readable, so the ask the prompt hook kept stands in.
+   */
+  private async latestAsk(sessionId: string): Promise<string | null | undefined> {
+    const desktop = desktopSessionById(desktopRoots(this.home), sessionId);
+    if (desktop !== null) {
+      return latestPersonLine(desktopConversation(desktop));
+    }
+    const path = await sessionTranscript(this.home, sessionId, this.transcripts);
+    return path === null ? undefined : readLatestAsk(path);
   }
 
   /** What the agent said to end its latest turn, in full, for the voice to answer "what did it find". */
@@ -354,12 +372,15 @@ interface Gathered {
   repository: string | undefined;
   branch: string | null;
   lastSaid: string | null;
+  /** The person's latest words from the transcript; null when it holds none, undefined when there is none to read. */
+  latestAsk: string | null | undefined;
   conversation: { conversation?: ConversationLine[] };
 }
 
 function viewOf(row: SessionRow, gathered: Gathered): SessionView {
   const { sessionId, agentName, steps, code, task, repository, branch, lastSaid } =
     gathered;
+  const lastAsk = latestAskOf(row, gathered.latestAsk);
   return {
     sessionId,
     agent: row.agent,
@@ -372,9 +393,7 @@ function viewOf(row: SessionRow, gathered: Gathered): SessionView {
     files: code.files,
     ...(code.excerpt === undefined ? {} : { excerpt: code.excerpt }),
     ...(task === undefined ? {} : { task }),
-    ...(row.lastAsk === undefined || row.lastAsk === task
-      ? {}
-      : { lastAsk: row.lastAsk }),
+    ...(lastAsk === undefined || lastAsk === task ? {} : { lastAsk }),
     ...(repository === undefined ? {} : { repository: basename(repository) }),
     ...(branch === null ? {} : { branch }),
     ...(row.runningIn === undefined ? {} : { runningIn: row.runningIn }),
@@ -387,6 +406,17 @@ function viewOf(row: SessionRow, gathered: Gathered): SessionView {
     ...(row.paused === undefined ? {} : { paused: row.paused }),
     ...gathered.conversation,
   };
+}
+
+/** The transcript's word over the prompt hook's, since the hook cannot tell the person's prompt from a helper's report. */
+function latestAskOf(
+  row: SessionRow,
+  fromTranscript: string | null | undefined,
+): string | undefined {
+  if (fromTranscript === undefined) return row.lastAsk;
+  if (fromTranscript === null) return undefined;
+  const statement = statementOfPrompt(fromTranscript);
+  return statement === '' ? undefined : statement;
 }
 
 function hostOf(host: SessionHost): DisplayHost {

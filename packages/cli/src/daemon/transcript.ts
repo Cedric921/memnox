@@ -96,6 +96,27 @@ function openingAskIn(raw: string): string | null {
   return everyLineIn(raw).find((line) => line.who === SPEAKER.PERSON)?.text ?? null;
 }
 
+/**
+ * The person's latest words in the session, or null when the transcript's tail holds none. Read here rather than
+ * from the prompt hook, which also fires for a helper's report or a harness notice the agent marks as not theirs.
+ */
+export function readLatestAsk(path: string): string | null {
+  return latestAskIn(tailOf(path));
+}
+
+export function latestAskIn(raw: string): string | null {
+  return latestPersonLine(everyLineIn(raw));
+}
+
+/** The newest line the person said, read from the end since that is where it most often is. */
+export function latestPersonLine(lines: readonly ConversationLine[]): string | null {
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    const line = lines[index];
+    if (line?.who === SPEAKER.PERSON) return line.text;
+  }
+  return null;
+}
+
 /** Long enough to answer "what did it find" from, short enough to never be a report read aloud. */
 const MOST_ANSWER_CHARS = 1_500;
 
