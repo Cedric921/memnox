@@ -255,6 +255,17 @@ describe("the person's own tools by voice", () => {
     expect(await new PendingSignIns(deps.home).all()).toEqual([]);
   });
 
+  it('lays out a Gmail reply as a mail with its words in the box', () => {
+    const draft = workDraftOf('gmail', 'GMAIL_REPLY_TO_THREAD', {
+      thread_id: '18f2',
+      recipient_email: 'sara@acme.test',
+      message_body: 'Thank you, I will send it soon.',
+    });
+    expect(draft.kind).toBe(WORK_DRAFT_KIND.EMAIL);
+    expect(draft.body).toBe('Thank you, I will send it soon.');
+    expect(draft.fields).toEqual([]);
+  });
+
   it('names who a message goes to by name, not by the id the tool takes', () => {
     const draft = workDraftOf(
       'slack',

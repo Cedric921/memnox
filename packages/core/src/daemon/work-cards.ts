@@ -86,6 +86,8 @@ const KIND_WORDS: ReadonlyArray<[WorkDraftKind, readonly string[]]> = [
 const BODY_KEYS = [
   'text',
   'body',
+  // A Gmail reply carries its words here, and a card that missed it showed an empty box over them.
+  'message_body',
   'message',
   'markdown',
   'markdown_text',
@@ -147,7 +149,7 @@ export function workDraftOf(
   return {
     toolkit,
     tool,
-    kind: kindOf(tool),
+    kind: kindOf(toolkit, tool),
     ...(account === undefined ? {} : { account }),
     ...(to.length === 0 ? {} : { to }),
     ...(where === undefined ? {} : { where }),
@@ -202,7 +204,11 @@ function restOf(args: Record<string, unknown>, used: ReadonlySet<string>): WorkF
     });
 }
 
-function kindOf(tool: string): WorkDraftKind {
+/** Toolkits whose every send is a mail, since a slug like GMAIL_REPLY_TO_THREAD reads as a chat reply. */
+const MAIL_TOOLKITS = ['gmail', 'outlook'];
+
+function kindOf(toolkit: string, tool: string): WorkDraftKind {
+  if (MAIL_TOOLKITS.includes(toolkit)) return WORK_DRAFT_KIND.EMAIL;
   const words = tool.toUpperCase().split('_');
   for (const [kind, markers] of KIND_WORDS) {
     if (markers.some((marker) => words.includes(marker))) return kind;
