@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
 import { readdir, readFile, stat } from 'node:fs/promises';
-import { delimiter, join, resolve } from 'node:path';
+import { basename, delimiter, join, resolve } from 'node:path';
 
 import {
   HOOK_SEAT,
@@ -13,7 +13,7 @@ import {
   MCP_CONFIG_LOCATIONS,
   MEMNOX_HOME,
   POLICY_REGISTRY_FILE,
-  PROXY_BINARY,
+  planWrap,
   readPolicyRegistry,
   readTextServers,
   versionPolicySet,
@@ -33,6 +33,7 @@ import {
   type MemnoxEvent,
   readAccount,
   type HealthFacts,
+  type ServerLaunch,
 } from '@memnox/core';
 import {
   askDaemon,
@@ -44,6 +45,8 @@ import {
   shimNamesIn,
 } from '@memnox/interceptors';
 
+import { readCodexHookStanding } from './agents/codex-hooks';
+import { DEFAULT_SHELL, loginPathConfigured } from './protect/shell-profile';
 import { describeError } from './cli-errors';
 import { serviceState } from './daemon/service';
 import { withEvents } from './event-store';
@@ -123,7 +126,14 @@ export async function readHealth(
     daemonStartsItself: serviceState(home).installed,
     ...(await readLedgerCounts(home)),
     claudeHook: await readClaudeHookSeat(home, managed),
+    codexHooks: await readCodexHookStanding(home, dir),
+    loginPathConfigured: await loginPathConfigured(shellOf(env), home),
   };
+}
+
+/** The person's shell by name, as its profile is chosen. */
+function shellOf(env: NodeJS.ProcessEnv): string {
+  return basename(env['SHELL'] ?? DEFAULT_SHELL);
 }
 
 /** Where Claude Code's hook is, or absent where Claude Code has never run here. */
@@ -275,37 +285,39 @@ async function proxyWiring(
   let wrapped = 0;
   for (const location of MCP_CONFIG_LOCATIONS) {
     const path = join(location.scope === 'home' ? home : dir, location.relative);
-    const launches = await readServerLaunches(path);
-    servers += launches.length;
-    wrapped += launches.filter((launch) => launch?.command === PROXY_BINARY).length;
+    // Counted as `mcp wrap` would act on them, so its fix can clear what this reports: Memnox's
+    // own servers and those declared by URL are never wrapped, and so never counted as missed.
+    const plan = planWrap(await readServerLaunches(path));
+    servers += plan.wrap.length + plan.alreadyWrapped.length;
+    wrapped += plan.alreadyWrapped.length;
   }
   return { mcpServers: servers, mcpWrapped: wrapped };
 }
 
-/** How each server in one config file is launched, or none where it is absent or unreadable. */
-async function readServerLaunches(path: string): Promise<{ command?: string }[]> {
-  if (!(await exists(path))) return [];
+/** How each server in one config file is launched, by name, or none where it is absent or unreadable. */
+async function readServerLaunches(path: string): Promise<Record<string, ServerLaunch>> {
+  if (!(await exists(path))) return {};
   let raw: string;
   try {
     raw = await readFile(path, 'utf8');
   } catch {
-    return [];
+    return {};
   }
 
   const format = formatOf(path);
   if (format !== CONFIG_FORMAT.JSON) {
-    return Object.values(readTextServers(format, raw).servers);
+    return readTextServers(format, raw).servers;
   }
   try {
     // Narrowed by the key lookup below; a missing block reads as no servers.
     const parsed = JSON.parse(raw) as Record<string, unknown>;
-    // Only `command` is read, and a launch without one is simply not ours.
+    // Read as launches; `planWrap` passes over any entry that is not one.
     const block = (parsed[JSON_SERVER_KEYS[0]] ?? parsed[JSON_SERVER_KEYS[1]]) as
-      Record<string, { command?: string }> | undefined;
-    return block === undefined ? [] : Object.values(block);
+      Record<string, ServerLaunch> | undefined;
+    return block ?? {};
   } catch {
     // A config we cannot parse is one we also refuse to rewrite; skip it here too.
-    return [];
+    return {};
   }
 }
 

@@ -55,6 +55,11 @@ export interface HomeView {
   today: HomeToday;
   ready?: HomeReady;
   notCovered: HomeNotCovered;
+  /**
+   * What only the person can do for what is here to be in force, such as approving hooks in
+   * Codex or restarting an agent that loads a plugin. Absent when nothing is owed.
+   */
+  needsYou?: string[];
 }
 
 export interface HomeResponseFields {
