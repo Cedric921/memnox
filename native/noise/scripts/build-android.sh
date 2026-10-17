@@ -22,7 +22,11 @@ build() {
   abi="$2"
   rustup target add "$triple" >/dev/null
   linker_var="CARGO_TARGET_$(printf '%s' "$triple" | tr 'a-z-' 'A-Z_')_LINKER"
-  env "$linker_var=$bin/$triple$api-clang" cargo build --release --features jni --target "$triple"
+  # ring, which snow uses, compiles C as well, so the cc crate is named the NDK's compiler and archiver too.
+  cc_var="CC_$(printf '%s' "$triple" | tr '-' '_')"
+  ar_var="AR_$(printf '%s' "$triple" | tr '-' '_')"
+  env "$linker_var=$bin/$triple$api-clang" "$cc_var=$bin/$triple$api-clang" "$ar_var=$bin/llvm-ar" \
+    cargo build --release --features jni --target "$triple"
   mkdir -p "$out/$abi"
   cp "target/$triple/release/libmemnox_noise.so" "$out/$abi/libmemnox_noise.so"
   echo "built $out/$abi/libmemnox_noise.so"
