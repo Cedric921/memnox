@@ -46,6 +46,8 @@ const REMOTE_METHODS: Readonly<Record<string, RemoteCapability>> = {
   [DAEMON_METHOD.VOICE_CHOICE]: REMOTE_CAPABILITY.SEE,
   [DAEMON_METHOD.FILES_LIST]: REMOTE_CAPABILITY.SEE,
   [DAEMON_METHOD.HOME]: REMOTE_CAPABILITY.SEE,
+  // Which app accounts the person connected and whether each sign in still works; acting in one is a separate signed proposal.
+  [DAEMON_METHOD.CONNECTIONS_LIST]: REMOTE_CAPABILITY.SEE,
   // Only writes a proposal; the rule holds once the person signs it with the rules capability.
   [DAEMON_METHOD.HAND_OVER]: REMOTE_CAPABILITY.ASK,
   [DAEMON_METHOD.ASK]: REMOTE_CAPABILITY.ASK,

@@ -129,8 +129,8 @@ describe('the connections-list request the Mac menu bar sends', () => {
     });
   });
 
-  it('is the Mac app’s to ask and not a paired phone’s', () => {
+  it('is the Mac app’s to ask and a paired phone’s to see', () => {
     expect(isVoiceMethod(DAEMON_METHOD.CONNECTIONS_LIST)).toBe(true);
-    expect(remoteCapabilityFor(DAEMON_METHOD.CONNECTIONS_LIST)).toBeNull();
+    expect(remoteCapabilityFor(DAEMON_METHOD.CONNECTIONS_LIST)).toBe('see');
   });
 });
