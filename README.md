@@ -139,7 +139,7 @@ The terminal is not the only place a question can reach you. Two open source app
 top of this runtime and give it a face and a voice, and neither holds a rule of its own:
 the daemon decides, and the apps show, speak, listen and sign.
 
-- **[Memnox for macOS](https://github.com/Memnox/memnox-macos)** lives in the notch. The
+- **[Memnox for macOS](https://github.com/Memnox/memnox-desktop/tree/main/macos)** lives in the notch. The
   island grows out of it to listen, to answer out loud, to show every working session
   with its latest steps, and to ask about a held call with Deny, Allow this session and
   Allow once. Every allow that reaches outside the session is signed after Touch ID.
@@ -676,12 +676,12 @@ test, and `pnpm format && pnpm typecheck && pnpm test && pnpm deadcode` has to p
 
 ### Working on it with the Mac app
 
-The Mac app in `memnox-macos` installs and runs this runtime itself, and where it gets it
+The Mac app in `memnox-desktop/macos` installs and runs this runtime itself, and where it gets it
 from is chosen when the app is built. Keep the two checkouts side by side:
 
 ```sh
 cd packages/cli && npm link && cd ../..   # once: memnox on your PATH is this checkout
-cd ../memnox-macos && ./scripts/bundle.sh # builds this runtime, then the app against it
+cd ../memnox-desktop/macos && ./scripts/bundle.sh # builds this runtime, then the app against it
 open build/Memnox.app
 ```
 

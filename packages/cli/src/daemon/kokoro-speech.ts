@@ -12,7 +12,7 @@ import { write, type Peer } from './socket-write';
  * so a phone whose app is in the background, where iOS allows no GPU, still speaks in that voice.
  */
 
-/** The Mac app's Kokoro server; the port is the one memnox-macos starts it on in Kokoro.swift. */
+/** The Mac app's Kokoro server; the port is the one memnox-desktop/macos starts it on in Kokoro.swift. */
 export const KOKORO_PORT = 8723;
 
 /** Loopback only, so a line said for the person never leaves this machine. */
