@@ -40,7 +40,12 @@ async function agents(setup: Setup): Promise<{ agents: VoiceAgents; asked: strin
       asked.push(each.kind);
       return setup.working.includes(each.kind)
         ? { spec: each, works: true }
-        : { spec: each, works: false, because: 'its plan ran out' };
+        : {
+            spec: each,
+            works: false,
+            because: 'its plan ran out',
+            reply: 'Upgrade your plan',
+          };
     },
     now: () => new Date('2026-10-04T09:00:00Z'),
   });
@@ -111,6 +116,7 @@ describe('VoiceAgents', () => {
       installed: true,
       works: false,
       because: 'its plan ran out',
+      reply: 'Upgrade your plan',
       chosen: false,
       checkedAt: '2026-10-04T09:00:00.000Z',
     });

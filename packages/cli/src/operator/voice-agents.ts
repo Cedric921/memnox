@@ -29,6 +29,7 @@ interface KeptCheck {
   kind: string;
   works: boolean;
   because?: string;
+  reply?: string;
 }
 
 interface KeptChecks {
@@ -111,10 +112,11 @@ export class VoiceAgents {
     );
     const kept: KeptChecks = {
       checkedAt: this.now().toISOString(),
-      checks: checks.map(({ spec, works, because }) => ({
+      checks: checks.map(({ spec, works, because, reply }) => ({
         kind: spec.kind,
         works,
         ...(because === undefined ? {} : { because }),
+        ...(reply === undefined ? {} : { reply }),
       })),
     };
     await writeJsonFile(voiceAgentsPath(this.home), kept).catch(() => undefined);
@@ -154,6 +156,7 @@ export class VoiceAgents {
         sealed: spec.sealed,
         ...(check === undefined ? {} : { works: check.works }),
         ...(check?.because === undefined ? {} : { because: check.because }),
+        ...(check?.reply === undefined ? {} : { reply: check.reply }),
         ...(check === undefined || kept === null ? {} : { checkedAt: kept.checkedAt }),
         chosen: chosen?.kind === spec.kind,
         install: spec.install,

@@ -190,6 +190,8 @@ export interface VoiceAgentStatus {
   works?: boolean;
   /** Why it did not, in words a person can act on. */
   because?: string;
+  /** Its own account's words when it answered something else, such as a spent plan or a missing model. */
+  reply?: string;
   checkedAt?: string;
   chosen: boolean;
   /** What to install, or set up, when it is missing or cannot answer. */
