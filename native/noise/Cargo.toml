@@ -14,11 +14,13 @@ crate-type = ["rlib", "cdylib", "staticlib"]
 default = []
 node = ["dep:napi", "dep:napi-derive"]
 ffi = []
+jni = ["dep:jni"]
 
 [dependencies]
 snow = "0.10"
 napi = { version = "3", default-features = false, features = ["napi6"], optional = true }
 napi-derive = { version = "3", optional = true }
+jni = { version = "0.21", default-features = false, optional = true }
 
 [build-dependencies]
 napi-build = "2"

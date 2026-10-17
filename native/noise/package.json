@@ -17,6 +17,8 @@
     "build": "sh scripts/build-node.sh",
     "build:debug": "sh scripts/build-node.sh debug",
     "build:xcframework": "sh scripts/build-xcframework.sh",
+    "build:android": "sh scripts/build-android.sh",
+    "test:jni": "sh scripts/test-jni.sh",
     "test": "cargo test --features ffi && node --test test/"
   },
   "optionalDependencies": {

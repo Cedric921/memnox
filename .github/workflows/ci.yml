@@ -34,6 +34,14 @@ jobs:
       - run: pnpm run test
       - run: pnpm run deadcode
 
+  # Android links the same crate through JNI, so the binding is driven from Java and built for both phone ABIs.
+  noise-android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sh native/noise/scripts/test-jni.sh
+      - run: sh native/noise/scripts/build-android.sh
+
   # Catches a broken manifest at PR time rather than at tag time.
   publish-dry-run:
     runs-on: ubuntu-latest

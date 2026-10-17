@@ -1,4 +1,4 @@
-//! The one Noise layer the Memnox runtime and the iPhone share. Every cipher, hash, DH and nonce comes from snow.
+//! The one Noise layer the Memnox runtime, the iPhone and Android share. Every cipher, hash, DH and nonce comes from snow.
 
 pub mod core;
 
@@ -7,3 +7,6 @@ mod node;
 
 #[cfg(feature = "ffi")]
 pub mod ffi;
+
+#[cfg(feature = "jni")]
+mod jni;
