@@ -8,6 +8,7 @@ import type { WiringSeams } from '../src/setup-wiring';
 import type { offboardAgent } from '../src/agents/onboard';
 import { readNames } from '../src/agents/names';
 import { readDeclined } from '../src/agents/declined';
+import { CLOUD_REFUSAL } from '../src/agents/enrol-agent';
 import { readRecord, retireRecord } from '../src/agents/onboarding';
 import { runCommand } from './cli-harness';
 import { RecordedOutput } from '../src/cli-output';
@@ -108,6 +109,11 @@ function fakeWiring(wired: string[]): WiringSeams {
     cursorHook: async () => false,
     geminiHook: async () => false,
     windsurfHook: async () => false,
+    hermesHook: async () => false,
+    openClawHook: async () => false,
+    copilotHook: async () => false,
+    devinHook: async () => false,
+    openCodeHook: async () => false,
     mcp: async () => ({ wrapped: 0, skipped: false }),
     keep: async () => undefined,
   };
@@ -601,6 +607,48 @@ describe('memnox setup', () => {
 
     expect(out.notes).toEqual([]);
     expect(out.lines.join('\n')).toContain('is under Memnox');
+  });
+
+  it('governs an agent on this machine when the workspace plan is full', async () => {
+    /* The plan caps credentials in the workspace and never this machine. Reporting
+       the refusal as a failure told somebody with five agents that two were not
+       under Memnox, while every hook and rule on the laptop held them all. */
+    vi.stubGlobal('fetch', (async (url: URL | string) =>
+      String(url).endsWith('/agents')
+        ? new Response(
+            JSON.stringify({
+              error: CLOUD_REFUSAL.AGENTS_EXHAUSTED,
+              message: 'Free governs 1 agent at once, and 1 already holds a credential.',
+            }),
+            { status: 409, headers: { 'content-type': 'application/json' } },
+          )
+        : deviceFlow(String(url))) as typeof fetch);
+    await run({ yes: false });
+
+    const { out } = await run({ yes: true });
+
+    const text = out.text;
+    expect(text).toContain('this machine');
+    expect(text).toContain('2 agents are under Memnox');
+    expect(text).toContain('governed on this machine only');
+    expect(text).not.toContain('failed');
+    expect(await readRecord(home, 'agt_claude-code')).toBeNull();
+    expect(await readDeclined(home)).toEqual({});
+  });
+
+  it('still reports any other refusal as a failure', async () => {
+    vi.stubGlobal('fetch', (async (url: URL | string) =>
+      String(url).endsWith('/agents')
+        ? new Response(JSON.stringify({ message: 'the workspace is suspended' }), {
+            status: 409,
+            headers: { 'content-type': 'application/json' },
+          })
+        : deviceFlow(String(url))) as typeof fetch);
+
+    const { out } = await run({ yes: true });
+
+    expect(out.text).toContain('failed');
+    expect(out.text).toContain('the workspace is suspended');
   });
 
   it('says plainly that authority did not change', async () => {
