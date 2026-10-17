@@ -143,7 +143,7 @@ the daemon decides, and the apps show, speak, listen and sign.
   island grows out of it to listen, to answer out loud, to show every working session
   with its latest steps, and to ask about a held call with Deny, Allow this session and
   Allow once. Every allow that reaches outside the session is signed after Touch ID.
-- **[Memnox for iPhone](https://github.com/Memnox/memnox-ios)** lives in the Dynamic
+- **[Memnox for iPhone](https://github.com/Memnox/memnox-mobile/tree/main/ios)** lives in the Dynamic
   Island and on the lock screen. It pairs with the Mac once, then carries the same held
   calls over an end to end encrypted Noise tunnel, and signs every remote yes after Face ID.
 
