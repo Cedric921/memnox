@@ -6,7 +6,10 @@ import type { RuleScope } from '../daemon/voice-cards';
 import type { Policy } from '../policy/policy';
 import { JsonRecordDir } from '../store/json-records';
 import type { HoldAnswer } from './hold';
+import { PROPOSAL_ANSWER, type ProposalAnswer } from './answers';
 import type { WorkAccount } from '../daemon/work-cards';
+
+export { PROPOSAL_ANSWER, type ProposalAnswer };
 
 /**
  * A change something other than a person suggested, written down and never applied until a
@@ -35,13 +38,6 @@ export const PROPOSAL_KIND = {
   /** An account a sign in reached, said once to be the person's own so it is matched from then on. */
   ACCOUNT: 'account',
 } as const;
-
-export const PROPOSAL_ANSWER = {
-  CONFIRMED: 'confirmed',
-  DECLINED: 'declined',
-} as const;
-
-export type ProposalAnswer = (typeof PROPOSAL_ANSWER)[keyof typeof PROPOSAL_ANSWER];
 
 export type ProposedChange =
   | {

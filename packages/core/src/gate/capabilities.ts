@@ -2,26 +2,11 @@ import { DISPLAY, DISPLAY_VIA, type DisplayKind } from '../daemon/display';
 import { DAEMON_METHOD, type DaemonEvent } from '../daemon/protocol';
 import { START_ID_PREFIX } from '../coordination/session-starts';
 import { PROPOSAL_KIND, type ProposedChange } from './proposals';
+import { REMOTE_CAPABILITY, type RemoteCapability } from './remote-capability';
 
-/**
- * What a paired device may do, as data the runtime decides and the apps only display. A remote
- * request is looked up here by the device the Noise handshake proved, never by a token or a header.
- */
+export { REMOTE_CAPABILITY, type RemoteCapability };
 
-export const REMOTE_CAPABILITY = {
-  SEE: 'see',
-  ASK: 'ask',
-  /** A held call, or a proposal answering one. */
-  ANSWER: 'answer',
-  /** Stopping, freezing or resuming, and the person's own follow up typed into a session. */
-  STEER: 'steer',
-  RULES: 'rules',
-  REWIND: 'rewind',
-  /** Driving, and a proposal for something only the Mac can do. */
-  MAC: 'mac',
-} as const;
-
-export type RemoteCapability = (typeof REMOTE_CAPABILITY)[keyof typeof REMOTE_CAPABILITY];
+/** Which capability each remote method needs, and what a phone holds the moment it pairs. */
 
 export const ALL_REMOTE_CAPABILITIES: readonly RemoteCapability[] =
   Object.values(REMOTE_CAPABILITY);

@@ -1,22 +1,13 @@
 import { minutesToMs } from '../domain/time';
 import { MemoryGrants, type GrantSubject, type SessionGrants } from './session-grants';
+import { HOLD_ANSWER, type HoldAnswer } from './answers';
+
+export { HOLD_ANSWER, type HoldAnswer };
 
 /**
  * Holding a call for a person while the agent waits on the other end of a pipe, so every
  * path ends in a decision: answered, timed out, or refused because nobody could be asked.
  */
-
-export const HOLD_ANSWER = {
-  /** This call only. The next identical one asks again. */
-  ONCE: 'once',
-  /** Every identical call for the rest of this session. */
-  SESSION: 'session',
-  DENY: 'deny',
-  /** The command was wrong rather than the rule, so the person fixes it and the loop survives. */
-  EDIT: 'edit',
-} as const;
-
-export type HoldAnswer = (typeof HOLD_ANSWER)[keyof typeof HOLD_ANSWER];
 
 export const HOLD_OUTCOME = {
   ALLOWED: 'allowed',
