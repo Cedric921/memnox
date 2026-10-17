@@ -25,7 +25,8 @@
     "ship": "node scripts/ship.mjs",
     "relay-stub": "node scripts/relay-stub.mjs",
     "phone-sim": "node scripts/phone-sim.mjs",
-    "machine-sim": "node scripts/machine-sim.mjs"
+    "machine-sim": "node scripts/machine-sim.mjs",
+    "vectors": "pnpm --filter @memnox/core build && node scripts/protocol-vectors.mjs"
   },
   "devDependencies": {
     "@types/node": "^20.14.0",

@@ -18,3 +18,4 @@ export * from './speech';
 export * from './team-calls';
 export * from './home';
 export * from './intercept';
+export * from './vectors';
