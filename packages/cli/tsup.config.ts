@@ -26,6 +26,8 @@ export default defineConfig({
     // The project's own documents ship too, so the voice answers about Memnox from what it says.
     for (const [source, name] of Object.entries(KNOWLEDGE_SOURCES))
       cpSync(join('../..', source), join('dist', KNOWLEDGE_DIR, name));
+    // The plugins written into agents that hook in-process, read beside the bundle at install.
+    cpSync('src/protect/agent-plugins', 'dist/agent-plugins', { recursive: true });
     // The native wrapper ships where it was built; without one the shims keep the Node interceptor.
     const native = '../../native/intercept/dist';
     if (existsSync(native)) cpSync(native, 'dist/native', { recursive: true });
