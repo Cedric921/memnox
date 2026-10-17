@@ -2,6 +2,11 @@ import { execFileSync } from 'node:child_process';
 import { ownProcessEnv, rememberRepository } from '@memnox/core';
 import { wrapEveryServer } from './mcp/wrap-servers';
 import { installClaudeHook } from './protect/claude-hook';
+import { writeHookLauncher } from './protect/hook-launcher';
+import { installHermesPlugin } from './protect/hermes-plugin';
+import { installOpenClawPlugin } from './protect/openclaw-plugin';
+import { installCopilotHook, installDevinHook } from './protect/named-host-hooks';
+import { installOpenCodePlugin } from './protect/opencode-plugin';
 import { installOwnInterceptors } from './protect/interceptor-entry';
 import {
   installCodexHook,
@@ -68,6 +73,12 @@ export interface WiringSeams {
   cursorHook?: (home: string) => Promise<boolean>;
   geminiHook?: (home: string) => Promise<boolean>;
   windsurfHook?: (home: string) => Promise<boolean>;
+  hermesHook?: (home: string) => Promise<boolean>;
+  openClawHook?: (home: string) => Promise<boolean>;
+  copilotHook?: (home: string) => Promise<boolean>;
+  devinHook?: (home: string) => Promise<boolean>;
+  launcher?: (home: string) => Promise<string>;
+  openCodeHook?: (home: string) => Promise<boolean>;
   mcp?: (home: string, project: string) => Promise<{ wrapped: number; skipped: boolean }>;
   keep?: (home: string, hooked: readonly string[]) => Promise<void>;
   session?: (home: string) => Promise<{ held: string[] }>;
@@ -95,6 +106,8 @@ export async function wireMachine(
   cwd: string,
   seams: WiringSeams = {},
 ): Promise<Wiring> {
+  // Every hook below names the launcher, so it is written before any of them.
+  await (seams.launcher ?? writeHookLauncher)(home);
   const installed = await (seams.interceptors ?? installOwnInterceptors)(home);
   const rules = await (seams.rules ?? writeBaseline)(home);
   const retired = await (seams.retire ?? retireCopies)(home);
@@ -136,6 +149,11 @@ async function installEditHooks(home: string, seams: WiringSeams): Promise<strin
   if (await (seams.cursorHook ?? installCursorHook)(home)) hooked.push('Cursor');
   if (await (seams.geminiHook ?? installGeminiHook)(home)) hooked.push('Gemini CLI');
   if (await (seams.windsurfHook ?? installWindsurfHook)(home)) hooked.push('Windsurf');
+  if (await (seams.hermesHook ?? installHermesPlugin)(home)) hooked.push('Hermes');
+  if (await (seams.openClawHook ?? installOpenClawPlugin)(home)) hooked.push('OpenClaw');
+  if (await (seams.copilotHook ?? installCopilotHook)(home)) hooked.push('Copilot CLI');
+  if (await (seams.devinHook ?? installDevinHook)(home)) hooked.push('Devin');
+  if (await (seams.openCodeHook ?? installOpenCodePlugin)(home)) hooked.push('OpenCode');
   return hooked;
 }
 

@@ -7,7 +7,13 @@ describe('the agents Protect my agents can still cover', () => {
       (kind) => ({ kind }),
     );
 
-    expect(unhookedOf(found, ['Claude Code', 'Codex', 'Cursor'])).toEqual([]);
+    expect(unhookedOf(found, ['Claude Code', 'Codex', 'Cursor', 'Hermes'])).toEqual([]);
+  });
+
+  it('names Hermes until its hook is in, since its shell hooks make it one setup covers', () => {
+    const found = ['claude-code', 'hermes'].map((kind) => ({ kind }));
+
+    expect(unhookedOf(found, ['Claude Code'])).toEqual(['Hermes']);
   });
 
   it('names a hookable agent found here and not hooked yet', () => {
