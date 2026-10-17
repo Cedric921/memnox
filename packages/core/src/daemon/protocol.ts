@@ -391,6 +391,8 @@ export interface DaemonResponse extends ExtensionResponseFields {
   words?: readonly string[];
   /** On SESSION_VIEW. */
   session?: SessionView;
+  /** On SESSION_VIEW with a path: that file's diff, its hunks with the lines around each change. */
+  diff?: CardExcerpt;
   /** On SESSIONS_LIST, the most recently active first. */
   sessions?: SessionCard[];
   /** On ASK, one per line; the turn ends with a chunk whose kind is in ASK_ENDS. */

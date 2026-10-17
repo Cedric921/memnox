@@ -24,11 +24,10 @@ import {
 import { displayName, readNames } from '../agents/names';
 import { readStatus } from '../commands/status.command';
 import { withEvents } from '../event-store';
-import { changesTool } from '../session-tools/changes-tool';
 import type { SessionToolDeps } from '../session-tools/read-tools';
 import type { RewindSeams } from '../session-tools/rewind-tool';
 import { SESSION_STATE, sessionsTool } from '../session-tools/sessions-tool';
-import { excerptOf, type ChangedFile } from '../session-tools/show-tool';
+import { excerptOf } from '../session-tools/show-tool';
 import {
   readConversation,
   readLastAnswer,
@@ -43,6 +42,7 @@ import {
   desktopRoots,
   desktopSessionById,
 } from './desktop-sessions';
+import { changesIn, fileDiff } from './session-changes';
 import { conversationOf } from './waiting-feed';
 import { idsOf } from '../session-tools/session-aliases';
 import {
@@ -57,9 +57,10 @@ import {
  * the voice reads from sessions, replay and changes, gathered in one answer it can poll.
  */
 
-/** Enough steps to see what it is in the middle of, never a log to scroll. */
-const MOST_STEPS = 12;
-const MOST_FILES = 8;
+/** The whole session as the live window keeps it, read again every two seconds; a ledger row is a short line. */
+const MOST_STEPS = 300;
+/** Every file a session is likely to touch, so the counts over them add up to the real change. */
+const MOST_FILES = 60;
 /** As long a command line as a window row shows before it is cut. */
 const MOST_STEP_CHARS = 90;
 /** The window polls every couple of seconds, and a diff of the tree is not that cheap. */
@@ -241,16 +242,21 @@ export class SessionViews {
       .map(stepOf);
   }
 
+  /** One changed file's diff, for the live window to open under the file's name. */
+  async diff(sessionId: string, path: string): Promise<CardExcerpt | null> {
+    return fileDiff(this.deps(), SEAMS, sessionId, path);
+  }
+
   /** The files it changed and the lines of the busiest, kept a few seconds, since every poll would otherwise diff the tree. */
   private async changed(deps: SessionToolDeps, sessionId: string): Promise<Code> {
     const kept = this.files.get(sessionId);
     const moment = this.now().getTime();
     if (kept !== undefined && moment - kept.at < FILES_FRESH_MS) return kept.code;
-    const answer = await changesIn(deps, sessionId);
+    const answer = await changesIn(deps, SEAMS, sessionId);
     const shown = answer.files?.shown ?? [];
     const others = await Promise.all(
       (answer.alsoChanged ?? []).map((each) =>
-        changesIn(deps, sessionId, each.repository),
+        changesIn(deps, SEAMS, sessionId, each.repository),
       ),
     );
     // Every repository it wrote in, named when there is more than one, so work in two is never half shown.
@@ -289,26 +295,6 @@ export class SessionViews {
       brief: async () => null,
     };
   }
-}
-
-/** What changes says a session changed, in one repository or the one it wrote in last. */
-interface Changes {
-  repository?: string;
-  files?: { shown: ChangedFile[] };
-  alsoChanged?: { repository: string }[];
-}
-
-async function changesIn(
-  deps: SessionToolDeps,
-  sessionId: string,
-  repository?: string,
-): Promise<Changes> {
-  const args =
-    repository === undefined
-      ? { session: sessionId }
-      : { session: sessionId, repository };
-  // Shaped by changesTool itself, and a failure is a session with nothing to show.
-  return (await changesTool(deps, SEAMS, args).catch(() => ({}))) as Changes;
 }
 
 /** The start of the agent's last answer, cut at a word, since the card shows where things stand rather than the report. */

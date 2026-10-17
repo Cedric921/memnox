@@ -135,6 +135,16 @@ describe('the live window on a session', () => {
         '+export const total = 0;',
       ],
     });
+    const diff = await new SessionViews(home, () => NOW).diff(
+      'ses_live',
+      'src/invoice.ts',
+    );
+    expect(diff?.path).toBe('src/invoice.ts');
+    expect(diff?.lines[0]).toMatch(/^@@/);
+    expect(diff?.lines).toContain('+export const total = 0;');
+    expect(
+      await new SessionViews(home, () => NOW).diff('ses_live', 'src/none.ts'),
+    ).toBeNull();
   });
 
   it('says what a session is about from its first request, with its branch, where it runs and where it stands', async () => {
