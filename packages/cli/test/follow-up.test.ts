@@ -168,6 +168,13 @@ describe('a follow up typed on a phone', () => {
     expect(answer).toMatchObject({ ok: false, reason: 'the tab is gone' });
   });
 
+  it('says words typed into the desktop app a session lives in as typed', async () => {
+    const p = await phone(PHONE_DEFAULT_CAPABILITIES, 'typed in its app');
+    const signature = p.key.signs(followUpMessage(SESSION, WORDS));
+    const answer = await followUpAnswer(request({ signature }), p.deps, p.principal);
+    expect(answer).toMatchObject({ ok: true, outcome: 'typed' });
+  });
+
   it('takes a signature from a trusted device at the Mac on the local socket', async () => {
     const p = await phone();
     const signature = p.key.signs(followUpMessage(SESSION, WORDS));

@@ -15,7 +15,7 @@ import {
 } from './session-tools.constants';
 
 /** How a follow up typed into a desktop app's own chat is reported. */
-const HOW_IN_APP = 'typed in its app';
+export const HOW_IN_APP = 'typed in its app';
 
 /**
  * A follow up for a session that lives in its desktop app, typed there where the person watches, since
@@ -34,11 +34,10 @@ export async function typedInItsApp(
     [TOOL_ARG.AGENT]: instruction.agent,
     message: instruction.message,
   });
-  return {
-    session: instruction.sessionId,
-    how: HOW_IN_APP,
-    ...(typeof typed === 'object' && typed !== null ? typed : {}),
-  };
+  const result = typeof typed === 'object' && typed !== null ? typed : {};
+  // Reported the way every other route reports it, so a phone's follow up reads it as sent.
+  const sent = (result as { typed?: unknown }).typed === true;
+  return { session: instruction.sessionId, how: HOW_IN_APP, ...result, sent };
 }
 
 /** A session only its desktop app keeps, read from the app or started there by voice, which no hook ever drains a note for. */
