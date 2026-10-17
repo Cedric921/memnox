@@ -102,7 +102,9 @@ nonzero return code.
   - `POST /v1/workspaces/:ws/machines/:id/relay/mailboxes/:mailbox/wake` with
     `{ reason: 'waiting' }` sends the phone a push with generic text only.
 - Phone HTTP route, authenticated with `rly_`:
-  - `PUT /v1/relay/push` with `{ apnsToken, pushToStartToken? }`.
+  - `PUT /v1/relay/push` with `{ apnsToken, pushToStartToken? }` from an iPhone, or
+    `{ fcmToken }` from an Android phone. One phone is on one push service, so a body naming both
+    is refused. Either way the wake carries no text, and the question arrives through the tunnel.
 
 ## Payload framing inside a mailbox
 
