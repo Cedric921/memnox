@@ -50,6 +50,9 @@ importers:
       '@memnox/noise-linux-x64-gnu':
         specifier: workspace:*
         version: link:npm/linux-x64-gnu
+      '@memnox/noise-win32-x64-msvc':
+        specifier: workspace:*
+        version: link:npm/win32-x64-msvc
 
   native/noise/npm/darwin-arm64: {}
 
@@ -58,6 +61,8 @@ importers:
   native/noise/npm/linux-arm64-gnu: {}
 
   native/noise/npm/linux-x64-gnu: {}
+
+  native/noise/npm/win32-x64-msvc: {}
 
   packages/cli:
     dependencies:

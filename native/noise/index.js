@@ -5,7 +5,13 @@ const { join } = require('node:path');
 // A local build beside this file wins, so a developer's own build is what runs; otherwise the
 // prebuilt package for this platform, which npm installed as an optional dependency.
 const platform = `${process.platform}-${process.arch}`;
-const prebuilt = process.platform === 'linux' ? `${platform}-gnu` : platform;
+// Linux builds name their libc and Windows builds their toolchain, as npm's native packages do.
+const prebuilt =
+  process.platform === 'linux'
+    ? `${platform}-gnu`
+    : process.platform === 'win32'
+      ? `${platform}-msvc`
+      : platform;
 
 function load() {
   try {

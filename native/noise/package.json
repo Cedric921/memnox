@@ -25,7 +25,8 @@
     "@memnox/noise-darwin-arm64": "workspace:*",
     "@memnox/noise-darwin-x64": "workspace:*",
     "@memnox/noise-linux-x64-gnu": "workspace:*",
-    "@memnox/noise-linux-arm64-gnu": "workspace:*"
+    "@memnox/noise-linux-arm64-gnu": "workspace:*",
+    "@memnox/noise-win32-x64-msvc": "workspace:*"
   },
   "repository": {
     "type": "git",

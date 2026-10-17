@@ -42,6 +42,20 @@ jobs:
       - run: sh native/noise/scripts/test-jni.sh
       - run: sh native/noise/scripts/build-android.sh
 
+  # Native Windows runs the daemon too, so its addon is built and tested here rather than first at release.
+  noise-windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: sh native/noise/scripts/build-node.sh
+      - run: node --test native/noise/test/
+
   # Catches a broken manifest at PR time rather than at tag time.
   publish-dry-run:
     runs-on: ubuntu-latest

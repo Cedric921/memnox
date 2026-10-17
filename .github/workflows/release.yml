@@ -33,7 +33,13 @@ jobs:
             runner: ubuntu-22.04
           - target: linux-arm64-gnu
             runner: ubuntu-22.04-arm
+          - target: win32-x64-msvc
+            runner: windows-latest
     runs-on: ${{ matrix.runner }}
+    # Git Bash on the Windows runner, so the same build script runs on every platform.
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
