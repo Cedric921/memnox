@@ -206,6 +206,8 @@ function desktopRows(
           handedBack: !each.working,
         }),
         turn: each.working ? TURN.IN_PROGRESS : TURN.HANDED_BACK,
+        // No hook runs in the apps, so nothing of theirs is ever held for the person; the view still names the count.
+        waitingOnYou: 0,
         runningIn: DESKTOP_APP_SPOKEN[each.app],
         desktop: true,
       };
