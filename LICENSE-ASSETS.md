@@ -11,7 +11,7 @@ service marks of the licensor. This file says which ones those are, and what you
 
 - The name Memnox, and any name or logo close enough to be mistaken for it.
 - `assets/logo.png`: the Memnox logo.
-- `assets/readme/`: the pictures of the notch, the iPhone and the tools.
+- `assets/readme/`: the Memnox mark, and the pictures of the apps and the tools.
 
 ## What you may do without asking
 
