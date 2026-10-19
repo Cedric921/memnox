@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { MEMNOX_HOME } from '@memnox/core';
 import { AcpBrain } from './acp-brain';
+import { rememberBrainSession } from './brain-sessions';
 import { BRAIN_CHUNK, type Brain, type BrainChunk } from './brain';
 import { VoiceAgents } from './voice-agents';
 import { ClaudeCodeBrain } from './claude-brain';
@@ -65,7 +66,12 @@ function brainFor(
     name: () => readOwner(home),
     catalogue: commandCatalogue,
   };
-  if (spec.kind !== VOICE_BRAIN.CLAUDE_CODE) return new AcpBrain({ ...shared, spec });
+  if (spec.kind !== VOICE_BRAIN.CLAUDE_CODE) {
+    // Kept in the person's home even for a check, since the agent lists a check's session beside theirs.
+    const opened = (sessionId: string): Promise<void> =>
+      rememberBrainSession(home, sessionId);
+    return new AcpBrain({ ...shared, spec, opened });
+  }
   return new ClaudeCodeBrain({
     ...shared,
     // Quick talk rather than depth: the person's own default model stays theirs everywhere else.

@@ -2,7 +2,8 @@ import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { RunTerminals } from '@memnox/core';
+import { deliveryRow, RunTerminals, SessionHosts } from '@memnox/core';
+import { withEvents } from '../src/event-store';
 import type { SessionToolDeps } from '../src/session-tools/read-tools';
 import { sessionsTool } from '../src/session-tools/sessions-tool';
 
@@ -64,5 +65,70 @@ describe('a session memnox run launched a moment ago', () => {
       startedAt: '2026-10-15T05:49:00.000Z',
     });
     expect(await sessionsTool(deps, {})).toEqual([]);
+  });
+});
+
+describe('a session the voice only typed into', () => {
+  it('is no agent session, and never working, when nothing but deliveries were recorded in it', async () => {
+    const deps = await depsAt();
+    await withEvents(deps.home, (store) =>
+      store.append(
+        deliveryRow({
+          sessionId: 'app_iterm',
+          agent: 'iTerm',
+          text: 'run the tests',
+          outcome: 'typed',
+          at: '2026-10-15T05:49:30.000Z',
+        }),
+      ),
+    );
+    const rows = (await sessionsTool(deps, {})) as (Row & {
+      state: string;
+      notAnAgent?: string;
+    })[];
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.notAnAgent).toContain('voice typing');
+    expect(rows[0]?.state).not.toBe('working');
+  });
+
+  it('counts a delivery into a real session as the person speaking, not the agent working', async () => {
+    const deps = await depsAt();
+    await new SessionHosts(deps.home).note({
+      sessionId: 'ses_real',
+      agent: 'claude-code',
+      pid: 2 ** 22 + 9,
+      seenAt: '2026-10-15T04:00:00.000Z',
+    });
+    await withEvents(deps.home, async (store) => {
+      await store.append({
+        ...deliveryRow({
+          sessionId: 'ses_real',
+          agent: 'claude-code',
+          text: 'x',
+          outcome: 'typed',
+          at: '2026-10-15T04:30:00.000Z',
+        }),
+        actorType: 'agent',
+        operation: 'shell.exec',
+        principal: 'claude-code',
+      });
+      await store.append(
+        deliveryRow({
+          sessionId: 'ses_real',
+          agent: 'claude-code',
+          text: 'carry on',
+          outcome: 'typed',
+          at: '2026-10-15T05:49:30.000Z',
+        }),
+      );
+    });
+    const rows = (await sessionsTool(deps, {})) as (Row & {
+      state: string;
+      lastActive: string;
+      notAnAgent?: string;
+    })[];
+    const real = rows.find((each) => each.session === 'ses_real');
+    expect(real?.notAnAgent).toBeUndefined();
+    expect(real?.lastActive).toBe('2026-10-15T04:30:00.000Z');
   });
 });

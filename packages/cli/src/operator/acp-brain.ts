@@ -33,6 +33,8 @@ interface AcpBrainOptions {
   address?: () => Promise<string | undefined>;
   name?: () => Promise<string | undefined>;
   catalogue?: () => Promise<string>;
+  /** Told each session it opens, so the agent's own session list can leave the voice's out. */
+  opened?: (sessionId: string) => Promise<void>;
 }
 
 /** A running agent with its session open. */
@@ -49,6 +51,9 @@ const START_TIMEOUT_MS = 30_000;
 
 /** How long an interrupted turn has to end before its process is ended instead. */
 const INTERRUPT_GRACE_MS = 2_000;
+
+/** Long enough for an agent to note its session ended, short enough that a stuck one is still stopped. */
+const CLOSE_GRACE_MS = 1_000;
 
 export class AcpBrain implements Brain {
   readonly name: string;
@@ -115,7 +120,7 @@ export class AcpBrain implements Brain {
     const live = this.live;
     this.live = null;
     void live?.then(
-      (running) => running.child.kill('SIGTERM'),
+      (running) => endSession(running),
       () => undefined,
     );
   }
@@ -218,6 +223,8 @@ export class AcpBrain implements Brain {
       resumed?.session ?? (await connection.request('session/new', { cwd, mcpServers }));
     const sessionId = resumed?.sessionId ?? readSessionId(session);
     if (sessionId === null) throw new Error(`${spec.label} opened no session`);
+    // Noting it is bookkeeping for a list elsewhere, so a home that cannot be written never stops the answer.
+    await this.options.opened?.(sessionId).catch(() => undefined);
     if (resumed === null) this.turns = 0;
     const mode = readOnlyMode(session, spec.readOnlyModes);
     if (mode !== null) {
@@ -350,6 +357,24 @@ class Turn {
     this.reader = null;
     read(chunk);
   }
+}
+
+/**
+ * Asks the agent to close the session before its process is stopped, so it records the session
+ * as ended rather than leaving it open in its own list; one that does not answer in time is stopped anyway.
+ */
+async function endSession(running: Live): Promise<void> {
+  const closed = running.connection
+    .request('session/close', { sessionId: running.sessionId })
+    .catch(() => undefined);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, CLOSE_GRACE_MS);
+    timer.unref();
+  });
+  await Promise.race([closed, late]);
+  clearTimeout(timer);
+  running.child.kill('SIGTERM');
 }
 
 function readSessionId(session: unknown): string | null {

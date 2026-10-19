@@ -28,6 +28,8 @@ export interface HermesSession {
   /** Where it works, which names the repository on a card. */
   directory?: string;
   toolCalls: number;
+  /** Where Hermes was driven from, such as `cli` or `acp`, so a client's own sessions can be told apart. */
+  source?: string;
 }
 
 /** One line of what was said, oldest first: the person, Hermes, or a tool it ran. */
@@ -39,6 +41,7 @@ export interface HermesMessage {
 
 interface SessionRow {
   id: string;
+  source: string | null;
   display_name: string | null;
   started_at: number;
   ended_at: number | null;
@@ -55,22 +58,40 @@ interface MessageRow {
   timestamp: number;
 }
 
-/** The sessions active since `since`, newest first, or none where Hermes keeps no database here. */
-export function readHermesSessions(home: string, since: Date): HermesSession[] {
+/**
+ * The sessions active since `since`, newest first, or none where Hermes keeps no database here.
+ * `skipSources` is left out before the limit, so a client opening many sessions never crowds the rest out.
+ */
+export function readHermesSessions(
+  home: string,
+  since: Date,
+  skipSources: readonly string[] = [],
+): HermesSession[] {
   return withHermes(
     home,
     (db) => {
+      const hasSource = hasColumn(db, 'sessions', 'source');
+      const source = hasSource ? 's.source' : 'NULL';
+      const skipping = hasSource && skipSources.length > 0;
+      const where = skipping
+        ? `WHERE COALESCE(s.source, '') NOT IN (${skipSources.map(() => '?').join(', ')})`
+        : '';
       const rows = db
         .prepare(
-          `SELECT s.id, s.display_name, s.started_at, s.ended_at, s.cwd, s.git_repo_root,
-                s.tool_call_count, MAX(m.timestamp) AS last_message
+          `SELECT s.id, ${source} AS source, s.display_name, s.started_at, s.ended_at, s.cwd,
+                s.git_repo_root, s.tool_call_count, MAX(m.timestamp) AS last_message
            FROM sessions s LEFT JOIN messages m ON m.session_id = s.id
+          ${where}
           GROUP BY s.id
          HAVING COALESCE(MAX(m.timestamp), s.started_at) >= ?
           ORDER BY COALESCE(MAX(m.timestamp), s.started_at) DESC
           LIMIT ?`,
         )
-        .all(since.getTime() / 1_000, MOST_SESSIONS) as SessionRow[];
+        .all(
+          ...(skipping ? skipSources : []),
+          since.getTime() / 1_000,
+          MOST_SESSIONS,
+        ) as SessionRow[];
       return rows.map(sessionOf);
     },
     [],
@@ -93,6 +114,13 @@ export function readHermesMessages(home: string, sessionId: string): HermesMessa
     },
     [],
   );
+}
+
+/** An older Hermes kept no `source`, and naming a column it lacks would read the whole list as nothing. */
+function hasColumn(db: Database.Database, table: string, column: string): boolean {
+  // PRAGMA rows are SQLite's own fixed shape, of which only the name is read.
+  const columns = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+  return columns.some((each) => each.name === column);
 }
 
 function withHermes<T>(home: string, read: (db: Database.Database) => T, none: T): T {
@@ -127,6 +155,7 @@ function sessionOf(row: SessionRow): HermesSession {
     lastActive: row.last_message === null ? started : instant(row.last_message),
     ...(directory === undefined ? {} : { directory }),
     toolCalls: row.tool_call_count ?? 0,
+    ...(row.source === null || row.source === '' ? {} : { source: row.source }),
   };
 }
 

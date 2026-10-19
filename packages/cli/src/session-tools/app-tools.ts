@@ -12,11 +12,14 @@ import {
   DISPLAY_VIA,
   DisplayRequests,
   isStartableAgent,
+  RunTerminals,
+  SessionHosts,
   type DisplayDelivery,
   type SessionStart,
   type StartableAgent,
 } from '@memnox/core';
 import { unlessMacTold } from './mac-told';
+import { processAlive } from './sessions-tool';
 import { witnessed } from './witnessed';
 import { textArg, type SessionToolDeps, type ToolArgs } from './read-tools';
 import {
@@ -255,9 +258,10 @@ async function typeInNamedApp(
   const appPath = (deps.findApp ?? installedAppNamed)(name);
   if (appPath === null) return { typed: false, said: noSuchApp(name) };
   const shownName = basename(appPath, APP_BUNDLE_SUFFIX);
+  const hosted = await sessionHostedIn(deps.home, appPath, shownName);
   const delivery = await shown(deps, {
-    sessionId: appSessionId(shownName),
-    agent: shownName,
+    sessionId: hosted?.sessionId ?? appSessionId(shownName),
+    agent: hosted?.agent ?? shownName,
     name: shownName,
     appPath,
     links: [],
@@ -267,6 +271,50 @@ async function typeInNamedApp(
   });
   const result = openedAs(delivery, true);
   return { app: shownName, typed: result['started'], ...result };
+}
+
+/** Terminal apps by their spoken names, where typing reaches the agent session running in the front tab. */
+const TERMINAL_APPS: ReadonlySet<string> = new Set([
+  'terminal',
+  'iterm',
+  'iterm2',
+  'ghostty',
+  'wezterm',
+  'warp',
+  'kitty',
+  'alacritty',
+  'hyper',
+  'tabby',
+]);
+
+/**
+ * The live agent session running in a terminal app, the newest where there are several, so words
+ * typed there are kept in that session rather than one invented for the app, which no agent is.
+ */
+async function sessionHostedIn(
+  home: string,
+  appPath: string,
+  name: string,
+): Promise<{ sessionId: string; agent: string } | null> {
+  if (!TERMINAL_APPS.has(spoken(name))) return null;
+  const inApp = (place: { app?: string; appPath?: string }): boolean =>
+    place.appPath === appPath || place.app === name;
+  const [hosts, runs] = await Promise.all([
+    new SessionHosts(home).all(),
+    new RunTerminals(home).all(),
+  ]);
+  const live = [
+    ...hosts
+      .filter((each) => each.endedAt === undefined && each.panel !== true)
+      .map((each) => ({ ...each, at: each.seenAt })),
+    ...runs.map((each) => ({ ...each, at: each.startedAt })),
+  ]
+    .filter((each) => inApp(each) && processAlive(each.pid))
+    .sort((a, b) => b.at.localeCompare(a.at));
+  const newest = live[0];
+  return newest === undefined
+    ? null
+    : { sessionId: newest.sessionId, agent: newest.agent };
 }
 
 /** Where apps are installed, the person's own folder after the shared one. */

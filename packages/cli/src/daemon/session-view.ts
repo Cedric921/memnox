@@ -44,6 +44,7 @@ import {
 } from './desktop-sessions';
 import { changesIn, fileDiff } from './session-changes';
 import { conversationOf } from './waiting-feed';
+import { readBrainSessions } from '../operator/brain-sessions';
 import { idsOf } from '../session-tools/session-aliases';
 import {
   hermesCards,
@@ -124,7 +125,9 @@ export class SessionViews {
       rows.map(async (row) => cardOf(row, names, await hosts.read(row.session))),
     );
     // Hermes keys no session in the ledger, so its own are read beside, newest first with the rest.
-    const hermes = hermesCards(this.transcripts, this.now(), nameOf(names, 'hermes'));
+    const hermes = hermesCards(this.transcripts, this.now(), nameOf(names, 'hermes'), {
+      ownSessions: await readBrainSessions(this.home),
+    });
     return [...cards, ...hermes]
       .sort((a, b) => (b.lastActive ?? '').localeCompare(a.lastActive ?? ''))
       .slice(0, MOST_CARDS);

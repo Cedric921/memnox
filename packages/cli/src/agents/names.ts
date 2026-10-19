@@ -190,6 +190,8 @@ const SPELLED: ReadonlyMap<string, string> = new Map([
 const ACRONYMS = new Set(['cli', 'mcp', 'ide', 'api', 'ai']);
 
 function capital(word: string): string {
+  // A capital inside the word is its maker's own spelling, as iTerm or macOS, which title case would break.
+  if (/[A-Z]/.test(word.slice(1))) return word;
   return word.charAt(0).toUpperCase() + word.slice(1);
 }
 

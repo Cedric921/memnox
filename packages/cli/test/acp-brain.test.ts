@@ -21,6 +21,7 @@ let permissionId = 900;
 const waiting = new Map();
 let pending = '';
 process.stdout.write('a banner that is not json\\n');
+process.on('SIGTERM', () => { log({ stopped: true }); process.exit(0); });
 process.stdin.on('data', (chunk) => {
   pending += chunk;
   const lines = pending.split('\\n');
@@ -44,6 +45,8 @@ process.stdin.on('data', (chunk) => {
     } else if (message.method === 'session/load') {
       update(message.params.sessionId, { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'replayed history' } });
       reply({ modes: { currentModeId: 'agent', availableModes: modes.map((id) => ({ id, name: id })) } });
+    } else if (message.method === 'session/close') {
+      if (!process.env.FAKE_SILENT_CLOSE) reply({});
     } else if (message.method === 'session/set_mode') {
       reply({});
     } else if (message.method === 'session/cancel') {
@@ -119,6 +122,7 @@ async function turn(brain: AcpBrain, said: string): Promise<BrainChunk[]> {
 }
 
 interface Logged {
+  stopped?: boolean;
   method?: string;
   params?: Record<string, unknown>;
   answered?: number;
@@ -127,6 +131,16 @@ interface Logged {
   started?: boolean;
   agent?: string | null;
   session?: string | null;
+}
+
+/** The log once the agent has been stopped, which ends whatever a close asked of it first. */
+async function untilStopped(path: string): Promise<Logged[]> {
+  for (let tries = 0; tries < 100; tries += 1) {
+    const calls = await logged(path);
+    if (calls.some((call) => call.stopped === true)) return calls;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error('the agent was never stopped');
 }
 
 async function logged(path: string): Promise<Logged[]> {
@@ -342,5 +356,54 @@ describe('AcpBrain', () => {
     expect(prompts.at(-1)?.params?.['prompt']).toEqual([
       { type: 'text', text: 'and then' },
     ]);
+  });
+  it('asks the agent to close its session before stopping it, so the agent records it ended', async () => {
+    const setup = await fake();
+    const brain = brainFor(setup, 'hermes', { FAKE_MODES: 'default' });
+
+    await turn(brain, 'hello');
+    brain.close();
+    const calls = await untilStopped(setup.log);
+
+    const closing = calls.findIndex((call) => call.method === 'session/close');
+    expect(calls[closing]?.params).toEqual({ sessionId: 'ses-1' });
+    expect(closing).toBeLessThan(calls.findIndex((call) => call.stopped === true));
+  });
+
+  it('stops an agent that never answers the close, after a short wait', async () => {
+    const setup = await fake();
+    const brain = brainFor(setup, 'hermes', {
+      FAKE_MODES: 'default',
+      FAKE_SILENT_CLOSE: '1',
+    });
+
+    await turn(brain, 'hello');
+    brain.close();
+    const calls = await untilStopped(setup.log);
+
+    expect(calls.some((call) => call.method === 'session/close')).toBe(true);
+  });
+
+  it('tells whoever keeps the list each session it opens', async () => {
+    const setup = await fake();
+    const opened: string[] = [];
+    const brain = new AcpBrain({
+      spec: spec('hermes'),
+      home: setup.home,
+      command: setup.command,
+      cwd: setup.home,
+      operator: { command: '/usr/bin/true', args: [] },
+      env: { ...process.env, FAKE_LOG: setup.log, FAKE_MODES: 'default' },
+      opened: (sessionId) => {
+        opened.push(sessionId);
+        return Promise.reject(new Error('a home that cannot be written'));
+      },
+    });
+
+    const chunks = await turn(brain, 'hello');
+    brain.close();
+
+    expect(opened).toEqual(['ses-1']);
+    expect(chunks.at(-1)).toEqual({ kind: BRAIN_CHUNK.DONE });
   });
 });
