@@ -417,6 +417,7 @@ does not go looking for something that is not there.
 | `16` agent budgets | `core/session/budget.ts`, `memnox budget`, enforced in the daemon. |
 | the daily report, which no section of the current vision names | `core/session/operations.ts`, `memnox report`. |
 | `14` autopilot, and blast radius | `core/session/autopilot.ts`, rendered by `cli/next/boundary-report.ts` under `memnox next --agent`. |
+| `14` autopilot that acts | `core/session/earned.ts`, run by the keeper in `cli/keeper/keep-autopilot.ts` when `autopilot = true`; grants per agent allowances in `~/.memnox/earned-allowances.json` for seven days, any refusal takes one back. `memnox autopilot` lists and revokes. |
 | `15` scope drift, and the task everything compares against | `core/session/session-task.ts`; `memnox run --task/--paths/--expect`. |
 | `15` circuit breaker, as narrowing rather than stopping | `core/session/strain.ts`, applied in `LocalGate`. Three failures nothing has got past and changes outside the machine, and deletes, ask first; local work goes on. |
 | `13` progressive autonomy, as a question kept for later | `PendingApprovals.park` and `RoutedHoldPrompt`. Unanswered is parked for sixteen hours, the agent carries on, and a later yes lets its retry through. |

@@ -19,6 +19,7 @@ import { holdsPolicyHook, runsCurrentHook } from '../protect/claude-hook';
 import { writeHookLauncher } from '../protect/hook-launcher';
 import { describeResumed, endStopWhenDue } from '../protect/stop';
 import { recordConfigChanges } from './config-events';
+import { autopilotOnce, describeAutopilot } from './keep-autopilot';
 import { DRIFT_GROUP, driftNotices, type DriftItem } from './keep-drift';
 import { dormantNotice } from './keep-dormant';
 import { probationClause, startProbations, type Adopted } from './keep-probation';
@@ -326,6 +327,13 @@ export class BoundaryKeeper {
       await recordConfigChanges(this.home, keptRecords(this.home, changes, targets), now);
     } catch (err) {
       this.options.log(`Keeping the boundary failed this pass: ${String(err)}`);
+    }
+    try {
+      for (const said of describeAutopilot(await autopilotOnce(this.home, now))) {
+        this.say(said);
+      }
+    } catch (err) {
+      this.options.log(`The autopilot failed this pass: ${String(err)}`);
     }
     if (this.lookDue(now)) await this.look(now);
   }

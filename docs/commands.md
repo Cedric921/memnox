@@ -999,6 +999,21 @@ Capabilities no rule covers are counted separately and never filed under "runs
 on its own". It refuses to call a boundary ready when something destructive
 would run unasked, or when more of what the agent can do is unruled than ruled.
 
+### `memnox autopilot`
+What the daemon handed each agent on its own record, and the way to take it back.
+It is off until a person runs `memnox config set autopilot true`, and an agent can
+never turn it on or run `next --hand-over` itself.
+
+Once it is on, the daemon reads the last thirty days of the ledger every pass and,
+per agent, hands over exactly what `next --hand-over` would offer: an action that
+agent was asked about and approved at least five times, with no refusal, never
+destructive or outward, on the targets it was approved for and none named like
+production. The grant is an allowance for that one agent, for seven days, so it
+only answers a question a rule would have asked and never overrules a refusal or a
+workspace ask. One refusal of that action for that agent takes it back on the next
+pass. Every grant and every revocation is a row in the ledger and a notice on the
+desktop naming the command that undoes it. `--revoke <id>` takes one back now.
+
 ### `memnox unattended [--agent <name>] [--json]`
 Whether an agent can be left running, as one screen: how many of its actions run
 on their own, wait for you, never happen or have no rule, and then every reason

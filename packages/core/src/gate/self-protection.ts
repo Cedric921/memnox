@@ -44,7 +44,14 @@ const LOOSENING: readonly string[] = [
   // Signing in as a person lets this terminal answer in their name, which is theirs alone.
   'signin',
   'signout',
+  // Revoking what the autopilot granted is the person's call, like the grant it undoes.
+  'autopilot',
 ];
+
+/** Subcommands that read unless this flag follows them, and then write an allow rule. */
+const LOOSENING_FLAGS: Readonly<Record<string, string>> = {
+  next: '--hand-over',
+};
 
 /** Reads that share a subcommand with a loosening one. */
 const READING: readonly string[] = [
@@ -60,10 +67,11 @@ const READING: readonly string[] = [
   'mcp list',
   'rewind --list',
   'devices list',
+  'autopilot --list',
 ];
 
 /** Subcommands that only read when nothing follows them, and loosen once anything does. */
-const BARE_READS: readonly string[] = ['mode', 'voice', 'devices'];
+const BARE_READS: readonly string[] = ['mode', 'voice', 'devices', 'autopilot'];
 
 const WRITES: readonly string[] = [ACTION.FILESYSTEM_WRITE, ACTION.FILESYSTEM_DELETE];
 
@@ -93,6 +101,8 @@ export function selfProtection(
 export function loosens(command: string): boolean {
   const words = command.trim().split(/\s+/);
   const subcommand = words[0] ?? '';
+  const flag = LOOSENING_FLAGS[subcommand];
+  if (flag !== undefined) return words.includes(flag);
   if (!LOOSENING.includes(subcommand)) return false;
   const spoken = words.join(' ');
   // `memnox mode` with no mode reads; `memnox mode off` does not. `voice` likewise.

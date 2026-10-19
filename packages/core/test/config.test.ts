@@ -58,8 +58,15 @@ describe('the config file', () => {
       noticeWarmupDays: 0,
       approvals: 'both' as const,
       uploadPaths: 'hashed' as const,
+      autopilot: true,
     };
     expect(parseConfig(renderConfig(config))).toEqual(config);
+  });
+
+  it('leaves the autopilot off until a person turns it on', () => {
+    expect(DEFAULT_CONFIG.autopilot).toBe(false);
+    expect(parseConfig('mode = "enforce"\n').autopilot).toBe(false);
+    expect(parseConfig('autopilot = true\n').autopilot).toBe(true);
   });
 
   it('reads the DM-only route an earlier build wrote as both, since the session is always asked', () => {

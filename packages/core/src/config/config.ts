@@ -51,6 +51,11 @@ export interface MemnoxConfig {
    * `full` as written, or `hashed` under a key only this machine holds.
    */
   uploadPaths: UploadPaths;
+  /**
+   * Hand an agent, for a week, an action a person approved again and again with no refusal.
+   * Off until a person turns it on, because it widens what an agent may do unasked.
+   */
+  autopilot: boolean;
 }
 
 export const UPLOAD_PATHS = { FULL: 'full', HASHED: 'hashed' } as const;
@@ -72,6 +77,7 @@ export const DEFAULT_CONFIG: MemnoxConfig = {
   approvals: APPROVAL_ROUTE.SESSION,
   // As it always was, since what a workspace already shows is not changed under it.
   uploadPaths: UPLOAD_PATHS.FULL,
+  autopilot: false,
 };
 
 const KEYS = [
@@ -84,6 +90,7 @@ const KEYS = [
   'noticeWarmupDays',
   'approvals',
   'uploadPaths',
+  'autopilot',
 ] as const;
 export type ConfigKey = (typeof KEYS)[number];
 
@@ -118,6 +125,7 @@ export function parseConfig(raw: string): MemnoxConfig {
     }
     if (key === 'failOpen') config.failOpen = value === 'true';
     if (key === 'telemetry') config.telemetry = value === 'true';
+    if (key === 'autopilot') config.autopilot = value === 'true';
     if (key === 'approvedAgents') config.approvedAgents = splitList(value);
     if (key === 'noticeUnusual') config.noticeUnusual = value !== 'false';
     if (key === 'uploadPaths' && isUploadPaths(value)) config.uploadPaths = value;
@@ -173,6 +181,13 @@ export function renderConfig(config: MemnoxConfig): string {
     '# Days after setup when those are only recorded, so day one is not a wall of asks.',
     `noticeWarmupDays = ${config.noticeWarmupDays}`,
     '',
+    ...renderRouting(config),
+  ].join('\n');
+}
+
+/** Where questions and paths go, and the autopilot: the half of the file added later. */
+function renderRouting(config: MemnoxConfig): string[] {
+  return [
     '# session | both. A question the agent cannot show its own prompt for is always',
     '# asked in the agent session; both also sends it to your Slack or Discord DM.',
     `approvals = "${config.approvals}"`,
@@ -181,7 +196,12 @@ export function renderConfig(config: MemnoxConfig): string {
     '# or hashed under a key only this machine holds, so the same file still matches.',
     `uploadPaths = "${config.uploadPaths}"`,
     '',
-  ].join('\n');
+    '# Hand an agent, for a week, an action you approved for it again and again with no',
+    '# refusal. Only what "memnox next --hand-over" would offer, never production, and',
+    '# any refusal takes it back. "memnox autopilot" lists what it granted.',
+    `autopilot = ${config.autopilot}`,
+    '',
+  ];
 }
 
 export interface ConfigParse {
@@ -248,6 +268,7 @@ export function applyConfigValue(
   if (key === 'failOpen') return { ...config, failOpen: value === 'true' };
   if (key === 'approvedAgents') return { ...config, approvedAgents: splitList(value) };
   if (key === 'noticeUnusual') return { ...config, noticeUnusual: value === 'true' };
+  if (key === 'autopilot') return { ...config, autopilot: value === 'true' };
   if (key === 'noticeWarmupDays') return { ...config, noticeWarmupDays: Number(value) };
   if (key === 'approvals')
     return { ...config, approvals: approvalRouteOf(value) ?? config.approvals };
