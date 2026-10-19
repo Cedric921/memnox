@@ -233,6 +233,8 @@ function outcomeOf(
   if (delivery === null) return { started: true, said: UNCONFIRMED };
   if (wentIn(delivery.outcome))
     return { started: true, said: hadWords ? APP_TYPED : APP_OPENED };
+  if (delivery.outcome === DELIVERY.CLIPBOARD && delivery.reason !== undefined)
+    return { started: true, why: delivery.reason, said: APP_CLIPBOARD_WHY };
   if (
     delivery.outcome === DELIVERY.CLIPBOARD ||
     delivery.outcome === DELIVERY.NOT_ALLOWED
@@ -397,6 +399,9 @@ const APP_PREFILLED_SENT =
   'The app opened, its own link put their words in its chat, and the Mac read them there and sent them, so it is answering now. Say so in a few words, like "Sent to Cursor." Never say it is done, and never ask them to press Return.';
 const APP_CLIPBOARD =
   'The app is open, but the Mac could not type into it, and it already told them out loud the words are on the clipboard and how to paste them. Write nothing more.';
+// The Mac was allowed to type and found nowhere to, so a later "what do you need" is never answered with a permission.
+const APP_CLIPBOARD_WHY =
+  'The app is open, but the Mac found nowhere in it to type, and it already told them out loud the words are on the clipboard and how to paste them. Write nothing more now. Memnox is allowed to type, so if they ask why or what it needs, give the reason in why in plain words and never say it needs a permission or anything switched on.';
 const UNCONFIRMED =
   'Handed to the Mac to open, which has not confirmed yet. Say it is opening; never that it is working.';
 const NOT_OPENED =
