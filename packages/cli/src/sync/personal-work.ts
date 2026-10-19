@@ -31,7 +31,7 @@ export interface PersonalTool {
   toolkit: string;
   inputParameters?: Record<string, unknown>;
   workClass: WorkClass;
-  /** Read through the workspace's own connection, which an admin made and has not signed in to themselves. */
+  /** Read through the workspace's own connection, which somebody else made and the person has not signed in to. */
   throughWorkspace?: true;
 }
 
@@ -46,11 +46,11 @@ export interface CheckedAccount {
 export interface PersonalTools {
   tools: PersonalTool[];
   accounts: CheckedAccount[];
-  /** Tools an admin connected that the person has not signed in to yet. */
+  /** Tools the person named and has not signed in to yet, which any person may connect themselves. */
   signInFirst: string[];
   /** Signed in as somebody else's account, so nothing runs there until they sign in again. */
   signInAgain: string[];
-  /** The tool they named is a team's that no admin connected yet. */
+  /** Tools the cloud would not let them connect, which it no longer does for anybody; kept so an old cloud is said plainly. */
   needsAdmin: string[];
   /** No tool by the name they gave can be reached. */
   unknown: string[];
@@ -71,7 +71,7 @@ export interface PersonalRun {
 }
 
 const NOT_SIGNED_IN =
-  'This Mac is not signed in as a person, so nothing can be done in their name. Say they can sign in once under Account in the Memnox app, the row for the voice and the terminal, or with memnox signin in a terminal.';
+  'This Mac is not signed in as the person yet, so nothing can be done in their name. Call memnox_sign_in at once, which opens their approval page, and carry on with what they asked once they approve it; never send them to the Account row or a terminal.';
 const NOT_REACHABLE =
   'The workspace could not be asked just now. Say so in a sentence; never say there is nothing there.';
 
@@ -149,8 +149,8 @@ export async function runPersonalTool(
 }
 
 /**
- * The provider's own sign in for one tool an admin connected, opened on this Mac. A member never
- * connects a tool; this is the tool asking them, once, whether Memnox may act in their name.
+ * The provider's own sign in for any tool, opened on this Mac. Every person connects their own tools,
+ * whatever their role or plan, and this is the tool asking them once whether Memnox may act in their name.
  */
 export async function signInPersonal(
   home: string,
@@ -343,7 +343,7 @@ interface PersonGrant {
 const GRANT_ACTIVE = 'active';
 
 /** Said by the Mac's menu bar as it stands, so these are words for the person rather than for the voice. */
-const CONNECTIONS_NOT_SIGNED_IN =
+export const CONNECTIONS_NOT_SIGNED_IN =
   'This Mac is not signed in as you yet, so your connected apps cannot be shown. Sign in under Account in the Memnox app, or run memnox signin in a terminal.';
 const CONNECTIONS_NOT_REACHABLE =
   'Memnox Cloud could not be reached just now, so your connected apps cannot be shown.';
@@ -438,7 +438,10 @@ function workPath(person: CloudReader, route: string): string {
 }
 
 /** The control plane's own sentence where it gave one, so the voice says what actually stopped it. */
-function refusal<T>(answer: { status: number; body?: unknown }): PersonalAnswer<T> {
+export function refusal<T>(answer: {
+  status: number;
+  body?: unknown;
+}): PersonalAnswer<T> {
   const body = answer.body;
   const message =
     typeof body === 'object' && body !== null && 'message' in body

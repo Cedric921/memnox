@@ -29,4 +29,13 @@ describe('protocol vectors', () => {
     );
     expect(empty?.message).toBe('memnox-confirm:v2:prp_3:confirmed:');
   });
+
+  it('write a mail sent to rewritten addresses as v3, the addresses before the words', () => {
+    const readdressed = protocolVectors().messages.find(
+      (each) => each.name === 'confirm-readdressed',
+    );
+    expect(readdressed?.message).toMatch(
+      /^memnox-confirm:v3:prp_4:confirmed:moise@memnox\.com,bo@acme\.test:Shipped/,
+    );
+  });
 });

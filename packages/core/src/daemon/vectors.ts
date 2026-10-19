@@ -86,7 +86,18 @@ function confirmVectors(): MessageVector[] {
       { subject: 'prp_3', answer: PROPOSAL_ANSWER.CONFIRMED, edited: '' },
       confirmationMessage('prp_3', PROPOSAL_ANSWER.CONFIRMED, ''),
     ),
+    readdressedVector(draft),
   ];
+}
+
+/** A mail sent to addresses the person typed on its card signs those addresses and the words together. */
+function readdressedVector(draft: string): MessageVector {
+  const to = 'moise@memnox.com,bo@acme.test';
+  return message(
+    'confirm-readdressed',
+    { subject: 'prp_4', answer: PROPOSAL_ANSWER.CONFIRMED, edited: draft, editedTo: to },
+    confirmationMessage('prp_4', PROPOSAL_ANSWER.CONFIRMED, draft, to),
+  );
 }
 
 /** Every message a paired device or the Mac signs about devices, drives and sessions. */

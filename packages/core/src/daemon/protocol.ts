@@ -83,6 +83,12 @@ export const DAEMON_METHOD = {
   PERSON_SIGN_OUT: 'person-sign-out',
   /** The apps the person connected through the workspace, Gmail or Slack say, for the Mac's menu bar and notch. */
   CONNECTIONS_LIST: 'connections-list',
+  /** Connecting one tool as the person, any toolkit and any role: answers its sign in page, opened on the Mac when asked there. */
+  CONNECTIONS_SIGN_IN: 'connections-sign-in',
+  /** Undoing every sign in the person made to one tool, answering the list as it now stands. */
+  CONNECTIONS_SIGN_OUT: 'connections-sign-out',
+  /** The tools anybody can connect, from the cloud's catalogue, so a screen offers more than the ones already known. */
+  TOOLKITS_SEARCH: 'toolkits-search',
   /** Whether this machine is connected to a workspace, which is what carries rules, memory and phones to it. */
   MACHINE: 'machine',
   /** The Mac app connecting this machine to a workspace: the device flow `memnox login` runs, polled behind the answer. */
@@ -405,7 +411,7 @@ export interface DaemonResponse extends ExtensionResponseFields {
   person?: PersonStanding;
   /** On MACHINE, MACHINE_SIGN_IN and MACHINE_SIGN_OUT: whether this machine is connected to a workspace. */
   machine?: MachineStanding;
-  /** On CONNECTIONS_LIST: one per app the person connected, by toolkit. */
+  /** On CONNECTIONS_LIST and CONNECTIONS_SIGN_OUT: one per app the person connected, by toolkit. */
   connections?: ToolConnection[];
   /** On POLISH: the dictation as it should be typed. */
   polished?: string;

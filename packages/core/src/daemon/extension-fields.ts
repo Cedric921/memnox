@@ -1,4 +1,5 @@
 import type { AgentQuestionItem } from '../session/agent-questions';
+import type { ConnectionsRequestFields, ConnectionsResponseFields } from './connections';
 import type { FilesRequestFields, FilesResponseFields } from './files';
 import type { HomeResponseFields } from './home';
 import type { InterceptRequestFields, InterceptResponseFields } from './intercept';
@@ -29,6 +30,8 @@ interface TeamEventFields {
 interface WorkRequestFields {
   /** On CONFIRM of a draft: the words the person rewrote on its card, which the signature then covers. */
   edited?: string;
+  /** On CONFIRM of a mail: the addresses the person typed on its card, joined by commas, which the signature covers too. */
+  editedTo?: string;
 }
 
 interface QuestionRequestFields {
@@ -68,6 +71,7 @@ export interface ExtensionRequestFields
     WorkRequestFields,
     AccountRequestFields,
     QuestionRequestFields,
+    ConnectionsRequestFields,
     InterceptRequestFields {}
 
 export interface ExtensionResponseFields
@@ -76,6 +80,7 @@ export interface ExtensionResponseFields
     FilesResponseFields,
     SpeechResponseFields,
     HomeResponseFields,
+    ConnectionsResponseFields,
     InterceptResponseFields {}
 
 export interface ExtensionEventFields

@@ -37,7 +37,7 @@ import type { RemotePrincipal } from './confirm';
 import { answerWaiting } from './confirm-question';
 import { followUpAnswer, followUpDeps } from './follow-up';
 import { answerMachine, isMachineMethod, type MachineSignIns } from './machine-calls';
-import { answerConnections, isConnectionsMethod } from './connection-calls';
+import { answerConnectionCall, isConnectionsMethod } from './connection-calls';
 import { answerPerson, isPersonMethod, type PersonSignIns } from './person-calls';
 export { isVoiceMethod } from './voice-methods';
 import { NoticeWatcher } from './notice-watch';
@@ -251,7 +251,7 @@ export class VoiceSurface {
     if (isPersonMethod(request.method)) return answerPerson(request, this.deps.person);
     if (isMachineMethod(request.method)) return answerMachine(request, this.deps.machine);
     if (isConnectionsMethod(request.method))
-      return answerConnections(request, this.deps.home);
+      return answerConnectionCall(request, this.deps.home, principal !== undefined);
     if (isWordsMethod(request.method)) {
       return wordsAnswer(this.deps.home, request, this.deps.now());
     }

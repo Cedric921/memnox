@@ -38,6 +38,16 @@
       "message": "memnox-confirm:v2:prp_3:confirmed:"
     },
     {
+      "name": "confirm-readdressed",
+      "inputs": {
+        "subject": "prp_4",
+        "answer": "confirmed",
+        "edited": "Shipped: the deploy is out.\nThanks, Bo 🎉",
+        "editedTo": "moise@memnox.com,bo@acme.test"
+      },
+      "message": "memnox-confirm:v3:prp_4:confirmed:moise@memnox.com,bo@acme.test:Shipped: the deploy is out.\nThanks, Bo 🎉"
+    },
+    {
       "name": "pair",
       "inputs": {
         "pairingId": "pr_1",
@@ -113,6 +123,9 @@
       "person-sign-in",
       "person-sign-out",
       "connections-list",
+      "connections-sign-in",
+      "connections-sign-out",
+      "toolkits-search",
       "machine",
       "machine-sign-in",
       "machine-sign-out",

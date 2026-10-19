@@ -132,7 +132,8 @@ describe("the person's own tools by voice", () => {
     })) as {
       said?: string;
     };
-    expect(waits.said).toContain('Airtable is a team tool');
+    expect(waits.said).toContain('Airtable could not be connected for them');
+    expect(waits.said).not.toMatch(/admin/);
     const none = await depsAt({ ran: [] }, { unknown: ['frobly'] });
     const missing = (await findToolTool(none, { what: 'post', toolkit: 'frobly' })) as {
       said?: string;
@@ -190,6 +191,7 @@ describe("the person's own tools by voice", () => {
     })) as { proposed: string; said: string };
     expect(seen.ran).toHaveLength(0);
     expect(answer.said).toContain('As maya on GitHub');
+    expect(answer.said).toContain('though not who it goes to');
     const proposal = await new Proposals(deps.home).read(answer.proposed);
     expect(proposal?.change).toEqual({
       kind: PROPOSAL_KIND.WORK,
@@ -276,7 +278,7 @@ describe("the person's own tools by voice", () => {
     expect(draft.to).toEqual(['Deco Mukendi']);
   });
 
-  it('opens the sign in for a tool an admin connected', async () => {
+  it('opens the sign in for any tool the person names', async () => {
     const deps = await depsAt({ ran: [] });
     const signed = (await signInTool(deps, { toolkit: 'linear' })) as { said: string };
     expect(signed.said).toContain('Linear sign in is open');

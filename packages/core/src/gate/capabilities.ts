@@ -33,6 +33,11 @@ const REMOTE_METHODS: Readonly<Record<string, RemoteCapability>> = {
   [DAEMON_METHOD.HOME]: REMOTE_CAPABILITY.SEE,
   // Which app accounts the person connected and whether each sign in still works; acting in one is a separate signed proposal.
   [DAEMON_METHOD.CONNECTIONS_LIST]: REMOTE_CAPABILITY.SEE,
+  // Only names from the cloud's catalogue, which tells the phone no more than the list does.
+  [DAEMON_METHOD.TOOLKITS_SEARCH]: REMOTE_CAPABILITY.SEE,
+  // Signing in or out changes what may be done in the person's name, so it takes what answering for them takes.
+  [DAEMON_METHOD.CONNECTIONS_SIGN_IN]: REMOTE_CAPABILITY.ANSWER,
+  [DAEMON_METHOD.CONNECTIONS_SIGN_OUT]: REMOTE_CAPABILITY.ANSWER,
   // Only writes a proposal; the rule holds once the person signs it with the rules capability.
   [DAEMON_METHOD.HAND_OVER]: REMOTE_CAPABILITY.ASK,
   [DAEMON_METHOD.ASK]: REMOTE_CAPABILITY.ASK,
