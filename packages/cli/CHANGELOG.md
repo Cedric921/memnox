@@ -1,5 +1,47 @@
 # memnox
 
+## 0.14.0
+
+### Patch Changes
+
+- 9a7a649: The autopilot acts once a person turns it on: an action an agent was approved for five times with no refusal is handed to that agent for seven days, and one refusal takes it back. `memnox autopilot` lists and revokes the grants, and an agent can no longer run `next --hand-over` itself.
+- 099b03f: Every person on every plan connects any tool as themselves. The daemon answers connections-sign-in with the tool's sign in page, opened on the Mac when asked there and handed to a paired phone to open, connections-sign-out with the list as it then stands, and toolkits-search with up to thirty tools from the cloud's catalogue. The voice calls sign_in the moment somebody says "connect my Notion", and no longer says an admin has to connect a tool first.
+- 4c51627: The daemon answers connections-list with the apps the person connected through the workspace, each marked connected or not, so the Mac menu bar and notch can show them.
+- 7cc5aaf: The home screen counts as not covered only the agents setup can hook and has not, because Claude Desktop and Hermes, which no hook reaches, kept Protect my agents showing after it had covered everything it could.
+- d706518: Agent hooks run the edit hook by its absolute path, because an agent started without the installer's PATH failed every tool call with `memnox-edit-hook: command not found`, and the daemon rewrites any hook still written by the bare name.
+- f46a903: Setup puts a Memnox plugin into Hermes, enabled without turning off the plugins Hermes already runs, so a Hermes session is ruled on, takes leases and reaches the ledger, and an ask goes to its person through Hermes's own approval. Shell hooks an earlier install wrote are taken out.
+- b1c309b: An agent the workspace plan has no room for is reported as governed on this machine rather than failed, since the plan caps workspace credentials and never the gates on the laptop.
+- cbfd421: GitHub Copilot CLI, Devin and OpenCode are hooked by setup and found by scan, as Gemini CLI and Windsurf now are too. Claude Code's hook stands down where Cursor, Devin or Copilot runs it, so no call is ruled twice or filed under the wrong agent, and doctor says when Codex no longer runs a Memnox hook it once trusted. Every agent's hook and plugin runs through one launcher at a fixed path, so an update to Memnox never sends Codex's hooks back for approval, and the launcher and the daemon run on a Node of the person's own before one another app bundles. Setup ends with what only the person can do, such as approving hooks in Codex or restarting an agent that loads a plugin, and doctor tells a terminal older than its PATH from one that is missing it. The daemon's home carries the same list as needsYou, each item kept until the ledger hears from that agent after the change, so the Mac app says what setup could not when it ran without a terminal. Doctor counts MCP servers the way mcp wrap acts on them, so Memnox's own servers and those declared by URL no longer read as unrouted.
+- f46a903: Setup writes a Memnox plugin into OpenClaw that hands every tool call and session to the policy hook, so OpenClaw is ruled on, takes leases and reaches the ledger. A relative path is resolved against the directory OpenClaw itself resolves it in, an ask goes to its person through OpenClaw's own approval and a no or a timeout there is recorded, and a config written as JSON5 is joined with marked insertions that keep every comment.
+- 3b2790a: The proxy and interceptors package descriptions read as sentences rather than around dashes.
+- 5427677: An email draft card shows the real address it goes to, with the name beside it, and the person can change that address on the card before Send. The new address goes out only under a fingerprint over it and the words together (`memnox-confirm:v3`), the voice reads the address back exactly, and `sent` names the address a mail really went to.
+- 2081eb8: A session that starts on a machine logged in to a workspace is told, before its first turn, who has a pull request or a pushed branch open on the files it is about to work on, which other open work touches them, and what was said about them in connected tools, asked once with a short timeout and said nothing about when the workspace cannot answer. The brief tool says the same lines first, and a note about other work on a file now reads as being about other work rather than about another agent.
+- e12626a: The Sessions overview no longer lists the voice's own Hermes conversations as Hermes working, shows a Hermes session as working only while Hermes is running, and no longer counts a terminal the voice typed into, such as iTerm, as an agent working now.
+- 0212519: The voice says a tool's sign in is open in front of the person, because the Mac now opens it in the browser at once rather than leaving an icon under the notch to tap.
+- 2081eb8: What connected tools such as Slack, Notion and Linear said that nobody has approved yet now reaches the agent as context. The workspace memory keeps it in its own `unconfirmed` list, the `memory` and `brief` session tools answer it apart from the facts under a warning, and the session hook says at most one per call, each opening with that nobody approved it and naming where it was read and who said it, with the untrusted warning where its source was outside the workspace. No verdict reads it, and nothing in it is ever described as settled.
+- 11dc443: The voice takes the person's name out of a reply only where it calls them, at the end of a clause or the start of a sentence, so "assigned to Moise, and nothing matches" is said whole rather than as "assigned to and nothing matches". A resumed voice is told which drafts it put up were sent, failed, declined, withdrawn or ran out since the person last spoke, so a draft already sent is never called waiting on their screen. The `repository` tool finds a repository named out loud on the disk when no session touched it in the last day, rather than reporting it missing, and its description no longer offers a real project name as the example.
+- 11dc443: The voice signs the person in to Memnox Cloud itself with `memnox_sign_in`, the same sign in as the Account row, rather than sending them to a menu or a terminal. It counts the tools their workspace connected from the same list the Tools panel shows, never calls an unverified account one still to confirm, reads only their own pull requests when asked for theirs, keeps dictated words such as "gate status" as said, writes a draft's label for the screen, and says they for anyone whose pronouns it was not told.
+- Updated dependencies [9a7a649]
+- Updated dependencies [099b03f]
+- Updated dependencies [4c51627]
+- Updated dependencies [819f22d]
+- Updated dependencies [d706518]
+- Updated dependencies [f46a903]
+- Updated dependencies [b1c309b]
+- Updated dependencies [cbfd421]
+- Updated dependencies [f46a903]
+- Updated dependencies [3b2790a]
+- Updated dependencies [f2eb66a]
+- Updated dependencies [5427677]
+- Updated dependencies [2081eb8]
+- Updated dependencies [e12626a]
+- Updated dependencies [2081eb8]
+- Updated dependencies [11dc443]
+- Updated dependencies [11dc443]
+  - @memnox/core@0.14.0
+  - @memnox/interceptors@0.14.0
+  - @memnox/proxy@0.14.0
+
 ## 0.13.15
 
 ### Patch Changes
