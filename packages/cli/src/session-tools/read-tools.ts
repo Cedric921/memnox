@@ -23,6 +23,8 @@ import {
   type StartableAgent,
   type MemnoxEvent,
   type Milestone,
+  type PersonStanding,
+  type ToolConnection,
 } from '@memnox/core';
 import type { SourceQuery, SourceRead, SourcesRead } from '../sync/workspace-reads';
 import type {
@@ -76,13 +78,17 @@ export interface SessionToolDeps {
     repositories?: (all?: boolean) => Promise<PersonalAnswer<WorkspaceRepositories>>;
     /** One read of a repository through that App: pull requests, issues, files, comments, commits. */
     github?: (read: GithubRead) => Promise<PersonalAnswer<unknown>>;
+    /** The apps the workspace connected to the person, the same list the Mac's Tools panel shows. */
+    connections?: () => Promise<PersonalAnswer<ToolConnection[]>>;
     /** Signs out of every sign in to one tool, answering how many were undone. */
     signOut: (toolkit: string) => Promise<PersonalAnswer<number>>;
-    /** Opens the provider's one time sign in for a tool an admin connected. */
+    /** Opens the provider's one time sign in for any tool, which every person may connect as themselves. */
     signIn: (
       toolkit: string,
     ) => Promise<PersonalAnswer<{ url: string; opened: boolean }>>;
   };
+  /** Starts the person's own Memnox sign in on the daemon, as the Mac's Account row does; null when no daemon answered. */
+  memnoxSignIn?: () => Promise<PersonStanding | null>;
   /** The workspace's own name, or null when it has none or cannot be asked. */
   workspaceName?: () => Promise<string | null>;
   /** How the Mac says an instruction it typed landed, or null when it never said; absent where nobody types. */

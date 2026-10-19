@@ -9,8 +9,8 @@ const REMINDER_CLOSE = '</system-reminder>';
 
 export class SpokenFilter {
   /**
-   * @param unsaid phrases taken out wherever they appear, such as ", Moïse" once the person was
-   * addressed by name already, since a name in every reply sounds like a script.
+   * @param unsaid phrases taken out where they address the person, such as ", Moïse" once they
+   * were addressed by name already, since a name in every reply sounds like a script.
    */
   constructor(private readonly unsaid: readonly string[] = []) {}
 
@@ -45,11 +45,8 @@ export class SpokenFilter {
 
   /** The turn is over: what was held for a reminder is said, and a held repeat never is. */
   end(): string {
-    const rest = this.inReminder
-      ? ''
-      : this.capital
-        ? this.withCapital(this.tail)
-        : this.tail;
+    const tail = withoutClosingAddress(this.tail, this.unsaid);
+    const rest = this.inReminder ? '' : this.capital ? this.withCapital(tail) : tail;
     this.tail = '';
     if (rest === '' || this.holding) return '';
     this.segment += rest;
@@ -72,7 +69,7 @@ export class SpokenFilter {
         continue;
       }
       const open = buffer.indexOf(REMINDER_OPEN);
-      const phrase = this.firstUnsaid(buffer);
+      const { phrase, waitFrom } = this.firstUnsaid(buffer, this.last + out);
       if (phrase !== null && (open < 0 || phrase.at < open)) {
         out += buffer.slice(0, phrase.at);
         buffer = buffer.slice(phrase.at + phrase.text.length);
@@ -87,6 +84,7 @@ export class SpokenFilter {
         continue;
       }
       const kept = Math.max(
+        buffer.length - waitFrom,
         partialTail(buffer, REMINDER_OPEN),
         ...this.unsaid.map((each) => partialTail(buffer, each)),
       );
@@ -109,13 +107,20 @@ export class SpokenFilter {
     return space + letter.toUpperCase() + buffer.slice(whole.length);
   }
 
-  private firstUnsaid(buffer: string): { at: number; text: string } | null {
-    let first: { at: number; text: string } | null = null;
+  /** The first phrase that addresses them, and where one waits on the next piece to tell. */
+  private firstUnsaid(buffer: string, before: string): Unsaid {
+    let phrase: { at: number; text: string } | null = null;
+    let waitFrom = buffer.length;
     for (const text of this.unsaid) {
-      const at = buffer.indexOf(text);
-      if (at >= 0 && (first === null || at < first.at)) first = { at, text };
+      for (let at = buffer.indexOf(text); at >= 0; at = buffer.indexOf(text, at + 1)) {
+        const verdict = addressing(text, buffer, at, before);
+        if (verdict === 'wait') waitFrom = Math.min(waitFrom, at);
+        if (verdict !== 'yes') continue;
+        if (phrase === null || at < phrase.at) phrase = { at, text };
+        break;
+      }
     }
-    return first;
+    return { phrase, waitFrom };
   }
 
   private withoutRepeats(text: string): string {
@@ -132,6 +137,41 @@ export class SpokenFilter {
     this.segment += out;
     return out;
   }
+}
+
+/** The first address to cut, and from where the buffer waits because the next piece decides. */
+interface Unsaid {
+  phrase: { at: number; text: string } | null;
+  waitFrom: number;
+}
+
+/** What may follow ", Moïse" when it calls the person, rather than naming somebody in a list. */
+const ADDRESS_ENDS = /^[.,!?;]/;
+
+/**
+ * Whether the phrase here calls the person, since cutting "assigned to Moïse, and" left "assigned
+ * to and": ", Moïse" must close its clause and "Moïse, " must open its sentence.
+ */
+function addressing(
+  text: string,
+  buffer: string,
+  at: number,
+  before: string,
+): 'yes' | 'no' | 'wait' {
+  if (text.startsWith(', ')) {
+    const next = buffer.slice(at + text.length);
+    if (next === '') return 'wait';
+    return ADDRESS_ENDS.test(next) ? 'yes' : 'no';
+  }
+  if (text.endsWith(', '))
+    return opensSentence(before + buffer.slice(0, at)) ? 'yes' : 'no';
+  return 'yes';
+}
+
+/** A trailing ", Moïse" held for the next piece calls them when the reply ends on it. */
+function withoutClosingAddress(tail: string, unsaid: readonly string[]): string {
+  const closing = unsaid.find((each) => each.startsWith(', ') && tail.endsWith(each));
+  return closing === undefined ? tail : tail.slice(0, -closing.length);
 }
 
 /** Enough of what was said to see the end of the sentence before a cut address. */

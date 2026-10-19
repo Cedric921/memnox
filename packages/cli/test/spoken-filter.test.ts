@@ -166,6 +166,33 @@ describe('addressing the person', () => {
     ]);
   });
 
+  it('keeps a name the reply is about rather than speaking to, as in the voice log', () => {
+    const filter = new SpokenFilter([', Moise', 'Moise, ']);
+    const said = [
+      'I checked your Linear tickets assigned to Mo',
+      'ise, and nothing matches. Tickets for Ann',
+      ', Moise and Bob are closed.',
+    ]
+      .map((piece) => filter.text(piece))
+      .join('');
+    expect(said + filter.end()).toBe(
+      'I checked your Linear tickets assigned to Moise, and nothing matches. Tickets for Ann, Moise and Bob are closed.',
+    );
+  });
+
+  it('still takes the name out where it closes the reply or opens a sentence', () => {
+    const closing = new SpokenFilter([', Moise', 'Moise, ']);
+    expect(closing.text('It is done, Moise') + closing.end()).toBe('It is done');
+    const asked = new SpokenFilter([', Moise', 'Moise, ']);
+    expect(asked.text('Shall I send it, Moise') + asked.text('?') + asked.end()).toBe(
+      'Shall I send it?',
+    );
+    const opening = new SpokenFilter([', Moise', 'Moise, ']);
+    expect(opening.text('Done. Moise, the draft went to Ann.') + opening.end()).toBe(
+      'Done. The draft went to Ann.',
+    );
+  });
+
   it('says a name that only starts like the phrase as it is', () => {
     const filter = new SpokenFilter([', Moïse']);
     expect(

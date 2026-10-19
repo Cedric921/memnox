@@ -10,7 +10,7 @@ export const ACTING_TOOLS: readonly ToolDefinition[] = [
   {
     name: 'memnox_command',
     description:
-      'Run any memnox command the person asks for, like "status", "timeline --since 1h", "doctor", "mode autonomous", "freeze" or "protect --yes". What only reads runs now and its output comes back for you to sum up. What changes something is proposed and runs only after their Touch ID. "login" signs this Mac in to Memnox Cloud and "agents onboard <agent> [more agents]" puts one or several agents under it with one Touch ID: after Touch ID each runs on its own, with a browser page to approve and no terminal, and its end is told to you. A few never run by voice, and it says why. Run "help <command>" first when unsure of a flag. Commands that change something run with no terminal, so pass --yes to one that would otherwise stop to ask.',
+      'Run any memnox command the person asks for, like "status", "timeline --since 1h", "doctor", "mode autonomous", "freeze" or "protect --yes". What only reads runs now and its output comes back for you to sum up. What changes something is proposed and runs only after their Touch ID. "login" connects this machine alone to Memnox Cloud, while signing the person in as themselves is memnox_sign_in, and "agents onboard <agent> [more agents]" puts one or several agents under it with one Touch ID: after Touch ID each runs on its own, with a browser page to approve and no terminal, and its end is told to you. A few never run by voice, and it says why. Run "help <command>" first when unsure of a flag. Commands that change something run with no terminal, so pass --yes to one that would otherwise stop to ask.',
     inputSchema: {
       type: 'object',
       properties: {

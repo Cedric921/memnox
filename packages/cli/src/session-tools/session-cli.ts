@@ -3,14 +3,16 @@
  * Memnox from inside the conversation. `--agent` names whose sessions it reads.
  */
 import { closeSync, openSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { homedir, hostname } from 'node:os';
 
 import {
   AGENT_FLAG,
+  DAEMON_METHOD,
   Milestones,
   NodeGit,
   NodeWorktree,
   type Milestone,
+  type PersonStanding,
 } from '@memnox/core';
 
 import { readStatus } from '../commands/status.command';
@@ -22,7 +24,9 @@ import {
   readSources,
   readWorkspaceName,
 } from '../sync/workspace-reads';
+import { socketDial } from '../remote/daemon-dial';
 import {
+  connectionsOf,
   findPersonalTools,
   personalAccounts,
   runPersonalTool,
@@ -114,10 +118,22 @@ function depsFor(argv: readonly string[], env: NodeJS.ProcessEnv): SessionToolDe
       repositories: (all) => workspaceRepositories(homedir(), all),
       github: (read) => readWorkspaceGithub(homedir(), read),
       signOut: (toolkit) => signOutOf(homedir(), toolkit),
+      connections: () => connectionsOf(homedir()),
     },
+    memnoxSignIn: () => askPersonSignIn(homedir()),
     delivered: (requestId, waitMs) => awaitDelivery(homedir(), requestId, waitMs),
     startSeen: (repository, since) => awaitSessionStart(homedir(), repository, since),
   };
+}
+
+/** The daemon's own person sign in, the one the Mac's Account row starts, so one approval also connects this Mac. */
+async function askPersonSignIn(home: string): Promise<PersonStanding | null> {
+  const answer = await socketDial(home).ask({
+    id: Date.now(),
+    method: DAEMON_METHOD.PERSON_SIGN_IN,
+    name: hostname().replace(/\.local$/, ''),
+  });
+  return answer?.ok === true ? (answer.person ?? null) : null;
 }
 
 function seamsFor(env: NodeJS.ProcessEnv): Omit<RewindSeams, 'confirm'> {

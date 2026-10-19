@@ -9,6 +9,7 @@ import {
   type SessionView,
 } from '@memnox/core';
 import type { AddressLimit } from './address-limit';
+import { answeredContext, answeredSince } from './answered-drafts';
 import {
   askContext,
   foldersContext,
@@ -308,12 +309,13 @@ export class VoiceAsk {
     moment: string,
   ): Promise<{ context: string; sessions: number }> {
     const exchanges = await this.deps.exchanges.read(moment);
-    const [cards, focus, waiting, asking, open] = await Promise.all([
+    const [cards, focus, waiting, asking, open, answered] = await Promise.all([
       this.deps.views.list().catch(() => []),
       new VoiceFocusStore(this.deps.home).read().catch(() => null),
       waitingOnYes(this.deps.home, moment, lastAnswered(exchanges)),
       new AgentQuestions(this.deps.home).open(moment).catch(() => []),
       this.openView(),
+      answeredSince(this.deps.home, moment, lastAnswered(exchanges)),
     ]);
     const [heardWords, folders, held, profile] = await Promise.all([
       readHeardWords(this.deps.home).catch(() => []),
@@ -338,6 +340,7 @@ export class VoiceAsk {
       heardWordsContext(heardWords),
       foldersContext(folders),
       recallContext(exchanges, waiting),
+      answeredContext(answered),
       questionsContext(asking),
       heldCallsContext(held),
       teamCallsContext(this.teamCalls),
