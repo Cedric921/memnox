@@ -82,7 +82,7 @@ const SAID: Record<Route, string> = {
   prefilled:
     'The Mac typed it into its message box in the editor, sent it and saw the box take it, so it is starting on it now. Say so in a few words.',
   later:
-    'It is idle where Memnox cannot type, so it has not got this yet: it only reads it when the person next prompts that session. Never say it will pick it up at its next step or on its own. Say in one sentence that it has not reached it yet, and offer to type it in there for them now. On a yes, call type_in_app with its agent and these same words when it lives in its desktop app, and otherwise show it with display open and call send_instruction again. Never ask them to send it themselves.',
+    'It is idle where Memnox cannot type, so it has not got this yet: it only reads it when the person next prompts that session. Never say it will pick it up at its next step or on its own. Say in one sentence that it has not reached it yet, and offer to type it in there for them now. On a yes, show it with display open and call send_instruction again. It runs in a terminal or an editor, never in a desktop app, since one there is typed into before this is said, so never call type_in_app for it: that types into a different chat. A session just started may not have come up yet, so if it is still not reached, say so and offer to try again in a moment. Never ask them to send it themselves.',
 };
 
 /** Sent, but the Mac could not read it back, so it is never called done. */
