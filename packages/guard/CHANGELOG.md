@@ -1,5 +1,13 @@
 # @memnox/guard
 
+## 0.14.1
+
+### Patch Changes
+
+- Updated dependencies [97039ac]
+- Updated dependencies [7b2621d]
+  - @memnox/core@0.14.1
+
 ## 0.14.0
 
 ### Patch Changes

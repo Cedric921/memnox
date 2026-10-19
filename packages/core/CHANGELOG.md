@@ -1,5 +1,12 @@
 # @memnox/core
 
+## 0.14.1
+
+### Patch Changes
+
+- 97039ac: When the Mac could type but found no message box in an app, the voice is told that reason and that typing is allowed, so asked what it needs it no longer sends the person to switch on a permission that was never the problem.
+- 7b2621d: An instruction that cannot reach a session yet is no longer typed into the agent's desktop app instead. A session waiting in a terminal or an editor is shown and sent again, and one just started that has not come up is offered another try in a moment, rather than landing in a different chat in the Claude or Codex app.
+
 ## 0.14.0
 
 ### Minor Changes
