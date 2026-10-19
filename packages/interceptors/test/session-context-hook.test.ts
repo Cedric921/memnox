@@ -19,6 +19,7 @@ import {
   writeWorkspaceMemory,
   WORK_BRIEF_VAR,
   WorkBriefs,
+  MOST_CANDIDATES_PER_CALL,
   type WorkspaceFact,
   NOTICE_MODE,
   renderConfig,
@@ -312,6 +313,48 @@ describe('what the workspace settled, where the agent meets it', () => {
     expect(facts(first)).toHaveLength(MOST_FACTS_PER_CALL);
     expect(facts(await decisionsAt(lookup, deps))).toHaveLength(2);
     expect(await decisionsAt(lookup, deps)).toBeNull();
+  });
+
+  it('says a candidate once, opening with that nobody approved it, and never as settled', async () => {
+    const deps = await machine();
+    await writeWorkspaceMemory(deps.home, {
+      hash: 'm1',
+      facts: [settled('f1')],
+      unconfirmed: [
+        {
+          id: 'c1',
+          kind: 'decision',
+          statement: 'Payment refunds go through the queue now.',
+          subject: 'payments',
+          standing: 'candidate',
+          approved: false,
+          sources: ['linear'],
+        },
+        {
+          id: 'c2',
+          kind: 'decision',
+          statement: 'Payment refunds are capped at fifty.',
+          subject: 'payments',
+          standing: 'candidate',
+          approved: false,
+          sources: ['slack'],
+        },
+      ],
+      withheld: 0,
+      syncedAt: NOW.toISOString(),
+    });
+    const lookup = { sessionId: 's1', prompt: 'why do payment refunds fail' };
+
+    const lines = ((await decisionsAt(lookup, deps)) ?? '').split('\n');
+    const guesses = lines.filter((line) => line.startsWith('Not approved by anyone'));
+
+    expect(guesses).toHaveLength(MOST_CANDIDATES_PER_CALL);
+    expect(guesses[0]).toContain('Context only');
+    expect(
+      lines.filter(
+        (line) => line.includes('Payment refunds') && line.startsWith('Your workspace'),
+      ),
+    ).toEqual([]);
   });
 
   it('tells the agent at session start to ask before it changes code', async () => {

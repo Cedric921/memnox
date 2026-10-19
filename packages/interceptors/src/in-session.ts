@@ -345,5 +345,6 @@ function depsOf(context: EditHookContext, env: NodeJS.ProcessEnv): SessionContex
     env,
     cwd: context.cwd,
     now: context.now,
+    ...(context.runSession === undefined ? {} : { runSession: context.runSession }),
   };
 }

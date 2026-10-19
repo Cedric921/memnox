@@ -106,7 +106,7 @@ export function renderNotes(notes: readonly SessionNote[]): string {
   const lines = others.map((note) => {
     const from =
       note.issuedBy === MEMNOX_AUTHOR
-        ? 'Memnox, about another agent'
+        ? 'Memnox, about other work on these files'
         : `${note.issuedBy}, through Memnox`;
     return `- From ${from}: ${note.message}`;
   });
