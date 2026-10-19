@@ -106,6 +106,8 @@ export interface ProposalRan {
   /** What went out, or why it did not, in the words the tool or the workspace gave. */
   said: string;
   at: string;
+  /** Who it went to, as sent, so a mail readdressed on its card is reported at the address it really went to. */
+  to?: string[];
 }
 
 export type ProposalOutcome =

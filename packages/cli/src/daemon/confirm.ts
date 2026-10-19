@@ -1,7 +1,6 @@
 import { basename, isAbsolute } from 'node:path';
 import {
   answeredBy,
-  confirmationMessage,
   Devices,
   driveCovers,
   holds,
@@ -31,7 +30,7 @@ import { machinePolicyPath } from '../protect/machine-rules';
 import { mergeRules, WRITTEN_POLICY_FILE } from '../protect/merge-rules';
 import { fileForScope, scopeAnswered, scopedRules } from '../protect/rule-scope';
 import { recordLocalDecisions } from '../sync/local-decisions';
-import { editedProposal } from './confirm-edit';
+import { editedProposal, ranOf, signedMessage } from './confirm-edit';
 import { applyPersonal } from './confirm-work';
 import { FROM_NOW_ON, proposeFromNowOn } from './from-now-on';
 import { registerPolicyFile } from '../policy-registry';
@@ -62,6 +61,8 @@ export interface ConfirmInput {
   signature?: string;
   /** The words the person rewrote on a draft card, which the signature covers and which go out instead. */
   edited?: string;
+  /** The addresses the person typed on a mail's card, joined by commas, which the signature covers with the words. */
+  editedTo?: string;
   at: string;
   /** How a confirmed memnox command is run; memnox itself unless a test hands in another. */
   run?: CommandRunner;
@@ -162,9 +163,9 @@ async function answerProposal(home: string, input: ConfirmInput): Promise<Confir
   const consent = await consentFor(home, input, await proposalNeeds(home, input, found));
   if ('refused' in consent) return { ok: false, error: consent.refused, refused: true };
   if (found === null) return { ok: false, error: `${input.subject} was never proposed` };
-  const edited = confirming ? editedProposal(found, input.edited) : found;
+  const edited = confirming ? editedProposal(found, input.edited, input.editedTo) : found;
   if (edited === null)
-    return { ok: false, error: `${input.subject} has no words to rewrite` };
+    return { ok: false, error: `${input.subject} cannot be rewritten so` };
   // Checked before it is marked, so a proposal aimed at another file is refused rather than half done.
   if (confirming && !writesOnlyAPolicyFile(home, found, scope)) {
     return {
@@ -205,8 +206,7 @@ async function carryOut(
   const applied = await apply(home, proposal, { at: input.at, run, by, scope });
   const kind = proposal.change.kind;
   if (kind !== PROPOSAL_KIND.WORK && kind !== PROPOSAL_KIND.ACCOUNT) return applied;
-  const said = applied.ok ? applied.outcome : applied.error;
-  await proposals.ran(proposal.id, { ok: applied.ok, said, at: input.at });
+  await proposals.ran(proposal.id, ranOf(proposal.change, applied, input.at));
   return applied;
 }
 
@@ -476,7 +476,7 @@ async function consentFor(
 /** The device whose key signed this answer: only the phone it came from, or any trusted device at the Mac. */
 async function signerOf(home: string, input: ConfirmInput): Promise<DeviceRecord | null> {
   if (input.signature === undefined) return null;
-  const message = confirmationMessage(input.subject, input.answer, input.edited);
+  const message = signedMessage(input);
   const principal = input.principal?.device;
   if (principal === undefined)
     return new Devices(home).signerOf(message, input.signature);
