@@ -4,6 +4,7 @@ import { basename, join } from 'node:path';
 import {
   appLaunch,
   bundleOf,
+  cursorPromptLink,
   DELIVERY,
   wentIn,
   DESKTOP_APPS,
@@ -109,18 +110,49 @@ export async function typeInAppTool(
   const appPath = resolve(agent);
   if (appPath === null) return { typed: false, ...noApp(agent, resolve) };
   const moment = deps.now().toISOString();
+  const words = message.split(/\r?\n/).join(' ').trim().slice(0, MOST_MESSAGE_CHARS);
+  if (agent === AGENT_ID.CURSOR) return promptedInCursor(deps, appPath, words, moment);
   const delivery = await shown(deps, {
     sessionId: `${APP_SESSION_PREFIX}${agent}`,
     agent,
     name: DESKTOP_APPS[agent].name,
     appPath,
     links: [],
-    typed: message.split(/\r?\n/).join(' ').trim().slice(0, MOST_MESSAGE_CHARS),
+    typed: words,
     ...(newChat ? { newChat } : {}),
     at: moment,
   });
   const result = openedAs(delivery, true);
   return { app: DESKTOP_APPS[agent].name, typed: result['started'], ...result };
+}
+
+/**
+ * Cursor's agent chat filled by Cursor's own prompt link, and sent by the Mac once it reads the words there. Typed
+ * instead, the words went wherever Cursor's focus was, its welcome page or a file, and an empty box read as sent.
+ */
+async function promptedInCursor(
+  deps: SessionToolDeps,
+  appPath: string,
+  words: string,
+  moment: string,
+): Promise<unknown> {
+  const name = DESKTOP_APPS[AGENT_ID.CURSOR].name;
+  const delivery = await shown(deps, {
+    sessionId: `${APP_SESSION_PREFIX}${AGENT_ID.CURSOR}`,
+    agent: AGENT_ID.CURSOR,
+    name,
+    appPath,
+    links: [cursorPromptLink(words)],
+    sendPrefilled: true,
+    at: moment,
+  });
+  const result = openedAs(delivery, false);
+  // Sent only when the Mac read the words in Cursor's chat and saw them go; otherwise they wait there for Return.
+  if (delivery?.outcome === DELIVERY.VERIFIED)
+    return { app: name, typed: true, ...result, said: APP_PREFILLED_SENT };
+  if (result['said'] === APP_OPENED)
+    return { app: name, typed: false, ...result, said: CURSOR_PREFILLED };
+  return { app: name, typed: false, ...result };
 }
 
 interface AppShow {
@@ -395,6 +427,8 @@ const APP_OPENED_NO_FOLDER =
   'The app is open, on no folder since they named none. Say so in a few words, like "Claude is open.", and ask what they would like it to do; never name a repository.';
 const APP_PREFILLED =
   'The app opened on that repository with their words already in its chat, where it waits for them to press Return, since the app asks before running a prompt it was handed. Say that in one sentence, like "Cursor is open with your question in its chat; press Return there to send it." Never ask what it should do, and never offer to send it again.';
+const CURSOR_PREFILLED =
+  'Cursor has their words in its agent chat, but the Mac could not see them go, so they may be waiting there for Return. Say that in one sentence, like "It is in Cursor\'s chat; press Return there if it has not started." Never say it was sent, and never offer to type it again.';
 const APP_PREFILLED_SENT =
   'The app opened, its own link put their words in its chat, and the Mac read them there and sent them, so it is answering now. Say so in a few words, like "Sent to Cursor." Never say it is done, and never ask them to press Return.';
 const APP_CLIPBOARD =

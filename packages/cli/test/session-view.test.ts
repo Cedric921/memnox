@@ -11,7 +11,7 @@ import {
   SqliteEventStore,
   type MemnoxEvent,
 } from '@memnox/core';
-import { SessionViews } from '../src/daemon/session-view';
+import { deliveredAs, SessionViews } from '../src/daemon/session-view';
 
 const NOW = new Date('2026-10-02T12:00:00.000Z');
 
@@ -208,5 +208,19 @@ describe('the live window on a session', () => {
       lastSaid: 'Done The cancel button is in Cart.tsx.',
     });
     expect(view?.repository).toBe(basename(repo));
+  });
+});
+
+describe('what became of a message, as a step reads', () => {
+  it("says it in the person's words rather than as the ledger row", () => {
+    expect(deliveredAs('verified')).toBe('Your message went in');
+    expect(deliveredAs('typed')).toBe('Your message was typed in');
+    expect(deliveredAs('clipboard')).toBe('Your message was left on the clipboard');
+    expect(deliveredAs('failed')).toBe('Your message did not go in');
+  });
+
+  it('never prints a raw outcome it does not know', () => {
+    expect(deliveredAs('something-new')).toBe('You sent it a message');
+    expect(deliveredAs(undefined)).toBe('You sent it a message');
   });
 });

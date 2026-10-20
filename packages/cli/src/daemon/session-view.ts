@@ -3,6 +3,8 @@ import {
   AGENT_ID_PREFIX,
   buildReplay,
   DECISION_EFFECT,
+  DELIVERY,
+  DELIVERY_OPERATION,
   LEDGER_SESSION_LIMIT,
   Milestones,
   NodeGit,
@@ -433,7 +435,10 @@ const SEAMS: RewindSeams = {
 
 function stepOf(step: ReplayStep): SessionViewStep {
   const target = step.target === undefined ? '' : ` ${shortTarget(step.target)}`;
-  const text = `${verbOf(step.operation) ?? step.summary}${target}`;
+  const text =
+    step.operation === DELIVERY_OPERATION
+      ? deliveredAs(step.target)
+      : `${verbOf(step.operation) ?? step.summary}${target}`;
   return {
     at: step.at,
     surface: step.surface ?? 'action',
@@ -460,6 +465,22 @@ const VERBS: Record<string, string> = {
   'git.checkout': 'Switched to',
   'session.summary': 'Finished its turn',
 };
+
+/** What became of the person's own words to the session, said as they would say it rather than as the ledger's row. */
+const DELIVERED: Record<string, string> = {
+  [DELIVERY.VERIFIED]: 'Your message went in',
+  [DELIVERY.TYPED]: 'Your message was typed in',
+  [DELIVERY.WAITING]: 'Your message waits for its next prompt',
+  [DELIVERY.CLIPBOARD]: 'Your message was left on the clipboard',
+  [DELIVERY.NOT_ALLOWED]: 'Your message was left on the clipboard',
+  [DELIVERY.FAILED]: 'Your message did not go in',
+};
+
+export function deliveredAs(outcome: string | undefined): string {
+  return (
+    (outcome === undefined ? undefined : DELIVERED[outcome]) ?? 'You sent it a message'
+  );
+}
 
 function verbOf(operation: string | undefined): string | undefined {
   if (operation === undefined) return undefined;
