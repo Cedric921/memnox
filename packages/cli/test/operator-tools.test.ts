@@ -779,6 +779,21 @@ describe('telling an agent what the person said', () => {
     });
   });
 
+  it('still hands a typed follow up over at the next step where there is no terminal prompt to type it into', async () => {
+    const deps = await depsAt();
+    await new SessionTurns(deps.home).prompted(
+      'ses_work',
+      'claude-code',
+      '2026-09-30T11:50:00.000Z',
+    );
+    const id = await proposed(deps);
+    expect(
+      await sendInstructionTool(deps, { instruction: id }, () => true, undefined, {
+        typedWhileWorking: true,
+      }),
+    ).toMatchObject({ sent: true, how: 'queued' });
+  });
+
   it('puts it in the input of a session waiting in an editor, for the person to send', async () => {
     const deps = await depsAt();
     const turns = new SessionTurns(deps.home);

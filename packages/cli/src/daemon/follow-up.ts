@@ -48,7 +48,9 @@ export function followUpDeps(
     send: (instruction) => {
       // A question the Mac began, so what the Mac types for it is never read as a phone's show to sign again.
       router.asked(undefined, voice.now());
-      return sendInstructionTool(views.deps(), { instruction });
+      return sendInstructionTool(views.deps(), { instruction }, undefined, undefined, {
+        typedWhileWorking: true,
+      });
     },
   };
 }

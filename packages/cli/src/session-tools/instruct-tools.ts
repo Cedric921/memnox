@@ -188,6 +188,7 @@ export async function sendInstructionTool(
   args: ToolArgs,
   inForeground: (tty: string) => boolean = agentInForeground,
   resume: ResumeHermes = resumeHermes,
+  { typedWhileWorking = false }: SendOptions = {},
 ): Promise<unknown> {
   const id = textArg(args, 'instruction');
   const moment = deps.now().toISOString();
@@ -199,7 +200,13 @@ export async function sendInstructionTool(
   const recorded = await new SessionHosts(deps.home).read(instruction.sessionId);
   // Where it runs now, since a tab recorded when it began may since be closed or someone else's.
   const host = recorded === null ? null : liveHost(recorded);
-  const route = await routeFor(deps, instruction.sessionId, host, inForeground);
+  const route = await routeFor(
+    deps,
+    instruction.sessionId,
+    host,
+    inForeground,
+    typedWhileWorking,
+  );
   const inApp = await typedInItsApp(deps, instruction, host, route === ROUTE.LATER);
   if (inApp !== null) return inApp;
   // A tmux or WezTerm pane is typed into through its own command line, whatever app shows it.
@@ -388,12 +395,22 @@ function failedTyping(
   return fresh && failed.tty === host?.tty ? failed : null;
 }
 
+/** How a send may reach a session beyond what the voice's own sends do. */
+export interface SendOptions {
+  /**
+   * The person's own typed words go into a working agent's prompt where it can be typed into, so they appear in
+   * the session as their message, which the agent queues itself, rather than as a note nobody sees arrive.
+   */
+  typedWhileWorking?: boolean;
+}
+
 /** How it reaches the session: its next step when working, else whatever it waits in. */
 async function routeFor(
   deps: SessionToolDeps,
   sessionId: string,
   host: SessionHost | null,
   inForeground: (tty: string) => boolean,
+  typedWhileWorking = false,
 ): Promise<Route> {
   const turn = await new SessionTurns(deps.home).read(sessionId);
   const asked = turn?.promptAt;
@@ -404,8 +421,11 @@ async function routeFor(
     // Read the way the sessions tool reads it: Codex, and a turn the person stopped, end with no hook,
     // and a session told it is working when it waits on them is handed a note it never reads.
     !(await turnOverByTranscript(deps.home, sessionId, deps.now()));
-  if (working) return ROUTE.QUEUED;
-  return waitingRoute(host, inForeground);
+  if (!working) return waitingRoute(host, inForeground);
+  // Only a terminal prompt queues what is typed into it; an editor's panel would take it as a second chat.
+  if (typedWhileWorking && waitingRoute(host, inForeground) === ROUTE.TYPED)
+    return ROUTE.TYPED;
+  return ROUTE.QUEUED;
 }
 
 /** A prompt in a terminal is typed into, an editor's own terminal too; an editor's chat panel is prefilled. */
