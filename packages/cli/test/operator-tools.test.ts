@@ -145,7 +145,7 @@ describe('what the operator is offered', () => {
     for (const tool of OPERATOR_TOOLS) {
       if (tool.annotations.readOnlyHint) continue;
       expect(tool.name).toMatch(
-        /^(propose_|show$|pause_session$|send_instruction$|type_in_app$|control_app$|answer_question$|answer_agent$|watch_for$|walk_through$|start_session$|show_agents$|memnox_command$|traces$|remember_word$|forget_word$|remember_about_me$|forget_about_me$|forget_screen$|open_folder$|create_folder$|withdraw$|open_link$|show_list$)/,
+        /^(propose_|show$|pause_session$|send_instruction$|type_in_app$|control_app$|answer_question$|answer_agent$|watch_for$|walk_through$|start_session$|show_agents$|memnox_command$|traces$|remember_word$|forget_word$|remember_about_me$|forget_about_me$|forget_screen$|open_folder$|create_folder$|withdraw$|open_link$|search_web$|show_list$)/,
       );
     }
   });

@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { DISPLAY, DisplayRequests, type DisplayDelivery } from '@memnox/core';
-import { openLinkTool } from '../src/session-tools/link-tools';
+import { openLinkTool, searchWebTool } from '../src/session-tools/link-tools';
 import type { SessionToolDeps } from '../src/session-tools/read-tools';
 
 /** The voice says where a page opened from whoever opened it, so a phone's page is never called the Mac's. */
@@ -76,5 +76,27 @@ describe('opening a page by voice', () => {
       '',
     ])
       expect(await openLinkTool(deps, { url }), url).toMatchObject({ opened: false });
+  });
+});
+
+describe('searching the web by voice', () => {
+  it('opens the results page for their words in the browser', async () => {
+    const deps = await depsWith({ outcome: 'typed', at: NOW.toISOString() });
+    const answer = (await searchWebTool(deps, { query: 'flights to Oslo' })) as Record<
+      string,
+      unknown
+    >;
+    expect(answer['opened']).toBe('https://www.google.com/search?q=flights+to+Oslo');
+    const [request] = await new DisplayRequests(deps.home).open(NOW.toISOString());
+    expect(request).toMatchObject({
+      display: DISPLAY.LINK,
+      links: ['https://www.google.com/search?q=flights+to+Oslo'],
+    });
+  });
+
+  it('asks for the words rather than opening an empty search', async () => {
+    const deps = await depsWith(null);
+    expect(await searchWebTool(deps, { query: '  ' })).toMatchObject({ opened: false });
+    expect(await new DisplayRequests(deps.home).open(NOW.toISOString())).toEqual([]);
   });
 });

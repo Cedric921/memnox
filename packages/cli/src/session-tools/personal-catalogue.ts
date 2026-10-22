@@ -16,7 +16,7 @@ import {
   signInTool,
 } from './personal-tools';
 import type { SessionToolDeps, ToolArgs } from './read-tools';
-import { openLinkTool, showListTool } from './link-tools';
+import { openLinkTool, searchWebTool, showListTool } from './link-tools';
 import { withdrawTool } from './withdraw-tool';
 
 /** Done at once when the person asks and never by a guess made while they pause, since each one shows or closes something. */
@@ -179,6 +179,16 @@ export const PERSONAL_TOOLS: readonly ToolDefinition[] = [
     },
   ),
   onAsking(
+    'search_web',
+    'Search the web in their browser when they ask to search, google, look up or find something online, such as "google flights to Oslo": the results page opens on the phone they asked from, else in their browser on the Mac. Say what you searched in a few words; never read the results out unless they ask you to.',
+    {
+      query: {
+        type: 'string',
+        description: 'the words to search for, as they said them',
+      },
+    },
+  ),
+  onAsking(
     'show_list',
     'Put a list on a card on their screen, such as the open pull requests, their issues or unread messages, when there are more than a few to read out or they ask to see them. Offer it rather than reading a long list aloud, and when they say yes, call this at once.',
     {
@@ -215,5 +225,6 @@ export const PERSONAL_CALLS: Readonly<
   propose_account: (deps, _seams, args) => confirmAccountTool(deps, args),
   withdraw: (deps, _seams, args) => withdrawTool(deps, args),
   open_link: (deps, _seams, args) => openLinkTool(deps, args),
+  search_web: (deps, _seams, args) => searchWebTool(deps, args),
   show_list: (deps, _seams, args) => showListTool(deps, args),
 };
