@@ -49,6 +49,8 @@ export const WORK_DRAFT_KIND = {
   COMMENT: 'comment',
   EMAIL: 'email',
   ISSUE: 'issue',
+  EVENT: 'event',
+  PAGE: 'page',
   OTHER: 'other',
 } as const;
 
@@ -75,6 +77,9 @@ export interface WorkDraft {
   where?: string;
   subject?: string;
   body?: string;
+  /** On an event, when it starts and ends as the tool was given them, so the card shows the time it books. */
+  starts?: string;
+  ends?: string;
   /** Every other argument, as text, so nothing goes out that the card did not show. */
   fields: WorkField[];
 }
@@ -83,6 +88,8 @@ export interface WorkDraft {
 const KIND_WORDS: ReadonlyArray<[WorkDraftKind, readonly string[]]> = [
   [WORK_DRAFT_KIND.COMMENT, ['COMMENT', 'REVIEW', 'REACTION']],
   [WORK_DRAFT_KIND.EMAIL, ['EMAIL', 'MAIL', 'DRAFT']],
+  [WORK_DRAFT_KIND.EVENT, ['EVENT', 'MEETING']],
+  [WORK_DRAFT_KIND.PAGE, ['PAGE', 'DOCUMENT', 'DOC']],
   [WORK_DRAFT_KIND.ISSUE, ['ISSUE', 'TICKET', 'TASK']],
   [WORK_DRAFT_KIND.MESSAGE, ['MESSAGE', 'CHAT', 'POST', 'DM', 'REPLY']],
 ];
@@ -98,7 +105,8 @@ const BODY_KEYS = [
   'content',
   'comment',
 ];
-const SUBJECT_KEYS = ['subject', 'title'];
+// A calendar event carries its title as a summary.
+const SUBJECT_KEYS = ['subject', 'title', 'summary'];
 const TO_KEYS = [
   'to',
   'to_email',
@@ -109,10 +117,13 @@ const TO_KEYS = [
   'channel_id',
   'user',
   'users',
+  'attendees',
   'cc',
 ];
 /** The arguments a mail holds its main addresses in, the only ones the person may rewrite on its card. */
 const ADDRESS_KEYS = ['to', 'to_email', 'recipient_email', 'recipients'];
+const STARTS_KEYS = ['start_datetime', 'start_time', 'start', 'start_date'];
+const ENDS_KEYS = ['end_datetime', 'end_time', 'end', 'end_date'];
 const REPO_KEYS = ['owner', 'repo'];
 const NUMBER_KEYS = ['pull_number', 'issue_number', 'number'];
 const PLACE_KEYS = [
@@ -157,11 +168,16 @@ export function workDraftOf(
   // Elsewhere the name alone, since a Slack id like U0B3QDB89Q9 tells a person nothing.
   const to = named ? [toName] : ids;
   const where = placeOf(args, used);
+  const kind = kindOf(toolkit, tool);
+  // Only an event's times are lifted out, so a start argument elsewhere still shows among the fields.
+  const event = kind === WORK_DRAFT_KIND.EVENT;
+  const starts = event ? firstOf(args, STARTS_KEYS, used) : undefined;
+  const ends = event ? firstOf(args, ENDS_KEYS, used) : undefined;
   const fields = restOf(args, used);
   return {
     toolkit,
     tool,
-    kind: kindOf(toolkit, tool),
+    kind,
     ...(account === undefined ? {} : { account }),
     ...(to.length === 0 ? {} : { to }),
     ...(mail && toName !== undefined && ids.length > 0 ? { toName } : {}),
@@ -169,6 +185,8 @@ export function workDraftOf(
     ...(where === undefined ? {} : { where }),
     ...(subject === undefined ? {} : { subject }),
     ...(body === undefined ? {} : { body }),
+    ...(starts === undefined ? {} : { starts }),
+    ...(ends === undefined ? {} : { ends }),
     fields,
   };
 }
