@@ -40,6 +40,8 @@ export interface SqlFinding {
   because: string;
   /** The statement's leading keyword. Never the whole statement, which holds values. */
   statement: string;
+  /** The table or collection it acts on, where the statement names one plainly. */
+  table?: string;
 }
 
 /** Strips string literals and comments, so a value can never look like a keyword. */
@@ -65,6 +67,26 @@ const WRITING =
 const READING =
   /\b(SELECT|SHOW|EXPLAIN|DESCRIBE|DESC|WITH|TABLE|VALUES|COPY)\b|^\\[a-z]/i;
 const HAS_WHERE = /\bWHERE\b/i;
+// Optionally schema qualified. A quoted name was emptied by the scrub, so it is left out rather than guessed.
+const NAME = String.raw`(\w+(?:\.\w+)?)\b(?!\s*\.?"")`;
+const TABLE_AFTER: readonly RegExp[] = [
+  new RegExp(String.raw`\bDELETE\s+FROM\s+(?:ONLY\s+)?${NAME}`, 'i'),
+  new RegExp(String.raw`\bTRUNCATE\s+(?:TABLE\s+)?(?:ONLY\s+)?${NAME}`, 'i'),
+  new RegExp(
+    String.raw`\bDROP\s+(?:TABLE|VIEW|MATERIALIZED\s+VIEW)\s+(?:IF\s+EXISTS\s+)?${NAME}`,
+    'i',
+  ),
+  new RegExp(String.raw`^\s*UPDATE\s+(?:ONLY\s+)?${NAME}`, 'i'),
+];
+
+/** The table a statement acts on, as written; never a guess. */
+function tableIn(sql: string): string | undefined {
+  for (const pattern of TABLE_AFTER) {
+    const name = pattern.exec(sql)?.[1];
+    if (name !== undefined) return name;
+  }
+  return undefined;
+}
 
 interface SqlRule {
   applies: (sql: string) => boolean;
@@ -131,12 +153,36 @@ function inspectOne(sql: string): SqlFinding {
       statement,
     };
   }
+  const table = tableIn(sql);
   return {
     risk: rule.risk,
     class: rule.class,
     because: rule.because(statement),
     statement,
+    ...(table === undefined ? {} : { table }),
   };
+}
+
+/**
+ * The way forward from a statement that takes every row: the same change bounded to the rows
+ * the task needs, on the table it named. Null for anything narrower, which needs no redirect.
+ */
+export function boundedAlternative(
+  finding: SqlFinding,
+  grammar: 'sql' | 'mongo' = 'sql',
+): string | null {
+  const on = finding.table === undefined ? 'that table' : finding.table;
+  const some =
+    finding.table === undefined ? 'the test rows' : `the test ${finding.table}`;
+  const bound = grammar === 'mongo' ? 'a filter' : 'a WHERE';
+  if (finding.risk === SQL_RISK.UNBOUNDED) {
+    return `add ${bound} to the ${finding.statement} on ${on} that bounds it to the rows this task needs, such as only ${some}, and run it again.`;
+  }
+  if (finding.risk === SQL_RISK.DROPS) {
+    const remove = grammar === 'mongo' ? 'a deleteMany' : 'a DELETE';
+    return `keep ${on} and remove only the rows this task needs with ${remove} bounded by ${bound}, such as only ${some}.`;
+  }
+  return null;
 }
 
 /** Read from the statement rather than the tool, which is the only signal before the query runs. */
@@ -262,6 +308,7 @@ export function inspectMongo(raw: string): SqlFinding {
     ' ',
   );
   const statement = /\.(\w+)\s*\(/.exec(script)?.[1] ?? 'unknown';
+  const table = /\bdb\.(\w+)\.\w+\s*\(/.exec(script)?.[1];
   // First match wins, most dangerous first, as the SQL rules are ordered.
   const rule = MONGO_RULES.find((candidate) => candidate.pattern.test(script));
   if (rule === undefined) {
@@ -277,6 +324,7 @@ export function inspectMongo(raw: string): SqlFinding {
     class: rule.class,
     because: rule.because ?? `it calls ${statement}`,
     statement,
+    ...(table === undefined ? {} : { table }),
   };
 }
 
@@ -312,7 +360,13 @@ function hostFlagIn(args: readonly string[]): string | undefined {
   return undefined;
 }
 
-function hostnameOf(target: string): string {
+/** Whether a host is this machine, which is what makes a database the person's own. */
+export function isLocalHost(host: string): boolean {
+  return LOCAL_HOSTS.includes(host.toLowerCase());
+}
+
+/** The host out of a connection string, or the value itself where it is a bare host. */
+export function hostnameOf(target: string): string {
   if (!/^\w+:\/\//.test(target)) return target;
   try {
     return new URL(target).hostname;
