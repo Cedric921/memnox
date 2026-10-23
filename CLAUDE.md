@@ -689,6 +689,20 @@ the person's own agents is still said at once, since no other agent can be asked
 to each other through `message_person` and `answer_person`, carried as `person.message` on
 the stream, and the stream names its last event id when it comes back, so a blink of the
 network swallows nothing said in it.
+
+**People collaborating on one feature are found, not declared.** A frontend agent on one laptop
+and a backend agent on another rarely touch one file, so a lease never meets them.
+`coordination/work-refs.ts` reads the branch off the checkout, with any ticket key in it, and
+`CloudLeases` sends those refs with every take. The cloud joins two people's sessions when the
+refs are the same, or when the tracker linked their tickets to each other or to one epic,
+parent or spec; a thing linked to more than forty tickets is a list and links nothing, and
+titles that merely look alike link nothing either, because a guessed partner is a stranger
+told about your work. Both agents are introduced on their own turn queue, each is kept up to
+date on what the other is doing at most every quarter hour, and both people get one quiet
+`together` notice. An agent reaches the others by feature, part or person, an ask wakes an
+agent whose turn ended at most every two minutes so two agents can never keep each other
+running, what they said is kept per feature and read back by `memnox_work`, and every message
+an agent picks up is a ledger row.
 ---
 
 ## Sequencing and staffing
