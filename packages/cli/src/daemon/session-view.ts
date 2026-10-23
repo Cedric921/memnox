@@ -94,7 +94,7 @@ interface SessionRow {
 }
 
 /** As many lines as a Claude Code transcript shows in the live window. */
-const MOST_DESKTOP_LINES = 14;
+const MOST_DESKTOP_LINES = 160;
 
 export class SessionViews {
   private readonly files = new Map<string, { at: number; code: Code }>();

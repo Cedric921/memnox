@@ -43,6 +43,10 @@ interface HistoryTurn {
   moreWritten?: number;
   committed: number;
   pushed: string[];
+  /** What the agent said while it worked, which carries why it changed what it did and what it settled on. */
+  explained: string[];
+  /** What it said before these, counted rather than dropped unsaid. */
+  moreExplained?: number;
   /** What a rule or the person refused, by what it was. */
   refused: string[];
   /** What was put to the person, whatever they answered. */
@@ -57,6 +61,9 @@ const MOST_ASK_CHARS = 300;
 const MOST_ANSWER_CHARS = 500;
 const MOST_FILES_NAMED = 5;
 const MOST_REFUSALS_NAMED = 3;
+/** The latest of what it said along the way, enough to tell why without reading a day of it aloud. */
+const MOST_EXPLAINED = 8;
+const MOST_EXPLAINED_CHARS = 280;
 
 /** What was asked before any transcript line, when the agent keeps no transcript Memnox can read. */
 const UNRECORDED = 'what it was asked is not in a transcript Memnox can read';
@@ -81,6 +88,11 @@ export function turnsOf(
     const said = lines.filter((line) => line.at >= ask.at && line.at < to);
     const done = rows.filter((row) => row.at >= from && row.at < to);
     const answer = [...said].reverse().find((line) => line.who === SPEAKER.AGENT);
+    // Everything it said before its answer is it explaining itself as it went.
+    const along = said.filter((line) => line.who === SPEAKER.AGENT && line !== answer);
+    const explained = along
+      .slice(-MOST_EXPLAINED)
+      .map((line) => clipped(line.text, MOST_EXPLAINED_CHARS));
     return {
       at: ask.at,
       asked: clipped(ask.text, MOST_ASK_CHARS),
@@ -88,6 +100,10 @@ export function turnsOf(
         ? {}
         : { answered: clipped(answer.text, MOST_ANSWER_CHARS) }),
       tools: said.filter((line) => line.who === SPEAKER.TOOL).length,
+      explained,
+      ...(along.length > explained.length
+        ? { moreExplained: along.length - explained.length }
+        : {}),
       ...wroteIn(done),
       committed: done.filter((row) => went(row, ACTION.GIT_COMMIT)).length,
       pushed: done
@@ -285,4 +301,4 @@ function totalsOf(
 }
 
 const WHOLE =
-  'This is the whole session, oldest turn first: when it started, whether and how it ended, and each turn with what they asked, what it answered and what it did. Answer what they asked from it, in a few sentences, starting with what matters most to their question; never read the list out. When it ended because its process is gone, say so plainly. Use turn numbers only if they ask for the order of things.';
+  'This is the whole session, oldest turn first: when it started, whether and how it ended, and each turn with what they asked, what it answered, what it said along the way and what it did. Answer what they asked from it, in a few sentences, starting with what matters most to their question; never read the list out. Asked what happened, tell it as a story of purpose: what they wanted, what the agent changed and why, taking the why from what it said along the way, and what was decided, like a choice it made, something it ruled out or a direction they agreed on, and where it stands now. Name a decision only where its own words say one was made, never one you inferred. When it ended because its process is gone, say so plainly. Use turn numbers only if they ask for the order of things.';

@@ -79,6 +79,25 @@ describe('a whole session, turn by turn', () => {
     });
   });
 
+  it('keeps what the agent said along the way, apart from its answer, so the why can be told', () => {
+    const [first] = turnsOf(
+      [
+        LINES[0]!,
+        {
+          at: '2026-10-09T09:02:00.000Z',
+          who: 'agent' as const,
+          text: 'The total skips discounts, so I will apply them before tax rather than after.',
+        },
+        ...LINES.slice(1),
+      ],
+      ROWS,
+    );
+    expect(first?.explained).toEqual([
+      'The total skips discounts, so I will apply them before tax rather than after.',
+    ]);
+    expect(first?.answered).toBe('Fixed and committed.');
+  });
+
   it('still tells what it did when no transcript can be read', () => {
     const [only] = turnsOf([], ROWS, 'fix the cart');
     expect(only).toMatchObject({

@@ -15,9 +15,11 @@ import {
  */
 
 /** The end of a long session is all the window shows, so a day of conversation is never read whole. */
-const TAIL_BYTES = 384 * 1_024;
-const MOST_LINES = 14;
-const MOST_SAID_CHARS = 420;
+const TAIL_BYTES = 1_024 * 1_024;
+/** Enough of the session for the window to read as its chat, scrolled back through a long afternoon. */
+const MOST_LINES = 160;
+/** A reply whole as the agent wrote it, which the window lays out, short of a pasted file. */
+const MOST_SAID_CHARS = 2_400;
 const MOST_TOOL_CHARS = 110;
 /** A session id as Claude Code names its file, which is also what keeps a path out of it. */
 const SAFE_ID = /^[A-Za-z0-9-]{8,80}$/;
