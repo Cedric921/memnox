@@ -30,10 +30,14 @@ const SSE_ACCEPT = 'text/event-stream';
 const WORKSPACE_AGENT = 'workspace';
 const FRAME_END = '\n\n';
 
+/** Names the last event heard, so a stream that dropped is first given what it missed. */
+const LAST_EVENT_ID = 'last-event-id';
+
 /** One server-sent event, as the stream framed it. */
 interface StreamFrame {
   event: string;
   data: string;
+  id?: string;
 }
 
 interface WorkspaceStreamDeps {
@@ -47,6 +51,8 @@ interface WorkspaceStreamDeps {
 export class WorkspaceStream {
   private running = false;
   private controller: AbortController | null = null;
+  /** The last event heard, kept across drops, so a blink of the network swallows nothing. */
+  private lastId: string | null = null;
 
   constructor(private readonly deps: WorkspaceStreamDeps) {}
 
@@ -65,6 +71,7 @@ export class WorkspaceStream {
 
   /** One event off the stream, said to the person where it is for them. */
   async heard(frame: StreamFrame): Promise<void> {
+    if (frame.id !== undefined) this.lastId = frame.id;
     const data = parsed(frame.data);
     if (frame.event === HANDOVER_EVENT.ASKED) {
       const ask = askFrom(data);
@@ -128,7 +135,11 @@ export class WorkspaceStream {
           person.baseUrl,
         ),
         {
-          headers: { accept: SSE_ACCEPT, authorization: `Bearer ${person.token}` },
+          headers: {
+            accept: SSE_ACCEPT,
+            authorization: `Bearer ${person.token}`,
+            ...(this.lastId === null ? {} : { [LAST_EVENT_ID]: this.lastId }),
+          },
           signal: controller.signal,
         },
       );
@@ -168,13 +179,16 @@ export function framesIn(buffer: string): { frames: StreamFrame[]; rest: string 
   const rest = parts.pop() ?? '';
   const frames = parts.flatMap((part) => {
     let event = '';
+    let id: string | undefined;
     const data: string[] = [];
     for (const line of part.split('\n')) {
       if (line.startsWith('event:')) event = line.slice('event:'.length).trim();
+      else if (line.startsWith('id:')) id = line.slice('id:'.length).trim();
       else if (line.startsWith('data:'))
         data.push(line.slice('data:'.length).trimStart());
     }
-    return event === '' ? [] : [{ event, data: data.join('\n') }];
+    if (event === '') return [];
+    return [{ event, data: data.join('\n'), ...(id === undefined ? {} : { id }) }];
   });
   return { frames, rest };
 }
