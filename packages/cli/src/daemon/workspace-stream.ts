@@ -5,7 +5,11 @@ import {
   describeReply,
   HANDOVER_EVENT,
   Handovers,
+  describeMessage,
   NOTICE_KIND,
+  PERSON_MESSAGE_EVENT,
+  PersonMessages,
+  personMessageFrom,
   replyFrom,
   workspaceAskFrom,
   WorkspaceAsks,
@@ -73,6 +77,10 @@ export class WorkspaceStream {
   async heard(frame: StreamFrame): Promise<void> {
     if (frame.id !== undefined) this.lastId = frame.id;
     const data = parsed(frame.data);
+    if (frame.event === PERSON_MESSAGE_EVENT) {
+      await this.messaged(data);
+      return;
+    }
     if (frame.event === HANDOVER_EVENT.ASKED) {
       const ask = askFrom(data);
       if (ask === null) return;
@@ -92,6 +100,22 @@ export class WorkspaceStream {
       return;
     }
     await this.askedOf(frame.event, data);
+  }
+
+  /** A teammate speaking to this person, said at once and listened after, like a collision. */
+  private async messaged(data: unknown): Promise<void> {
+    const message = personMessageFrom(data);
+    if (message === null) return;
+    await new PersonMessages(this.deps.home).keep(message);
+    this.deps.tell({
+      kind: DAEMON_EVENT.NOTICE,
+      notice: NOTICE_KIND.MESSAGE,
+      subject: `ntc_message_${message.id}`,
+      agent: WORKSPACE_AGENT,
+      agentName: message.fromName,
+      summary: describeMessage(message),
+      at: message.sentAt,
+    });
   }
 
   /** An incident, an exception or a call short of its approvals, said whatever the speak up setting. */
