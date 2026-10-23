@@ -18,6 +18,7 @@ import { HOME_METHOD } from './home';
 import { INTERCEPT_METHOD } from './intercept';
 import { REMOTE_METHOD } from './remote';
 import { SPEECH_METHOD } from './speech';
+import { SPOKEN_RULE_METHOD } from './spoken-rule';
 import type {
   CardExcerpt,
   CardFile,
@@ -106,6 +107,7 @@ export const DAEMON_METHOD = {
   ...SPEECH_METHOD,
   ...HOME_METHOD,
   ...INTERCEPT_METHOD,
+  ...SPOKEN_RULE_METHOD,
 } as const;
 
 export type DaemonMethod = (typeof DAEMON_METHOD)[keyof typeof DAEMON_METHOD];

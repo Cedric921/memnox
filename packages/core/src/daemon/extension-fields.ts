@@ -9,6 +9,7 @@ import type {
   RemoteResponseFields,
 } from './remote';
 import type { SpeechRequestFields, SpeechResponseFields } from './speech';
+import type { SpokenRuleRequestFields, SpokenRuleResponseFields } from './spoken-rule';
 import type { TeamAnswerBrief, TeamCallBrief } from './team-calls';
 import type { SignedIn, ToolSignIn, WorkDraft } from './work-cards';
 
@@ -72,7 +73,8 @@ export interface ExtensionRequestFields
     AccountRequestFields,
     QuestionRequestFields,
     ConnectionsRequestFields,
-    InterceptRequestFields {}
+    InterceptRequestFields,
+    SpokenRuleRequestFields {}
 
 export interface ExtensionResponseFields
   extends
@@ -81,7 +83,8 @@ export interface ExtensionResponseFields
     SpeechResponseFields,
     HomeResponseFields,
     ConnectionsResponseFields,
-    InterceptResponseFields {}
+    InterceptResponseFields,
+    SpokenRuleResponseFields {}
 
 export interface ExtensionEventFields
   extends RemoteEventFields, TeamEventFields, WorkEventFields, QuestionEventFields {}

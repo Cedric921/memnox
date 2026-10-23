@@ -40,6 +40,8 @@ const REMOTE_METHODS: Readonly<Record<string, RemoteCapability>> = {
   [DAEMON_METHOD.CONNECTIONS_SIGN_OUT]: REMOTE_CAPABILITY.ANSWER,
   // Only writes a proposal; the rule holds once the person signs it with the rules capability.
   [DAEMON_METHOD.HAND_OVER]: REMOTE_CAPABILITY.ASK,
+  // Drafts and proposes a spoken rule; it holds only once the person signs it with the rules capability.
+  [DAEMON_METHOD.RULE]: REMOTE_CAPABILITY.ASK,
   [DAEMON_METHOD.ASK]: REMOTE_CAPABILITY.ASK,
   [DAEMON_METHOD.CANCEL]: REMOTE_CAPABILITY.ASK,
   [DAEMON_METHOD.WARM]: REMOTE_CAPABILITY.ASK,

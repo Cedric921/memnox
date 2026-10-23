@@ -15,6 +15,7 @@ export * from './limits';
 export * from './remote';
 export * from './files';
 export * from './speech';
+export * from './spoken-rule';
 export * from './team-calls';
 export * from './home';
 export * from './connections';

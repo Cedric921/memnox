@@ -27,7 +27,7 @@ const HEADING =
  * The brain drafts them with propose_rule, and the Mac asks where each holds before Touch ID.
  */
 export const RULE_NOTE =
-  '[Memnox, not the person] They held the rule keys, so what follows is a rule or policy they want enforced on their agents. Turn each rule into propose_rule calls now: the action, the effect, any branches or paths it names, and the project only if they named one. Then say back in one sentence what the rule does, and ask whether it should hold on the whole Mac or only in one repository; the card on the Mac lets them pick and confirm with Touch ID. Never say it is in force. If what they said is not a rule at all, say so in one sentence and propose nothing.';
+  '[Memnox, not the person] They held the rule keys, so what follows is a rule or policy they want enforced on their agents. Pass each rule to propose_rule as their sentence now, and say back the rule it reads as; ask any open question it returns before anything else. Where the sentence is refused, call it with the action, the effect, any branches or paths it names, and the project only if they named one. The card on the Mac is confirmed with Touch ID. Never say it is in force. If what they said is not a rule at all, say so in one sentence and propose nothing.';
 
 /**
  * Sent when the Mac asks again what the person asked before a sign in finished. The words are theirs from earlier,

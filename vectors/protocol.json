@@ -148,7 +148,8 @@
       "hand-over",
       "intercept",
       "intercept-acted",
-      "intercept-ran"
+      "intercept-ran",
+      "rule"
     ],
     "events": [
       "held",

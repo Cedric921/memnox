@@ -8,6 +8,7 @@ import { changesTool, readingFor } from './changes-tool';
 import { readReach } from '../operator/vocabulary';
 import { proposeInstructionTool, sendInstructionTool } from './instruct-tools';
 import { proposeAnswerTool, proposeRuleTool } from './propose-tools';
+import { PROPOSE_RULE_TOOL } from './spoken-rule-tool';
 import { outsideTool } from './outside-tool';
 import { repositoryTool } from './repository-tool';
 import { showAgentsTool } from './agents-tool';
@@ -363,34 +364,7 @@ export const OPERATOR_TOOLS: readonly ToolDefinition[] = [
       said: SAID_ARG,
     },
   ),
-  proposeTool(
-    'propose_rule',
-    'Write down a rule the person asked for: allow, ask or deny an action, optionally only on some branches or paths. The Mac shows it with where it could hold, the whole Mac or one of their repositories, and nothing is in force until they pick and confirm with Touch ID.',
-    {
-      action: {
-        type: 'string',
-        description:
-          'a command such as "railway deploy", or a verb such as "npm.publish" or "filesystem.read"',
-      },
-      effect: { type: 'string', description: 'allow, ask or deny' },
-      reason: { type: 'string', description: 'why, as the person put it' },
-      branches: {
-        type: 'string',
-        description: 'only on these branches, comma separated, such as "main, release/*"',
-      },
-      paths: {
-        type: 'string',
-        description:
-          'only for these files or folders, comma separated globs, such as "*.env, secrets/*"',
-      },
-      project: {
-        type: 'string',
-        description:
-          'the repository they named, by folder name or full path; leave it out when they named none, and the whole Mac is suggested',
-      },
-      said: SAID_ARG,
-    },
-  ),
+  PROPOSE_RULE_TOOL,
 ];
 
 /** The same reads the session server makes, pointed at whichever agent the person named. */

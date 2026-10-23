@@ -47,6 +47,8 @@ export type ProposedChange =
       rules: readonly Policy[];
       /** The places offered on the Mac; the one picked is the signed answer, and decides the file and the reach. */
       scopes?: readonly RuleScope[];
+      /** A spoken rule on an enrolled machine: in force here once signed, and offered to the team as well. */
+      offerTeam?: boolean;
     }
   | { kind: typeof PROPOSAL_KIND.ANSWER; pendingId: string; answer: HoldAnswer }
   | { kind: typeof PROPOSAL_KIND.RESUME; sessionId: string }

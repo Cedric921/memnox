@@ -29,6 +29,7 @@ import {
 import { textArg, type SessionToolDeps, type ToolArgs } from './read-tools';
 import { knownRepositories, repositoryNamed } from './known-repositories';
 import { teamCallsNow } from '../daemon/team-calls-store';
+import { proposeSpokenRuleTool } from './spoken-rule-tool';
 
 /**
  * What the operator may do with what a person said: write it down as a proposal. A refusal
@@ -177,6 +178,10 @@ export async function proposeRuleTool(
   args: ToolArgs,
 ): Promise<unknown> {
   const action = textArg(args, 'action');
+  const sentence = textArg(args, 'sentence');
+  // Their own words go through the grammar, which reads targets, kinds of data and exclusions too.
+  if (action === undefined && sentence !== undefined)
+    return proposeSpokenRuleTool(deps, sentence, args);
   const effect = textArg(args, 'effect');
   const reason = textArg(args, 'reason');
   if (action === undefined || effect === undefined || !RULE_EFFECTS.includes(effect)) {

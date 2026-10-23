@@ -45,6 +45,7 @@ const FIELD_TYPES: Readonly<Record<string, 'string' | 'number' | 'boolean'>> = {
   toolkit: 'string',
   again: 'boolean',
   query: 'string',
+  approved: 'string',
 };
 const LIST_FIELDS: readonly string[] = ['learned', 'spans', 'vocabulary'];
 const OBJECT_FIELDS: readonly string[] = ['proof', 'sight', 'evidence'];
