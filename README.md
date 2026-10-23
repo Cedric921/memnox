@@ -760,6 +760,10 @@ test, and this has to pass:
 pnpm format && pnpm typecheck && pnpm test && pnpm deadcode
 ```
 
+Before the first `pnpm test` on a fresh clone, build the native Noise addon the pairing tests
+load, which needs [Rust](https://rustup.rs): `pnpm --filter @memnox/noise build`. A clone ships
+without it, so those tests fail until it is built.
+
 <details>
 <summary><b>Repository layout</b></summary>
 <br>

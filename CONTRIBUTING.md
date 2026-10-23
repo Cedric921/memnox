@@ -14,10 +14,19 @@ table of where to make each kind of change.
 git clone https://github.com/Memnox/memnox.git
 cd memnox
 pnpm install          # pnpm 11, Node 22 or 24
+pnpm --filter @memnox/noise build   # the native addon pairing runs on; needs Rust
 pnpm build            # every package, in dependency order
 pnpm test             # ~2100 tests, a few seconds
 pnpm bench            # the wall-clock ones, run on purpose
 ```
+
+**Build the Noise addon once, before the first `pnpm test`.** Pairing a phone runs over an
+encrypted tunnel written in Rust (`native/noise`), and its tests load the real addon. A
+release ships it prebuilt for each platform, but a clone has none, so without this step
+about forty pairing tests fail with "Pairing needs the Noise addon". It needs a Rust
+toolchain (`curl https://sh.rustup.rs -sSf | sh`) and, on Linux, a C linker
+(`sudo apt install build-essential`). Run it again only after changing anything under
+`native/noise`.
 
 Run your working copy against your own machine:
 
