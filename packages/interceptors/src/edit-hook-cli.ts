@@ -24,7 +24,7 @@ import { claimAll, type EditHookContext } from './edit-claims';
 import { answerAgentQuestion } from './agent-question';
 import { answerPicker } from './held-picker';
 import { checkpointBeforeFirstWrite } from './checkpoint-seam';
-import { canAskPerson } from './edit-hook';
+import { canAskPerson, withAddedContext } from './edit-hook';
 import { fingerprintHold } from './fingerprint-hold';
 import { keepBeforeShell, takeOwedReport } from './shell-written';
 import { fieldsOf } from './hook-payload';
@@ -93,9 +93,10 @@ async function main(): Promise<void> {
   // Windsurf's `post_write_code` is both an edit to
   // claim and a tool to record, so the claim goes first.
   const pause = sessionEventOf(payload);
-  if (await answerEdits(payload, context)) return;
+  const unconfirmed: string[] = [];
+  if (await answerEdits(payload, context, unconfirmed)) return;
   await noteCursorAsking(payload, reply !== null, context);
-  emit(reply);
+  emit(toldUnconfirmed(payload, reply, unconfirmed));
   if (pause === null) return;
   const said = await beforePause(payload, pause, context, process.env);
   process.stdout.write(await answerPause(pause, context, said));
@@ -282,10 +283,14 @@ async function releaseSession(ended: string, context: EditHookContext): Promise<
  * Claims the writes in this payload and answers
  * the host. True when the write was refused.
  */
-async function answerEdits(payload: unknown, context: EditHookContext): Promise<boolean> {
+async function answerEdits(
+  payload: unknown,
+  context: EditHookContext,
+  unconfirmed: string[],
+): Promise<boolean> {
   const found = agentEditsOf(payload);
   if (found === null) return false;
-  const refusal = await claimAll(found, canAskPerson(payload), context);
+  const refusal = await claimAll(found, canAskPerson(payload), context, unconfirmed);
   if (refusal === null) {
     await keepBeforeFirstWrite(found, context);
     // Cursor reads a permission reply that is not JSON
@@ -303,6 +308,26 @@ async function answerEdits(payload: unknown, context: EditHookContext): Promise<
     process.stdout.write(`${refusal}\n`);
   }
   return true;
+}
+
+/**
+ * The reply with what could not be checked added for the model where its host reads
+ * context before a tool runs, and on stderr for the person everywhere else.
+ */
+function toldUnconfirmed(
+  payload: unknown,
+  reply: ToolReply | null,
+  unconfirmed: readonly string[],
+): ToolReply | null {
+  if (unconfirmed.length === 0) return reply;
+  const note = unconfirmed.join(' ');
+  const found = agentEditsOf(payload);
+  const before =
+    found?.host === EDIT_HOST.PRE_TOOL_USE && found.moment === EDIT_MOMENT.BEFORE;
+  const added = before ? withAddedContext(reply?.stdout, note) : null;
+  if (added !== null) return { ...(reply ?? {}), stdout: added };
+  log(note);
+  return reply;
 }
 
 /**
