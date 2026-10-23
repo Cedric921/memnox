@@ -20,6 +20,7 @@ import { PERSONAL_CALLS, PERSONAL_TOOLS } from './personal-catalogue';
 import { answerQuestionTool } from './question-tool';
 import { proposeRewindTool } from './rewind-proposal';
 import { pauseSessionTool, proposeResumeTool } from './session-actions';
+import { AGENT_PAUSE_CALLS, AGENT_PAUSE_TOOLS } from './agent-pause-tools';
 import { proposeStartTool, startSessionTool } from './start-tools';
 import { controlAppTool, typeInAppTool } from './app-tools';
 import { walkThroughTool } from './walk-tool';
@@ -273,6 +274,7 @@ export const OPERATOR_TOOLS: readonly ToolDefinition[] = [
     // It holds an agent back and lets nothing happen, the same as a refusal.
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   },
+  ...AGENT_PAUSE_TOOLS,
   proposeTool(
     'propose_instruction',
     'Tell an agent session to do something the person said, such as "push it" or "add a test for the cart". Nothing is sent: it returns an id and the words to read back, so a misheard instruction is caught first. Pass message as a clear instruction to the agent in the person\'s words, with misheard names fixed, like "git push" for "guitar push"; never add work they did not ask for.',
@@ -452,6 +454,7 @@ const OPERATOR_CALLS: Record<string, OperatorCall> = {
   ...WORKSPACE_ASK_CALLS,
   ...LOOK_CALLS,
   ...ANSWER_AGENT_CALLS,
+  ...AGENT_PAUSE_CALLS,
 };
 
 export async function callOperatorTool(

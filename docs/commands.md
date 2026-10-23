@@ -734,6 +734,18 @@ its reads do not. The notice that announced it says so, and `memnox status` list
 is on probation and until when. `trust` ends one now, on the record. A probation that
 was served or ended is never started again because a config was rewritten.
 
+### `memnox agents pause <agent>` / `memnox agents resume <agent>`
+Stops one agent on this machine, every session of it, and leaves every other agent
+working. The agent is named the way a person says it (`codex`, `Claude Code`, the name
+you gave it), and a name that fits two agents is refused with both named. The pause is a
+local freeze the gate reads on the very next call, so it bites before any heartbeat, and
+the agent is told a person paused it and to wait. When this machine is enrolled and you
+are signed in with `memnox signin`, the same freeze is declared to the workspace scoped to
+this machine, so teammates see it; a workspace that cannot be reached never undoes the
+pause here. It lifts itself after a day. `resume` lifts it here and every workspace freeze
+on that agent this machine knows of, and says so when the workspace still holds one. By
+voice, "pause Codex" happens at once, and letting it carry on waits for Touch ID.
+
 ### `memnox daemon`
 Holds the rules in one process so an interceptor pays a connect instead of a file
 read. Optional: an interceptor that cannot reach it evaluates in process instead.

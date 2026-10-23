@@ -13,6 +13,7 @@ import { runName, type NameOptions } from './agents/name';
 import { runStatus } from './agents/status';
 import { runOffboard, runOnboard, type OnboardOptions } from './agents/onboard';
 import { runControl } from './agents/control';
+import { runPause, runResumeAgent, type PauseOptions } from './agents/pause';
 
 /** Everything but the context, for a test to swap; each has a real default. */
 type AgentsSeams = Omit<AgentsDeps, 'context'>;
@@ -42,6 +43,29 @@ export function registerAgentsCommand(
   registerLocalSubcommands(agents, deps);
   registerWorkspaceSubcommands(agents, deps);
   registerTrustSubcommand(agents, deps);
+  registerPauseSubcommands(agents, deps);
+}
+
+/** One agent held on this machine at once and let go again, the rest left working. */
+function registerPauseSubcommands(agents: Command, deps: AgentsDeps): void {
+  agents
+    .command('pause <agent>')
+    .description(
+      'Stop one agent on this machine now, every session of it, until you resume it',
+    )
+    .option('--reason <why>', 'why, kept with the pause')
+    .option('--json', 'machine-readable output')
+    .action(async (agent: string, options: PauseOptions) =>
+      runPause(deps, agent, options),
+    );
+
+  agents
+    .command('resume <agent>')
+    .description('Let a paused agent carry on, here and in the workspace')
+    .option('--json', 'machine-readable output')
+    .action(async (agent: string, options: JsonOptions) =>
+      runResumeAgent(deps, agent, options),
+    );
 }
 
 /** Ends the probation an agent the daemon adopted started on. */

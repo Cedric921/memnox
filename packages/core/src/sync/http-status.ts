@@ -19,6 +19,8 @@ export const HTTP = {
   METHOD_NOT_ALLOWED: 405,
   /** Somebody else holds it, which is how the shared register refuses a lease. */
   CONFLICT: 409,
+  /** Read and understood as a request, and still not something it could make sense of. */
+  UNPROCESSABLE_ENTITY: 422,
   NOT_IMPLEMENTED: 501,
   BAD_GATEWAY: 502,
 } as const;
