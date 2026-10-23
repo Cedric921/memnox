@@ -3,6 +3,7 @@ import { basename } from 'node:path';
 import {
   shortDigest,
   AGENT_ID_PREFIX,
+  AgentsFirst,
   Clashes,
   concurrentWork,
   DAEMON_EVENT,
@@ -60,8 +61,9 @@ const MOST_AT_ONCE = 3;
 /** Long enough for the app to ask for the brief, short enough that the map never grows. */
 const KEEP_MS = 10 * 60 * 1_000;
 
-/** Said after a hold by another machine, so the person knows its owner is one sentence away. */
-const ASK_THE_OWNER = ' You can ask its owner for it, and they will hear you now.';
+/** Said after a hold by another machine the agents could not settle, so the person knows its owner is one sentence away. */
+const ASK_THE_OWNER =
+  ' The agents could not settle it between them. You can ask its owner for it, and they will hear you now.';
 
 /** How often the clash folder is looked at: one stat, so the notch hears of a clash well inside a second. */
 const CLASH_LOOK_MS = 200;
@@ -79,6 +81,8 @@ export class NoticeWatcher {
   private clashSeen: string;
   /** Every clash told, since the watch and the look can both read one before either moves `clashSeen`. */
   private readonly clashTold = new Set<string>();
+  /** Holds by another machine wait for the two agents to settle them before anybody is told. */
+  private readonly agentsFirst = new AgentsFirst();
   private clashTimer: ReturnType<typeof setInterval> | null = null;
   /** What other people in the workspace say to this person, held open while somebody listens. */
   private workspace: WorkspaceStream | null = null;
@@ -155,19 +159,22 @@ export class NoticeWatcher {
     const last = fresh.at(-1);
     if (last !== undefined) this.clashSeen = last.at;
     const names = await readNames(this.home);
-    return fresh.slice(-MOST_AT_ONCE).map((clash) => {
-      const agentName = nameOf(names, clash.agent);
-      return {
-        kind: DAEMON_EVENT.NOTICE,
-        subject: `ntc_collision_${clash.id}`,
-        agent: clash.agent,
-        agentName,
-        notice: NOTICE_KIND.COLLISION,
-        sessionId: clash.sessionId,
-        summary: `${agentName} was held off ${basename(clash.what)} because another agent has it: ${clash.said}${clash.leaseId === undefined ? '' : ASK_THE_OWNER}`,
-        at: clash.at,
-      };
-    });
+    return this.agentsFirst
+      .forPerson(fresh)
+      .slice(-MOST_AT_ONCE)
+      .map((clash) => {
+        const agentName = nameOf(names, clash.agent);
+        return {
+          kind: DAEMON_EVENT.NOTICE,
+          subject: `ntc_collision_${clash.id}`,
+          agent: clash.agent,
+          agentName,
+          notice: NOTICE_KIND.COLLISION,
+          sessionId: clash.sessionId,
+          summary: `${agentName} was held off ${basename(clash.what)} because another agent has it: ${clash.said}${clash.leaseId === undefined ? '' : ASK_THE_OWNER}`,
+          at: clash.at,
+        };
+      });
   }
 
   /**
