@@ -340,11 +340,16 @@ export function noticeBrief(event: DaemonEvent, person?: string): string {
         ? `Folder the session was opened in: ${event.place}.`
         : `Folder it last wrote in: ${event.place}. Say this folder, not one the task names.`,
     person === undefined ? '' : `You may address them as ${person}, this once.`,
-    event.notice === NOTICE_KIND.COLLISION || event.notice === NOTICE_KIND.ASKING
+    event.notice === NOTICE_KIND.COLLISION ||
+    event.notice === NOTICE_KIND.ASKING ||
+    event.notice === NOTICE_KIND.MESSAGE
       ? ''
       : 'Tell them in one short sentence, calmly, the way a capable assistant mentions something in passing, then stop: no offer and no question, since they did not call you and a question keeps the microphone open. When something failed, say what it said and what would fix it. Read repository or changes only if it makes the sentence true; never more than one tool.',
     event.notice === NOTICE_KIND.COLLISION
       ? 'This needs them: two agents are on the same work, and only they can say which one carries on. Say who and on what in one sentence, then ask in a few words whether to pause one of them, and keep listening. When they name one, call pause_session for it; never pick one yourself.'
+      : '',
+    event.notice === NOTICE_KIND.MESSAGE
+      ? 'This needs them: a teammate is speaking to them through the workspace. Say who and what they said in one sentence, in their words, then keep listening. When they answer, call answer_person with what they said; when they want to say something else to someone, call message_person. Never answer it yourself.'
       : '',
     event.notice === NOTICE_KIND.ASKING
       ? 'This needs them: the agent stopped in its own terminal and waits on their answer. Call look with the app it runs in to read the question and its choices, then say who is asking, the question and the choices in one plain sentence, and ask how to answer, like "Claude Code in memnox runtime wants to run git push. Shall I allow it?". On their answer call answer_agent with this session id and the keys that pick what they chose. Never answer it yourself.'

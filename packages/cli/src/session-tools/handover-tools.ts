@@ -3,20 +3,23 @@ import {
   HANDOVER_ANSWER,
   Handovers,
   minutesToMs,
+  PERSON_MESSAGE_KIND,
+  PersonMessages,
   wantedPart,
   type Clash,
   type HandoverAnswer,
 } from '@memnox/core';
 import { answerAsk, askForLines } from '../sync/handover';
+import { answerPerson, sendToPerson, type MessageTo } from '../sync/person-message';
 import { SAID_ARG } from './operator-args';
 import type { OperatorCall } from './operator-call';
 import { textArg, type SessionToolDeps, type ToolArgs } from './read-tools';
 import type { ToolDefinition } from './session-tools';
 
 /**
- * Two owners settling who writes a file, through their voices: asking the owner of another
- * machine for the lines its agent holds, and answering such an ask. Coordination between two
- * people rather than a change to any rule, so each acts at once on what the person said.
+ * Two people settling things through their voices: asking the owner of another machine for the
+ * lines its agent holds, answering such an ask, and speaking to a teammate about anything.
+ * Coordination between people rather than a change to any rule, so each acts at once.
  */
 
 /** A hold older than this is not the one the person is talking about. */
@@ -58,11 +61,49 @@ export const HANDOVER_TOOLS: readonly ToolDefinition[] = [
     },
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   },
+  {
+    name: 'message_person',
+    description:
+      'Say something to a teammate in this workspace on their own computer, where their voice says it at once: "tell Ana I am done with billing", "ask Andre whether he is still in the payments service". Sent in the person\'s name with their words. Leave to out when they mean whoever\'s agent their own agent was just held off, like "ask them how long they need". Use it as soon as they ask, with no read back. An answer comes back to you as news to tell.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        to: {
+          type: 'string',
+          description:
+            "the teammate's name as they said it; leave out for whoever holds the lines",
+        },
+        said: {
+          type: 'string',
+          description: "what the teammate will hear, in the person's words",
+        },
+        ask: {
+          type: 'string',
+          description: '"true" when it is a question that wants an answer',
+        },
+      },
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+  },
+  {
+    name: 'answer_person',
+    description:
+      'Answer what a teammate just said to the person, which you will have just read to them, with what the person says back. Do it as soon as they answer, with no read back.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        said: { type: 'string', description: 'their answer, in their words' },
+      },
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+  },
 ];
 
 export const HANDOVER_CALLS: Readonly<Record<string, OperatorCall>> = {
   ask_for_lines: (deps, _seams, args) => askTool(deps, args),
   answer_ask_for_lines: (deps, _seams, args) => answerTool(deps, args),
+  message_person: (deps, _seams, args) => messageTool(deps, args),
+  answer_person: (deps, _seams, args) => answerPersonTool(deps, args),
 };
 
 async function askTool(deps: SessionToolDeps, args: ToolArgs): Promise<unknown> {
@@ -119,6 +160,59 @@ async function answerTool(deps: SessionToolDeps, args: ToolArgs): Promise<unknow
     answered: true,
     said: `Told ${ask.fromName} about ${wantedPart(ask)}. Say so in a few words.`,
   };
+}
+
+async function messageTool(deps: SessionToolDeps, args: ToolArgs): Promise<unknown> {
+  const said = textArg(args, 'said');
+  if (said === undefined) {
+    return { sent: false, said: 'Ask them what to say.' };
+  }
+  const named = textArg(args, 'to');
+  const clash = named === undefined ? await latestHeldElsewhere(deps) : null;
+  const to: MessageTo | null =
+    named !== undefined
+      ? { person: named }
+      : clash !== null && clash.leaseId !== undefined
+        ? { leaseId: clash.leaseId }
+        : null;
+  if (to === null) {
+    return {
+      sent: false,
+      said: 'Ask them who it is for: no agent of theirs was held off another machine lately.',
+    };
+  }
+  const kind =
+    textArg(args, 'ask') === 'true' ? PERSON_MESSAGE_KIND.ASK : PERSON_MESSAGE_KIND.TELL;
+  const sent = await sendToPerson(deps.home, to, { kind, said });
+  return {
+    sent: sent.ok,
+    said: sent.ok
+      ? 'Sent. Say in a few words that their voice is telling them now.'
+      : `${sent.said} Say that plainly, and never say it was sent.`,
+  };
+}
+
+async function answerPersonTool(deps: SessionToolDeps, args: ToolArgs): Promise<unknown> {
+  const said = textArg(args, 'said');
+  if (said === undefined) return { answered: false, said: 'Ask them what to say back.' };
+  const messages = new PersonMessages(deps.home);
+  const moment = deps.now().toISOString();
+  const heard = await messages.latestOpen(moment);
+  if (heard === null) {
+    return {
+      answered: false,
+      said: 'Nobody is waiting on an answer from them. Say so in a sentence.',
+    };
+  }
+  const sent = await answerPerson(deps.home, heard, said);
+  if (!sent.ok) {
+    return {
+      answered: false,
+      said: `${sent.said} Say that plainly, and never say it was sent.`,
+    };
+  }
+  await messages.answered(heard, moment);
+  return { answered: true, said: `Told ${heard.fromName}. Say so in a few words.` };
 }
 
 /** The newest hold on another machine's lease, which is the one the person is talking about. */
