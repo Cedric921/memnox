@@ -11,6 +11,7 @@ import {
 } from '@memnox/core';
 import { answerAsk, askForLines } from '../sync/handover';
 import { answerPerson, sendToPerson, type MessageTo } from '../sync/person-message';
+import { sharedWorkOf } from '../sync/shared-work';
 import { SAID_ARG } from './operator-args';
 import type { OperatorCall } from './operator-call';
 import { textArg, type SessionToolDeps, type ToolArgs } from './read-tools';
@@ -86,6 +87,13 @@ export const HANDOVER_TOOLS: readonly ToolDefinition[] = [
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   },
   {
+    name: 'team_work',
+    description:
+      "The features the person's agents are working on with other people's, as the workspace found them from their tickets and branches: who is on each, what every agent is doing now, and what the agents said to each other. Use it when they ask who they are working with, what a teammate's agent is doing, or what the agents agreed.",
+    inputSchema: { type: 'object', properties: {} },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+  },
+  {
     name: 'answer_person',
     description:
       'Answer what a teammate just said to the person, which you will have just read to them, with what the person says back. Do it as soon as they answer, with no read back.',
@@ -103,6 +111,7 @@ export const HANDOVER_CALLS: Readonly<Record<string, OperatorCall>> = {
   ask_for_lines: (deps, _seams, args) => askTool(deps, args),
   answer_ask_for_lines: (deps, _seams, args) => answerTool(deps, args),
   message_person: (deps, _seams, args) => messageTool(deps, args),
+  team_work: (deps) => teamWorkTool(deps),
   answer_person: (deps, _seams, args) => answerPersonTool(deps, args),
 };
 
@@ -189,6 +198,21 @@ async function messageTool(deps: SessionToolDeps, args: ToolArgs): Promise<unkno
     said: sent.ok
       ? 'Sent. Say in a few words that their voice is telling them now.'
       : `${sent.said} Say that plainly, and never say it was sent.`,
+  };
+}
+
+async function teamWorkTool(deps: SessionToolDeps): Promise<unknown> {
+  const read = await sharedWorkOf(deps.home);
+  if (!read.ok) return { said: `${read.said} Say that plainly.` };
+  if (read.features.length === 0) {
+    return {
+      features: [],
+      said: "None of their agents is working on a feature with anybody else's right now. Say so in a sentence.",
+    };
+  }
+  return {
+    features: read.features,
+    said: 'Say, for each feature, who else is on it and what their agent is doing, in a sentence or two; mention what the agents agreed only when asked.',
   };
 }
 
