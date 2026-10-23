@@ -10,7 +10,8 @@ import {
 } from '../constants/decision.constants';
 import { normalizeActionRequest } from '../domain/action-identity';
 import { capabilityOf } from '../domain/capability';
-import { matchesAny, withWorkspace } from './pattern-matcher';
+import { matchesAny, matchesAnyOf, withWorkspace } from './pattern-matcher';
+import { classificationsImpliedBy } from '../domain/sensitive-data';
 import { TOOL_CLASS } from '../discovery/classify';
 import { matchesAnyTimeWindow } from './time-window';
 import { classifyRisk } from './risk-classifier';
@@ -181,7 +182,10 @@ export class PolicyEngine {
       matchesAny(policy.match.principals, request.principal) &&
       matchesAny(policy.match.models, request.model) &&
       matchesAny(policy.match.providers, request.provider) &&
-      matchesAny(policy.match.dataClassifications, request.dataClassification) &&
+      matchesAnyOf(
+        policy.match.dataClassifications,
+        classificationsImpliedBy(request.dataClassification),
+      ) &&
       matchesAny(policy.match.jurisdictions, request.jurisdiction) &&
       matchesAny(policy.match.workingDirectories, request.workingDirectory) &&
       matchesAny(policy.match.branches, request.branch) &&

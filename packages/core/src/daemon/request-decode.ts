@@ -12,6 +12,7 @@ const FIELD_TYPES: Readonly<Record<string, 'string' | 'number' | 'boolean'>> = {
   agent: 'string',
   action: 'string',
   target: 'string',
+  dataClassification: 'string',
   argsDigest: 'string',
   reason: 'string',
   exitCode: 'number',

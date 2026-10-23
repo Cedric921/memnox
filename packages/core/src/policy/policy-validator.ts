@@ -12,6 +12,7 @@ import type {
   PolicyMode,
 } from './policy';
 import { POLICY_DOCUMENT_VERSION, POLICY_MODE } from './policy';
+import { validateClassifications } from './classification-validator';
 
 /**
  * Turning a hand-written rule file into rules the engine can hold, every problem listed.
@@ -65,9 +66,9 @@ export function validatePolicyDocument(input: unknown): PolicyDocument {
     seenNames.add(policy.name);
     policies.push(policy);
   }
-
+  const patterns = validateClassifications(doc['classifications'], issues);
   if (issues.length > 0) throw new PolicyValidationError(issues);
-  return { version: POLICY_DOCUMENT_VERSION, project, policies };
+  return { version: POLICY_DOCUMENT_VERSION, project, policies, ...patterns };
 }
 
 /** A typo must be rejected: it would silently split one project into two scopes. */

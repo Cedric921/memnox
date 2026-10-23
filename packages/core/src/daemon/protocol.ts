@@ -121,6 +121,8 @@ export interface DaemonRequest extends ExtensionRequestFields {
   agent?: string;
   action?: string;
   target?: string;
+  /** On EVALUATE: what the payload carries that is sensitive, as `classificationLabel` names it, for a rule's `dataClassifications`. */
+  dataClassification?: string;
   /** A digest. Arguments travel only on INTERCEPT, ruled on in memory and never kept. */
   argsDigest?: string;
   reason?: string;
