@@ -73,12 +73,25 @@ const TURN_END_TIMEOUT_S = 600;
 export const TURN_END_TIMEOUT_MARK = `"timeout": ${TURN_END_TIMEOUT_S}`;
 
 /**
+ * Seconds before a tool runs, past the host's sixty, so an agent's questions can be answered
+ * step by step on the notch; everything else the hook does there is bounded well inside it.
+ */
+const PRE_TOOL_TIMEOUT_S = 300;
+
+/** In the settings file only once a pre tool hook carries it, so an install from before is upgraded. */
+export const PRE_TOOL_TIMEOUT_MARK = `"timeout": ${PRE_TOOL_TIMEOUT_S}`;
+
+/**
  * Before a write, to take the lines; after a tool call, a turn or a prompt, where a
  * session can be handed a note; and when the session starts and ends.
  */
 export function claudeEvents(editMatcher: string = MATCHER): HookEvent[] {
   return [
-    { event: EDIT_HOOK_EVENT.PRE_TOOL_USE, matcher: editMatcher },
+    {
+      event: EDIT_HOOK_EVENT.PRE_TOOL_USE,
+      matcher: editMatcher,
+      timeout: PRE_TOOL_TIMEOUT_S,
+    },
     { event: EDIT_HOOK_EVENT.SESSION_END },
     { event: EDIT_HOOK_EVENT.POST_TOOL_USE, matcher: EVERY_TOOL },
     { event: EDIT_HOOK_EVENT.STOP, timeout: TURN_END_TIMEOUT_S },

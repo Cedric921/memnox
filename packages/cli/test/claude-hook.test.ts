@@ -27,7 +27,8 @@ describe("Claude Code's settings with the lease hook", () => {
       { matcher: 'Bash', hooks: [{ type: 'command', command: 'lint-it' }] },
       {
         matcher: 'Write|Edit|MultiEdit|NotebookEdit',
-        hooks: [{ type: 'command', command: OURS }],
+        // Past the host's sixty seconds, so an agent's questions can be answered step by step.
+        hooks: [{ type: 'command', command: OURS, timeout: 300 }],
       },
     ]);
     expect(next.hooks?.['SessionEnd']).toEqual([

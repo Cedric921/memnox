@@ -48,6 +48,7 @@ import { momentContext } from './ask-context';
 import {
   heardRemotely,
   markNeedsMac,
+  noteTold,
   OriginRouter,
   sendWaiting,
   type RouterDeps,
@@ -436,7 +437,7 @@ export class VoiceSurface {
     // The Mac app is listening, so the first question should meet a brain that is already up.
     void this.turns?.warm();
     const waiting = await this.feed.everything(this.deps.now());
-    waiting.forEach((event) => told.add(event.subject));
+    waiting.forEach((event) => noteTold(told, event));
     for (const event of await this.feed.told.firstHeard(waiting, principal !== undefined))
       write(socket, { id, ok: true, event: this.hold.stamp(markNeedsMac(event)) });
     this.watchNotices();

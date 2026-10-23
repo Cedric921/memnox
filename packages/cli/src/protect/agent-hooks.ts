@@ -21,6 +21,7 @@ import {
   removeClaudeHook,
   removeSettingsHook,
   TURN_END_TIMEOUT_MARK,
+  PRE_TOOL_TIMEOUT_MARK,
   type HookEvent,
 } from './claude-hook';
 import { HERMES_PLUGIN, installHermesPlugin, removeHermesPlugin } from './hermes-plugin';
@@ -253,7 +254,7 @@ export const EDIT_HOOK_TARGETS: readonly EditHookTarget[] = [
     install: installClaudeHook,
     remove: removeClaudeHook,
     currentEvents: STARTS_A_SESSION,
-    currentText: [TURN_END_TIMEOUT_MARK],
+    currentText: [TURN_END_TIMEOUT_MARK, PRE_TOOL_TIMEOUT_MARK],
   },
   {
     name: 'Codex',
