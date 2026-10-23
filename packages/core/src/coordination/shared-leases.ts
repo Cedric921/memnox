@@ -83,6 +83,8 @@ export class CloudLeases implements SharedLeases {
     private readonly timeoutMs: number = SHARED_LEASE_TIMEOUT_MS,
     // The repository by its remote, so only clones of one project meet across machines.
     private readonly repository?: string,
+    // The ticket and branch this work declares, so the workspace can join it to a teammate's feature.
+    private readonly workRefs?: () => Promise<string[]>,
   ) {}
 
   async take(
@@ -95,12 +97,17 @@ export class CloudLeases implements SharedLeases {
     if (account === null) {
       return { outcome: SHARED_OUTCOME.UNKNOWN, because: 'this machine is not enrolled' };
     }
+    // Refs that cannot be read are refs not sent; the write's lease is what matters here.
+    const refs = this.workRefs === undefined ? [] : await this.workRefs().catch(() => []);
     const response = await this.send(account, {
       path: `/v1/workspaces/${account.workspaceId}/leases`,
-      body: takeBody(
-        { path, holder, minutes, region, repository: this.repository },
-        account.machineId,
-      ),
+      body: {
+        ...takeBody(
+          { path, holder, minutes, region, repository: this.repository },
+          account.machineId,
+        ),
+        ...(refs.length === 0 ? {} : { refs }),
+      },
     });
     if (response === null) {
       return {
