@@ -214,6 +214,8 @@ export interface ToolConnection {
   toolkit: string;
   /** Whether any of their sign ins to it is active and enabled, rather than pending, expired, failed or turned off. */
   connected: boolean;
+  /** Reached on this machine itself, an MCP server or a signed in command line tool, so nothing is connected or disconnected here. */
+  local?: true;
 }
 
 /** A step the Mac timed, hung on the trace of the question it belongs to. */

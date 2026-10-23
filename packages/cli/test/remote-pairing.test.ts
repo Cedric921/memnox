@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
@@ -81,8 +81,26 @@ interface Rig {
   ask: (request: Omit<DaemonRequest, 'id'>) => Promise<DaemonResponse>;
 }
 
-async function rig(enrolled = true, macKey = true): Promise<Rig> {
+/** A personal space this Mac registered with no account, as the daemon keeps it. */
+const SPACE = {
+  version: 1,
+  baseUrl: 'https://api.memnox.test',
+  workspaceId: 'dsp_1',
+  machineId: 'mac_space',
+  token: 'mch_space',
+  privateKey: 'unused',
+  signingKey: 'unused',
+  deviceId: 'pdv_1',
+  personId: 'per_space',
+  registeredAt: '2026-10-01T00:00:00.000Z',
+};
+
+async function rig(enrolled: boolean | 'space' = true, macKey = true): Promise<Rig> {
   const home = await mkdtemp(join(tmpdir(), 'memnox-remote-'));
+  if (enrolled === 'space') {
+    await mkdir(join(home, '.memnox'), { recursive: true });
+    await writeFile(join(home, '.memnox', 'device-space.json'), JSON.stringify(SPACE));
+  }
   const mac = personKey();
   if (macKey) await new ConfirmKeys(home).register(mac.point, NOW);
   const relay = new MemoryRelay();
@@ -95,7 +113,8 @@ async function rig(enrolled = true, macKey = true): Promise<Rig> {
     voice: () => voice,
     cloud,
     openRelay: relay.open,
-    account: async () => (enrolled ? ACCOUNT : null),
+    // A space is read off disk as the daemon does; otherwise the account is handed in.
+    ...(enrolled === 'space' ? {} : { account: async () => (enrolled ? ACCOUNT : null) }),
     speaks: async () => true,
   });
   const surface = new VoiceSurface({
@@ -154,13 +173,26 @@ async function answered(
 }
 
 describe('pairing a phone', () => {
-  it('is refused with a reason when this Mac is not on Memnox Cloud', async () => {
+  it('is refused with a reason when no machine can be had from Memnox Cloud', async () => {
     const at = await rig(false);
     const answer = await at.ask({ method: DAEMON_METHOD.PAIR_BEGIN });
 
     expect(answer).toMatchObject({ ok: false, outcome: REMOTE_OUTCOME.REFUSED });
-    expect(answer.reason).toContain('Connect it first');
+    expect(answer.reason).toContain('could not be reached');
     expect(at.cloud.calls).toEqual([]);
+  });
+
+  it("pairs through this Mac's own personal space when it holds no account", async () => {
+    const at = await rig('space');
+    const begun = await at.ask({ method: DAEMON_METHOD.PAIR_BEGIN });
+
+    expect(begun.outcome).toBe(REMOTE_OUTCOME.PAIRING);
+    expect(qrOf(begun).machineId).toBe(SPACE.machineId);
+    expect(at.cloud.calls).toEqual(['open']);
+    const kept = JSON.parse(
+      await readFile(join(at.home, '.memnox', 'device-space.json'), 'utf8'),
+    ) as { relay?: boolean };
+    expect(kept.relay).toBe(true);
   });
 
   it('opens a QR that names the relay, the mailbox and the runtime key, and nothing lasting', async () => {

@@ -36,6 +36,8 @@ import {
   readWorkspaceGithub,
   workspaceRepositories,
 } from '../sync/personal-work';
+import { findEveryTool, runLocal } from '../local-tools/local-tools';
+import { isLocalSlug } from '../local-tools/local-run';
 import type { SessionToolDeps } from './read-tools';
 import type { RewindSeams } from './rewind-tool';
 import { awaitSessionStart } from './await-start';
@@ -110,8 +112,15 @@ function depsFor(argv: readonly string[], env: NodeJS.ProcessEnv): SessionToolDe
     source: (link) => readSource(homedir(), link),
     workspaceName: () => readWorkspaceName(homedir()),
     personalWork: {
-      find: (what, toolkit) => findPersonalTools(homedir(), what, toolkit),
-      run: (tool, argumentsText) => runPersonalTool(homedir(), tool, argumentsText),
+      find: (what, toolkit) =>
+        findEveryTool(homedir(), what, toolkit, (words, named) =>
+          findPersonalTools(homedir(), words, named),
+        ),
+      // A read on this Mac itself runs here; nothing local that changes anything runs without Touch ID.
+      run: (tool, argumentsText) =>
+        isLocalSlug(tool)
+          ? runLocal(homedir(), tool, argumentsText, false)
+          : runPersonalTool(homedir(), tool, argumentsText),
       signIn: (toolkit) => signInPersonal(homedir(), toolkit),
       link: (toolkit) => signInLink(homedir(), toolkit),
       accounts: () => personalAccounts(homedir()),

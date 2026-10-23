@@ -13,3 +13,6 @@ process.env['PATH'] = (process.env['PATH'] ?? '')
   .split(delimiter)
   .filter((entry) => !entry.startsWith(process.cwd()) || !entry.endsWith(workspaceBins))
   .join(delimiter);
+
+// Nothing in a test registers a personal space with the real control plane: this port answers nobody.
+process.env['MEMNOX_CLOUD_URL'] = 'http://127.0.0.1:9';

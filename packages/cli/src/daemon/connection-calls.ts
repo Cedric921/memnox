@@ -1,4 +1,10 @@
-import { DAEMON_METHOD, type DaemonRequest, type DaemonResponse } from '@memnox/core';
+import {
+  DAEMON_METHOD,
+  type DaemonRequest,
+  type DaemonResponse,
+  type ToolConnection,
+} from '@memnox/core';
+import { localConnections } from '../local-tools/local-tools';
 import { openBrowser, OPEN_BROWSER_VAR } from '../sync/browser';
 import {
   connectedAlready,
@@ -35,6 +41,8 @@ export function isConnectionsMethod(method: string): boolean {
 /** What the calls reach the cloud and the browser through, so a test drives them with neither. */
 export interface ConnectionSeams {
   list: typeof connectionsOf;
+  /** What this Mac reaches itself, listed beside the connections and never connected or disconnected here. */
+  local: (home: string) => Promise<ToolConnection[]>;
   link: typeof connectLink;
   open: (url: string) => Promise<boolean>;
   signOut: typeof disconnect;
@@ -43,6 +51,7 @@ export interface ConnectionSeams {
 
 const LIVE: ConnectionSeams = {
   list: connectionsOf,
+  local: localConnections,
   link: connectLink,
   // The person pressed connect at this Mac, so the page opens even with no terminal in front of them.
   open: (url) => openBrowser(url, { ...process.env, [OPEN_BROWSER_VAR]: '1' }),
@@ -64,7 +73,7 @@ export async function answerConnectionCall(
     return guarded(request, COULD_NOT_DISCONNECT, () => signOut(request, home, live));
   if (request.method === DAEMON_METHOD.TOOLKITS_SEARCH)
     return guarded(request, COULD_NOT_SEARCH, () => search(request, home, live));
-  return answerConnections(request, home, live.list);
+  return answerConnections(request, home, live.list, live.local);
 }
 
 /** The Mac's menu bar and notch asking which apps the person connected; a refusal is a sentence, never a throw. */
@@ -72,11 +81,15 @@ export async function answerConnections(
   request: DaemonRequest,
   home: string,
   list: typeof connectionsOf = connectionsOf,
+  local: ConnectionSeams['local'] = async () => [],
 ): Promise<DaemonResponse> {
   try {
-    const answer = await list(home);
-    return answer.ok
-      ? { id: request.id, ok: true, connections: answer.value }
+    const [answer, here] = await Promise.all([list(home), local(home).catch(() => [])]);
+    if (answer.ok)
+      return { id: request.id, ok: true, connections: [...here, ...answer.value] };
+    // What this Mac reaches itself stands whatever the cloud said.
+    return here.length > 0
+      ? { id: request.id, ok: true, connections: here }
       : { id: request.id, ok: false, reason: answer.said };
   } catch {
     return { id: request.id, ok: false, reason: COULD_NOT_LIST };
@@ -90,6 +103,11 @@ async function signIn(
   seams: ConnectionSeams,
 ): Promise<DaemonResponse> {
   const toolkit = toolkitSlug(request.toolkit) ?? '';
+  if (await isLocal(seams, home, toolkit))
+    return refused(
+      request,
+      `${toolkitTitle(toolkit)} is already on this Mac, so there is nothing to connect.`,
+    );
   // A second press on a tool that already works is a slip unless they asked for another account.
   if (request.again !== true && (await connectedAlready(home, toolkit, seams.list))) {
     return refused(
@@ -108,6 +126,13 @@ async function signOut(
   home: string,
   seams: ConnectionSeams,
 ): Promise<DaemonResponse> {
+  const toolkit = toolkitSlug(request.toolkit) ?? '';
+  if (await isLocal(seams, home, toolkit)) {
+    return refused(
+      request,
+      `${toolkitTitle(toolkit)} is on this Mac itself rather than connected, so it is removed from the agent or signed out of where it runs.`,
+    );
+  }
   const answer = await seams.signOut(home, request.toolkit ?? '', { list: seams.list });
   return answer.ok
     ? { id: request.id, ok: true, connections: answer.value }
@@ -123,6 +148,15 @@ async function search(
   return answer.ok
     ? { id: request.id, ok: true, toolkits: answer.value }
     : refused(request, answer.said);
+}
+
+async function isLocal(
+  seams: ConnectionSeams,
+  home: string,
+  toolkit: string,
+): Promise<boolean> {
+  const here = await seams.local(home).catch(() => []);
+  return here.some((each) => each.toolkit.toLowerCase() === toolkit);
 }
 
 /** A failure nobody planned for is still a sentence on the screen, never a dropped connection. */

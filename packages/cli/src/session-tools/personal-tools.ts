@@ -18,6 +18,7 @@ import { PendingSignIns } from '../sync/sign-ins';
 import { foundTools, readBack } from './personal-fit';
 import { textArg, type SessionToolDeps, type ToolArgs } from './read-tools';
 import { notTiedNote } from './account-tools';
+import { isLocalSlug } from '../local-tools/local-run';
 
 /**
  * The person's own tools, in their own name: reads run at once, a tool still to sign in to opens its
@@ -230,7 +231,7 @@ export async function proposeToolTool(
       said: 'Pass label: what will happen, in plain words, so the person hears it first.',
     };
   }
-  const checked = await theirAccountFor(deps, call.tool);
+  const checked = await accountFor(deps, call.tool);
   if ('said' in checked) return checked;
   const account = workAccountOf(checked);
   const said = textArg(args, 'said') ?? '';
@@ -342,6 +343,23 @@ async function theirAccountFor(
     done: false,
     said: `Their ${nameOf(checked.toolkit)} sign in reached somebody else's account, so nothing was written down. Its sign in is open in front of them to sign in again.`,
   };
+}
+
+/** The account a proposed run goes out as: a local tool's sign in on this Mac, else the cloud's check. */
+function accountFor(
+  deps: SessionToolDeps,
+  tool: string,
+): ReturnType<typeof theirAccountFor> | Promise<CheckedAccount> {
+  return isLocalSlug(tool)
+    ? Promise.resolve(localAccount(tool))
+    : theirAccountFor(deps, tool);
+}
+
+/** A tool on this Mac runs as however the person is signed in to it there, which no cloud checks. */
+function localAccount(tool: string): CheckedAccount {
+  const rest = tool.slice(tool.indexOf(':') + 1);
+  const toolkit = rest.split(':')[0] ?? rest;
+  return { toolkit, check: WORK_ACCOUNT_CHECK.UNKNOWN };
 }
 
 /** "As maya on GitHub", so the person hears whose name it goes out under. */

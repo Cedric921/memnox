@@ -9,7 +9,6 @@ import {
   holds,
   isRemoteCapability,
   PER_SUBJECT,
-  readAccount,
   REMOTE_CAPABILITY,
   REMOTE_METHOD,
   REMOTE_OUTCOME,
@@ -31,6 +30,8 @@ import { write, type Peer } from '../daemon/socket-write';
 import { WaitingFeed } from '../daemon/waiting-feed';
 import type { HeartbeatBeats } from '../sync/beat';
 import { cloudRelay, type RelayCloud } from '../sync/relay';
+import { defaultBaseUrl } from '../sync/cloud-url';
+import { ensureDeviceSpace, relayMachine, spaceBaseUrl } from '../sync/device-space';
 import { DriveGrants, driveRefusal } from './drive';
 import { loadNoise, type Noise } from './noise';
 import { PairingBook, refused } from './pairings';
@@ -105,7 +106,8 @@ export class RemoteEndpoint {
       home: deps.home,
       now: deps.now,
       noise: () => this.noise(),
-      account: () => this.account(),
+      // Pairing is the one need that registers this Mac's personal space, so a phone pairs with no account.
+      account: () => this.account(true),
       cloud: this.cloud(),
       relayUrl: relayUrl(),
       machineName: () => hostname().replace(/\.local$/, ''),
@@ -458,8 +460,16 @@ export class RemoteEndpoint {
     return this.deps.speaks?.() ?? kokoroAnswers();
   }
 
-  private account(): Promise<Account | null> {
-    return this.deps.account?.() ?? readAccount(this.deps.home);
+  /** The account's machine, else this Mac's personal space, which the relay carries a phone to just the same. */
+  private account(create = false): Promise<Account | null> {
+    if (this.deps.account !== undefined) return this.deps.account();
+    const home = this.deps.home;
+    return relayMachine(
+      home,
+      create
+        ? async () => ensureDeviceSpace(home, await spaceBaseUrl(home, defaultBaseUrl()))
+        : null,
+    );
   }
 
   private noise(): Noise {

@@ -7,6 +7,7 @@ import {
   type PersonStanding,
 } from '@memnox/core';
 import { DEFAULT_BASE_URL } from '../sync/connect';
+import { claimDeviceSpace } from '../sync/device-space';
 import {
   awaitPerson,
   enrolPerson,
@@ -40,7 +41,12 @@ export function personSignInFlow(home: string): PersonSignInFlow {
     baseUrl: async () => (await readAccount(home))?.baseUrl ?? DEFAULT_BASE_URL,
     requestCode: (baseUrl, companionOf) => requestPersonCode(baseUrl, companionOf),
     awaitApproval: (baseUrl, code) => awaitPerson(baseUrl, code, (ms) => sleep(ms)),
-    enrol: (baseUrl, granted) => enrolPerson(home, baseUrl, granted),
+    enrol: async (baseUrl, granted) => {
+      const person = await enrolPerson(home, baseUrl, granted);
+      // What this Mac connected before any account becomes the person's, so nothing is connected twice.
+      await claimDeviceSpace(home).catch(() => null);
+      return person;
+    },
     signOut: (person) => signOutPerson(home, person),
   };
 }

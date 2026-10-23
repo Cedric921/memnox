@@ -10,7 +10,15 @@ import {
 } from '@memnox/core';
 import { callCloud, CloudUnreachable } from './client';
 import { openBrowser, OPEN_BROWSER_VAR } from './browser';
-import { readPerson, type PersonCredential } from './person';
+import { readPerson } from './person';
+import { defaultBaseUrl } from './cloud-url';
+import {
+  ensureDeviceSpace,
+  readDeviceSpace,
+  spaceAsCaller,
+  spaceBaseUrl,
+  type PersonalCaller,
+} from './device-space';
 
 /**
  * The person's own tools through their own sign ins, so the voice reads and replies as them, never a
@@ -33,6 +41,8 @@ export interface PersonalTool {
   workClass: WorkClass;
   /** Read through the workspace's own connection, which somebody else made and the person has not signed in to. */
   throughWorkspace?: true;
+  /** Reached on this Mac itself, an MCP server or a signed in command line tool, with no Memnox service between. */
+  local?: true;
 }
 
 /** The account one of the person's sign ins reached, as the tool itself named it. */
@@ -70,8 +80,9 @@ export interface PersonalRun {
   data: Record<string, unknown>;
 }
 
+/** Only when this Mac could not set itself up to act for them, since acting for themselves needs no Memnox account. */
 const NOT_SIGNED_IN =
-  'This Mac is not signed in as the person yet, so nothing can be done in their name. Call memnox_sign_in at once, which opens their approval page, and carry on with what they asked once they approve it; never send them to the Account row or a terminal.';
+  'Memnox Cloud could not be reached to set this Mac up to act in their own tools just now. Say so in a sentence and offer to try again; they need no Memnox account for their own tools, so never ask them to sign in to Memnox for this.';
 const NOT_REACHABLE =
   'The workspace could not be asked just now. Say so in a sentence; never say there is nothing there.';
 
@@ -344,7 +355,7 @@ const GRANT_ACTIVE = 'active';
 
 /** Said by the Mac's menu bar as it stands, so these are words for the person rather than for the voice. */
 export const CONNECTIONS_NOT_SIGNED_IN =
-  'This Mac is not signed in as you yet, so your connected apps cannot be shown. Sign in under Account in the Memnox app, or run memnox signin in a terminal.';
+  'This Mac could not reach Memnox Cloud to connect your apps just now. Try again in a moment; you need no Memnox account for your own apps.';
 const CONNECTIONS_NOT_REACHABLE =
   'Memnox Cloud could not be reached just now, so your connected apps cannot be shown.';
 
@@ -352,8 +363,9 @@ const CONNECTIONS_NOT_REACHABLE =
 export async function connectionsOf(
   home: string,
 ): Promise<PersonalAnswer<ToolConnection[]>> {
-  const person = await readPerson(home);
-  if (person === null) return { ok: false, said: CONNECTIONS_NOT_SIGNED_IN };
+  const person = await existingCaller(home);
+  // Nothing registered yet is nothing connected yet, so a list never registers a space on its own.
+  if (person === null) return { ok: true, value: [] };
   try {
     const grants = await callCloud<PersonGrant[]>({
       baseUrl: person.baseUrl,
@@ -397,7 +409,7 @@ export function workAccountOf(checked: CheckedAccount): WorkAccount {
 }
 
 function signWork(
-  person: PersonCredential,
+  person: PersonalCaller,
   proposalId: string,
   tool: string,
   argumentsText: string,
@@ -414,9 +426,9 @@ function signWork(
 
 async function asPerson<T>(
   home: string,
-  call: (person: PersonCredential) => Promise<PersonalAnswer<T>>,
+  call: (person: PersonalCaller) => Promise<PersonalAnswer<T>>,
 ): Promise<PersonalAnswer<T>> {
-  const person = await readPerson(home);
+  const person = await personalCaller(home);
   if (person === null) return { ok: false, said: NOT_SIGNED_IN };
   try {
     return await call(person);
@@ -431,7 +443,26 @@ function listOf<T>(value: T[] | undefined): T[] {
 }
 
 /** Whoever a read goes out as: the person, or for workspace names alone this Mac. */
-type CloudReader = Pick<PersonCredential, 'baseUrl' | 'workspaceId' | 'token'>;
+type CloudReader = Pick<PersonalCaller, 'baseUrl' | 'workspaceId' | 'token'>;
+
+/** The signed in person, else this Mac's own personal space, without registering one. */
+export async function existingCaller(home: string): Promise<PersonalCaller | null> {
+  const person = await readPerson(home);
+  if (person !== null) return person;
+  const space = await readDeviceSpace(home);
+  return space === null ? null : spaceAsCaller(space);
+}
+
+/**
+ * Who acts in the person's own tools: the person where they signed in, else this Mac's personal space,
+ * registered the first time it is needed so nobody needs a Memnox account to act as themselves.
+ */
+export async function personalCaller(home: string): Promise<PersonalCaller | null> {
+  const found = await existingCaller(home);
+  if (found !== null) return found;
+  const space = await ensureDeviceSpace(home, await spaceBaseUrl(home, defaultBaseUrl()));
+  return space === null ? null : spaceAsCaller(space);
+}
 
 function workPath(person: CloudReader, route: string): string {
   return `/v1/workspaces/${encodeURIComponent(person.workspaceId)}/me/${route}`;

@@ -128,14 +128,15 @@ describe('connections-sign-in, connecting any tool as the person', () => {
     expect(broken.error).toBe('That tool could not be connected just now.');
   });
 
-  it('refuses over the socket in plain words while nobody is signed in', async () => {
+  it('refuses over the socket in plain words when the cloud cannot be reached, never asking for an account', async () => {
     const home = await mkdtemp(join(tmpdir(), 'memnox-connect-surface-'));
     const surface = new VoiceSurface({ home, now: () => 'now', log: () => undefined });
     const peer = new Heard();
     await surface.respond(peer, signInRequest());
     surface.close();
     expect(peer.said[0]).toMatchObject({ id: 4, ok: false });
-    expect(peer.said[0]?.error).toMatch(/not signed in as you/);
+    expect(peer.said[0]?.error).toMatch(/could not reach Memnox Cloud/);
+    expect(peer.said[0]?.error).toMatch(/no Memnox account/);
     expect(peer.said[0]?.signIn).toBeUndefined();
   });
 
@@ -146,8 +147,8 @@ describe('connections-sign-in, connecting any tool as the person', () => {
       ok: false,
       said: 'Name the tool to connect, such as notion or asana.',
     });
-    const nobody = await connectLink(home, 'asana');
-    expect(nobody.ok ? '' : nobody.said).toMatch(/not signed in as you/);
+    const unreached = await connectLink(home, 'asana');
+    expect(unreached.ok ? '' : unreached.said).toMatch(/could not reach Memnox Cloud/);
   });
 });
 
@@ -163,10 +164,10 @@ describe('connections-sign-out, answering the refreshed list', () => {
     expect(response).toEqual({ id: 5, ok: true, connections: after });
   });
 
-  it('undoes the sign in and then lists, both as the person', async () => {
+  it('has nothing to undo before anything was connected, and registers nothing for it', async () => {
     const home = await mkdtemp(join(tmpdir(), 'memnox-disconnect-'));
     const nobody = await disconnect(home, 'notion');
-    expect(nobody.ok ? '' : nobody.said).toMatch(/not signed in as you/);
+    expect(nobody.ok ? '' : nobody.said).toBe('Nothing is connected on this Mac yet.');
   });
 });
 
@@ -206,10 +207,10 @@ describe('toolkits-search, the catalogue anybody can connect from', () => {
     expect(toolkitsFrom(undefined)).toEqual([]);
   });
 
-  it('says the menu bar words while nobody is signed in', async () => {
+  it('says the menu bar words when the cloud cannot be reached', async () => {
     const home = await mkdtemp(join(tmpdir(), 'memnox-toolkits-'));
     const answer = await searchToolkits(home, 'notion');
-    expect(answer.ok ? '' : answer.said).toMatch(/not signed in as you/);
+    expect(answer.ok ? '' : answer.said).toMatch(/could not reach Memnox Cloud/);
   });
 });
 

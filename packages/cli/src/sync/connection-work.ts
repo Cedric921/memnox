@@ -6,10 +6,11 @@ import {
   type ToolkitSummary,
 } from '@memnox/core';
 import { callCloud, CloudUnreachable } from './client';
-import { readPerson } from './person';
 import {
   CONNECTIONS_NOT_SIGNED_IN,
   connectionsOf,
+  existingCaller,
+  personalCaller,
   refusal,
   signInLink,
   signOutOf,
@@ -44,7 +45,8 @@ export async function connectLink(
 ): Promise<PersonalAnswer<string>> {
   const slug = toolkitSlug(toolkit);
   if (slug === null) return { ok: false, said: NAME_A_TOOL };
-  if ((await readPerson(home)) === null)
+  // The first connect registers this Mac's personal space, so nobody needs a Memnox account for it.
+  if ((await personalCaller(home)) === null)
     return { ok: false, said: CONNECTIONS_NOT_SIGNED_IN };
   const answer = await link(home, slug);
   return answer.ok
@@ -60,8 +62,8 @@ export async function disconnect(
 ): Promise<PersonalAnswer<ToolConnection[]>> {
   const slug = toolkitSlug(toolkit);
   if (slug === null) return { ok: false, said: 'Name the tool to disconnect.' };
-  if ((await readPerson(home)) === null)
-    return { ok: false, said: CONNECTIONS_NOT_SIGNED_IN };
+  if ((await existingCaller(home)) === null)
+    return { ok: false, said: 'Nothing is connected on this Mac yet.' };
   const undone = await (seams.signOut ?? signOutOf)(home, slug);
   if (!undone.ok)
     return couldNot(undone, `${toolkitTitle(slug)} could not be disconnected.`);
@@ -91,7 +93,7 @@ export async function searchToolkits(
   home: string,
   query?: string,
 ): Promise<PersonalAnswer<ToolkitSummary[]>> {
-  const person = await readPerson(home);
+  const person = await personalCaller(home);
   if (person === null) return { ok: false, said: CONNECTIONS_NOT_SIGNED_IN };
   const words = query?.trim() ?? '';
   const search = words === '' ? '' : `&search=${encodeURIComponent(words)}`;

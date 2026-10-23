@@ -68,16 +68,15 @@ describe('the apps the person connected, folded from their sign ins', () => {
 });
 
 describe('the connections-list request the Mac menu bar sends', () => {
-  it('says in plain words that nobody is signed in, rather than throwing', async () => {
+  it('lists nothing before anything was connected, with no account and no registration', async () => {
     const home = await mkdtemp(join(tmpdir(), 'memnox-connections-'));
 
     const answer = await connectionsOf(home);
 
-    expect(answer.ok).toBe(false);
-    if (!answer.ok) expect(answer.said).toMatch(/not signed in as you/);
+    expect(answer).toEqual({ ok: true, value: [] });
   });
 
-  it('answers the refusal over the socket with a reason', async () => {
+  it('answers an empty list over the socket with no account', async () => {
     const home = await mkdtemp(join(tmpdir(), 'memnox-connections-surface-'));
     const surface = new VoiceSurface({ home, now: () => 'now', log: () => undefined });
     const peer = new Heard();
@@ -85,9 +84,8 @@ describe('the connections-list request the Mac menu bar sends', () => {
     await surface.respond(peer, REQUEST);
     surface.close();
 
-    expect(peer.said[0]).toMatchObject({ id: 9, ok: false });
-    expect(peer.said[0]?.reason).toMatch(/not signed in as you/);
-    expect(peer.said[0]?.connections).toBeUndefined();
+    expect(peer.said[0]).toMatchObject({ id: 9, ok: true });
+    expect(peer.said[0]?.reason).toBeUndefined();
   });
 
   it('carries the connections when the workspace answered', async () => {
@@ -100,6 +98,38 @@ describe('the connections-list request the Mac menu bar sends', () => {
       id: 9,
       ok: true,
       connections: [{ toolkit: 'gmail', connected: true }],
+    });
+  });
+
+  it('lists what this Mac reaches itself as connected, with no account, first', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'memnox-connections-local-'));
+    const response = await answerConnections(REQUEST, home, connectionsOf, async () => [
+      { toolkit: 'gh', connected: true, local: true },
+      { toolkit: 'notes', connected: true, local: true },
+    ]);
+
+    expect(response).toEqual({
+      id: 9,
+      ok: true,
+      connections: [
+        { toolkit: 'gh', connected: true, local: true },
+        { toolkit: 'notes', connected: true, local: true },
+      ],
+    });
+  });
+
+  it('keeps what this Mac reaches itself when the cloud refuses', async () => {
+    const response = await answerConnections(
+      REQUEST,
+      '/nowhere',
+      async () => ({ ok: false, said: 'Memnox Cloud could not be reached.' }),
+      async () => [{ toolkit: 'gh', connected: true, local: true }],
+    );
+
+    expect(response).toEqual({
+      id: 9,
+      ok: true,
+      connections: [{ toolkit: 'gh', connected: true, local: true }],
     });
   });
 

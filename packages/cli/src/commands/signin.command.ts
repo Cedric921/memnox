@@ -10,6 +10,7 @@ import { EXIT, readAccount } from '@memnox/core';
 import type { CliContext } from '../cli-context';
 import { openBrowser } from '../sync/browser';
 import { DEFAULT_BASE_URL } from '../sync/connect';
+import { claimDeviceSpace } from '../sync/device-space';
 import {
   awaitPerson,
   enrolPerson,
@@ -76,13 +77,17 @@ async function runSignIn(
     );
     const granted = await awaitPerson(baseUrl, code, (ms) => sleep(ms));
     const person = await enrolPerson(deps.home(), baseUrl, granted);
+    // What this Mac connected before any account becomes the person's, so nothing is connected twice.
+    const claimed = await claimDeviceSpace(deps.home()).catch(() => null);
     flow.close(`Signed in as ${person.name}.`);
+    if (claimed?.connections !== undefined && claimed.connections > 0)
+      flow.hint(
+        `${claimed.connections} app${claimed.connections === 1 ? '' : 's'} this Mac had connected moved into your account`,
+      );
     flow.hint(
       'memnox inbox   lists what is waiting on you, here and from your workspace',
     );
-    flow.hint(
-      'memnox approve or memnox deny answers one; the voice can now act in your own tools',
-    );
+    flow.hint('memnox approve or memnox deny answers one');
     return EXIT.OK;
   } catch (err) {
     flow.fail(err instanceof Error ? err.message : String(err));
