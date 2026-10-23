@@ -678,6 +678,17 @@ once because a lease is coordination, never a rule. The same stream carries inci
 exception requests and calls short of their approvals to whoever can act on them;
 `acknowledge_incident` and `reject_exception` act by voice, and approving an exception stays
 in the console because it loosens a rule.
+
+**Two agents settle it first, and a person hears only what needs them.** A refusal for another
+machine's lease names `memnox_message_agent`, the cloud tool that queues one agent's word on
+the other session's own turn queue, which its hook reads at its next step. Every message
+carries the address its answer goes back to, so nothing is kept. `core/coordination/agents-first.ts`
+keeps the voice quiet about such a hold until the same session is still held off the same
+lease a minute later, because by then the agents could not settle it; a hold between two of
+the person's own agents is still said at once, since no other agent can be asked. People speak
+to each other through `message_person` and `answer_person`, carried as `person.message` on
+the stream, and the stream names its last event id when it comes back, so a blink of the
+network swallows nothing said in it.
 ---
 
 ## Sequencing and staffing
