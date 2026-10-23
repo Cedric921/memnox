@@ -2,7 +2,7 @@ import { secondsToMs } from '@memnox/core';
 
 // How often the sync loop runs, and what brings a pass forward.
 
-/** Often enough that a new rule lands in a minute; an unchanged bundle is a 304. */
+/** The fallback for a lost beat, since the control plane beats a machine when a rule or a condition changes. */
 export const HEARTBEAT_MS = secondsToMs(60);
 
 /** Where it backs off to while the control plane is unreachable. */
@@ -43,37 +43,41 @@ interface WaitInput {
   beaten?: () => boolean;
 }
 
+/** How long the loop waited, and whether a beat ended it, which is the one wait that must pull. */
+interface Due {
+  waited: number;
+  beaten: boolean;
+}
+
 /**
- * Waits until the next pass is due, leaving early when an agent here stops on a question
- * or has done something for a while, and says how long it waited.
+ * Waits until the next pass is due, leaving early when the control plane beats this machine,
+ * when an agent here stops on a question, or when one has done something for a while.
  */
-export async function waitUntilDue(input: WaitInput): Promise<number> {
+export async function waitUntilDue(input: WaitInput): Promise<Due> {
   let waited = 0;
   while (waited < input.idleMs) {
     const step = Math.min(HELD_POLL_MS, input.idleMs - waited);
     await input.sleep(step);
     waited += step;
-    const beaten = input.beaten?.() ?? false;
+    // Honoured whether or not anything is held, since a beat also means a rule or a freeze changed.
+    if (input.beaten?.() ?? false) return { waited, beaten: true };
     const held = await input.holding(input.home);
-    if (held.length > 0 && heldPassDue(input, held, waited, beaten)) return waited;
+    if (held.length > 0 && heldPassDue(input, held, waited)) {
+      return { waited, beaten: false };
+    }
     if (waited >= ACTIVE_PASS_MS && (await input.active(input.home, input.since))) {
-      return waited;
+      return { waited, beaten: false };
     }
   }
-  return waited;
+  return { waited, beaten: false };
 }
 
 /**
  * A held call is polled every two seconds unless the relay link is up, where a beat or a call
  * not yet carried up brings the pass and the slow poll is only the fallback.
  */
-function heldPassDue(
-  input: WaitInput,
-  held: readonly string[],
-  waited: number,
-  beaten: boolean,
-): boolean {
-  if (beaten || !(input.relayed?.() ?? false)) return true;
+function heldPassDue(input: WaitInput, held: readonly string[], waited: number): boolean {
+  if (!(input.relayed?.() ?? false)) return true;
   if (held.some((id) => !(input.carried?.has(id) ?? false))) return true;
   return waited >= RELAYED_HELD_POLL_MS;
 }
