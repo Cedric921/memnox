@@ -22,3 +22,4 @@ export * from './own-path';
 export * from './clashes';
 export * from './handovers';
 export * from './agents-first';
+export * from './person-messages';
