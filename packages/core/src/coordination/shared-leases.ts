@@ -17,6 +17,9 @@ import { minutesToMs } from '../domain/time';
 /** Milliseconds. An interceptor runs on every write; a slow control plane must not be felt. */
 export const SHARED_LEASE_TIMEOUT_MS = 1_500;
 
+/** The first status that is the control plane's own fault rather than an answer. */
+const SERVER_FAULT = 500;
+
 export const SHARED_OUTCOME = {
   TAKEN: 'taken',
   HELD_BY_ANOTHER: 'held_by_another',
@@ -46,7 +49,15 @@ export type SharedTake =
       /** The lease itself, so a person can free it by name. */
       leaseId?: string;
     }
-  | { outcome: typeof SHARED_OUTCOME.UNKNOWN; because: string };
+  | {
+      outcome: typeof SHARED_OUTCOME.UNKNOWN;
+      because: string;
+      /**
+       * An enrolled machine asked and got no answer it could read, so another machine may
+       * be writing. Absent where nobody was asked or the workspace has no shared register.
+       */
+      unanswered?: true;
+    };
 
 export const FREE_OUTCOME = {
   FREED: 'freed',
@@ -113,6 +124,7 @@ export class CloudLeases implements SharedLeases {
       return {
         outcome: SHARED_OUTCOME.UNKNOWN,
         because: 'the control plane did not answer',
+        unanswered: true,
       };
     }
     if (response.status === HTTP.CREATED || response.status === HTTP.OK) {
@@ -124,6 +136,8 @@ export class CloudLeases implements SharedLeases {
     return {
       outcome: SHARED_OUTCOME.UNKNOWN,
       because: `the control plane answered ${response.status}`,
+      // A fault is a register that exists and could not say; a refusal is one this machine has no use of.
+      ...(response.status >= SERVER_FAULT ? { unanswered: true as const } : {}),
     };
   }
 

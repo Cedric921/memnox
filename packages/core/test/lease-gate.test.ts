@@ -301,6 +301,8 @@ describe('two machines on one repository', () => {
         }),
         now: clock.now,
         sleep: clock.sleep,
+        // No window to wait in, so the refusal is worded at the moment it was asked.
+        ceilingMs: 0,
       });
     const tmpHome = await home();
 
