@@ -8,6 +8,7 @@ import {
   LocalGate,
   loadPolicySet,
   readPolicyFiles,
+  type Policy,
 } from '@memnox/core';
 
 import { MCP_ACTION_PREFIX } from './firewall.constants';
@@ -23,6 +24,11 @@ export interface LocalGateEnvironment {
   agentRole?: string;
   /** The person `memnox run --for` named, which a rule's `principals:` matches. */
   principal?: string;
+  /**
+   * The agent `memnox mcp wrap` wrote into the line, so a pause on that agent stops this
+   * server too. The environment's name wins, since `memnox run` knows the run.
+   */
+  wrappedFor?: string;
 }
 
 /**
@@ -53,16 +59,43 @@ export async function loadLocalGate(
     return null;
   }
 
+  return gateOver(set.policies, { environment, serverName, home });
+}
+
+export interface GateScene {
+  environment: LocalGateEnvironment;
+  serverName: string;
+  home: string;
+  /** The conditions in force as labels, so a freeze or a pause decides the call. */
+  stateFacts?: readonly string[];
+}
+
+/** One gate over rules already read, as every proxy builds it. */
+export function gateOver(policies: readonly Policy[], scene: GateScene): LocalGate {
+  const { environment, serverName, home, stateFacts } = scene;
   const allowances = new FileAllowances(home);
-  return new LocalGate(set.policies, {
-    agentName: environment.agentName ?? `${MCP_ACTION_PREFIX}:${serverName}`,
+  return new LocalGate(policies, {
+    agentName: agentServed(environment, serverName),
     allowances: () => allowances.inForceNow(new Date().toISOString()),
     ...(environment.agentRole === undefined ? {} : { agentRole: environment.agentRole }),
     ...(environment.principal === undefined ? {} : { principal: environment.principal }),
     ...(environment.agentName === undefined
       ? {}
       : { parents: parentAgentsOf(process.env, environment.agentName) }),
+    ...(stateFacts === undefined ? {} : { stateFacts }),
   });
+}
+
+/** The agent a rule's `agents:` and a pause match this server's calls as. */
+export function agentServed(
+  environment: LocalGateEnvironment,
+  serverName: string,
+): string {
+  return (
+    environment.agentName ??
+    environment.wrappedFor ??
+    `${MCP_ACTION_PREFIX}:${serverName}`
+  );
 }
 
 export function localGateEnvironment(env: NodeJS.ProcessEnv): LocalGateEnvironment {
