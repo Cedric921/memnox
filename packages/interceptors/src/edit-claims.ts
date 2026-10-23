@@ -117,6 +117,7 @@ async function claimOne(
         agent: leases.holder.agent,
         what: fileOf(edit, context),
         said: refused.asked ?? refused.reason,
+        ...(refused.leaseId === undefined ? {} : { leaseId: refused.leaseId }),
       })
       .catch(() => undefined);
   }

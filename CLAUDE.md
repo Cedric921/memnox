@@ -662,6 +662,22 @@ own copy of the old gap, classing a row by the tool's name after ruling on its s
 and taking neither `--role` nor `--for`. What it does not do is read the agent's
 reasoning: that takes a model on the enforcement path, and matching words in text the
 agent writes is a check the agent can steer.
+
+**A collision is a conversation between two people, so it travels like one.** A write held
+off by another machine's lease now reaches the notch in about a fifth of a second, because
+`NoticeWatcher.followCollisions` stats the clash folder every 200 ms rather than waiting for
+the ten second news look; a file watch was tried and refused by the sandbox, out of band,
+which in a daemon is a crash. The daemon, not the Mac app, holds the person's workspace
+stream (`daemon/workspace-stream.ts`), because the app polls its inbox every twenty seconds
+and the daemon already speaks to the app instantly. The cloud's `me/handovers` routes carry
+an ask to the holding machine's owner and the answer back, statelessly: only that owner may
+answer, so the fields the answer quotes back can move nobody's lines but their own. Both
+arrive as `collision` notices, which the Mac app already says whatever the speak up setting
+and listens after, so no Swift changed. `ask_for_lines` and `answer_ask_for_lines` act at
+once because a lease is coordination, never a rule. The same stream carries incidents,
+exception requests and calls short of their approvals to whoever can act on them;
+`acknowledge_incident` and `reject_exception` act by voice, and approving an exception stays
+in the console because it loosens a rule.
 ---
 
 ## Sequencing and staffing

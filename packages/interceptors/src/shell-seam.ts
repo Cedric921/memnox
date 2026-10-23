@@ -326,7 +326,7 @@ export class ShellSeam {
         const verdict = await leases.gate.claim(scope, leases.holder, intent);
         if (proceeds(verdict)) continue;
         const message = verdict.message ?? `${scope} is held by another agent.`;
-        await this.noteClash(scope, verdict.asked ?? message);
+        await this.noteClash(scope, verdict.asked ?? message, verdict.sharedLeaseId);
         return { message, exitCode: SHELL_EXIT_WITHHELD };
       }
     }
@@ -334,7 +334,7 @@ export class ShellSeam {
   }
 
   /** Kept for the voice to tell the person; never in the way of the refusal itself. */
-  private async noteClash(what: string, said: string): Promise<void> {
+  private async noteClash(what: string, said: string, leaseId?: string): Promise<void> {
     const { home, leases } = this.deps;
     if (home === undefined || leases === undefined) return;
     await new Clashes(home)
@@ -344,6 +344,7 @@ export class ShellSeam {
         agent: leases.holder.agent,
         what,
         said,
+        ...(leaseId === undefined ? {} : { leaseId }),
       })
       .catch(() => undefined);
   }

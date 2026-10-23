@@ -1,0 +1,206 @@
+import {
+  askFrom,
+  DAEMON_EVENT,
+  describeAsk,
+  describeReply,
+  HANDOVER_EVENT,
+  Handovers,
+  NOTICE_KIND,
+  replyFrom,
+  workspaceAskFrom,
+  WorkspaceAsks,
+  type DaemonEvent,
+} from '@memnox/core';
+import { readPerson, type PersonCredential } from '../sync/person';
+
+/**
+ * The person's live stream from their workspace, held open by the daemon rather than the
+ * Mac app, so what reaches them is said the moment it lands: an ask for lines their agent
+ * holds, the answer to one they sent, and what they approve. Comes in, never out.
+ */
+
+/** First retry after a dropped stream, doubling to the longest, so a dead network is not hammered. */
+const FIRST_RETRY_MS = 1_000;
+const LONGEST_RETRY_MS = 60_000;
+/** How often a Mac with nobody signed in looks again, since they may sign in at any moment. */
+const SIGNED_OUT_LOOK_MS = 30_000;
+
+const SSE_ACCEPT = 'text/event-stream';
+/** Who a notice from the workspace itself is from, since no agent on this machine raised it. */
+const WORKSPACE_AGENT = 'workspace';
+const FRAME_END = '\n\n';
+
+/** One server-sent event, as the stream framed it. */
+interface StreamFrame {
+  event: string;
+  data: string;
+}
+
+interface WorkspaceStreamDeps {
+  home: string;
+  tell: (event: DaemonEvent) => void;
+  now: () => string;
+  fetcher?: typeof fetch;
+  sleep?: (ms: number) => Promise<void>;
+}
+
+export class WorkspaceStream {
+  private running = false;
+  private controller: AbortController | null = null;
+
+  constructor(private readonly deps: WorkspaceStreamDeps) {}
+
+  /** Holds the stream open until stopped, coming back after every drop. */
+  start(): void {
+    if (this.running) return;
+    this.running = true;
+    void this.loop();
+  }
+
+  stop(): void {
+    this.running = false;
+    this.controller?.abort();
+    this.controller = null;
+  }
+
+  /** One event off the stream, said to the person where it is for them. */
+  async heard(frame: StreamFrame): Promise<void> {
+    const data = parsed(frame.data);
+    if (frame.event === HANDOVER_EVENT.ASKED) {
+      const ask = askFrom(data);
+      if (ask === null) return;
+      await new Handovers(this.deps.home).keep(ask);
+      this.deps.tell(
+        notice(`ntc_handover_${ask.id}`, ask.heldBy.agent, describeAsk(ask), ask.askedAt),
+      );
+      return;
+    }
+    if (frame.event === HANDOVER_EVENT.ANSWERED) {
+      const reply = replyFrom(data);
+      if (reply === null) return;
+      const subject = `ntc_handover_${reply.leaseId}_${reply.answeredAt}`;
+      this.deps.tell(
+        notice(subject, reply.byName, describeReply(reply), reply.answeredAt),
+      );
+      return;
+    }
+    await this.askedOf(frame.event, data);
+  }
+
+  /** An incident, an exception or a call short of its approvals, said whatever the speak up setting. */
+  private async askedOf(event: string, data: unknown): Promise<void> {
+    const ask = workspaceAskFrom(event, data, this.deps.now());
+    if (ask === null) return;
+    await new WorkspaceAsks(this.deps.home).keep(ask);
+    this.deps.tell({
+      kind: DAEMON_EVENT.NOTICE,
+      notice: NOTICE_KIND.WATCHED,
+      subject: `ntc_${ask.key}`,
+      agent: WORKSPACE_AGENT,
+      summary: ask.said,
+      at: ask.at,
+    });
+  }
+
+  private async loop(): Promise<void> {
+    let retry = FIRST_RETRY_MS;
+    while (this.running) {
+      const person = await readPerson(this.deps.home).catch(() => null);
+      if (person === null) {
+        await this.wait(SIGNED_OUT_LOOK_MS);
+        continue;
+      }
+      const opened = await this.follow(person);
+      // A stream that opened and later dropped was healthy, so the next try is quick again.
+      retry = opened ? FIRST_RETRY_MS : Math.min(retry * 2, LONGEST_RETRY_MS);
+      if (this.running) await this.wait(retry);
+    }
+  }
+
+  /** True when the stream opened, whatever ended it afterwards. */
+  private async follow(person: PersonCredential): Promise<boolean> {
+    const controller = new AbortController();
+    this.controller = controller;
+    try {
+      const response = await (this.deps.fetcher ?? fetch)(
+        new URL(
+          `/v1/workspaces/${encodeURIComponent(person.workspaceId)}/me/stream`,
+          person.baseUrl,
+        ),
+        {
+          headers: { accept: SSE_ACCEPT, authorization: `Bearer ${person.token}` },
+          signal: controller.signal,
+        },
+      );
+      if (!response.ok || response.body === null) return false;
+      await this.read(response.body);
+      return true;
+    } catch {
+      // Dropped, refused or stopped: the loop decides whether to come back.
+      return false;
+    }
+  }
+
+  private async read(body: ReadableStream<Uint8Array>): Promise<void> {
+    const decoder = new TextDecoder();
+    let buffer = '';
+    for await (const chunk of body) {
+      buffer += decoder.decode(chunk, { stream: true });
+      const { frames, rest } = framesIn(buffer);
+      buffer = rest;
+      for (const frame of frames) await this.heard(frame).catch(() => undefined);
+    }
+  }
+
+  private wait(ms: number): Promise<void> {
+    const sleep =
+      this.deps.sleep ??
+      ((delay: number) =>
+        new Promise<void>((resolve) => setTimeout(resolve, delay).unref()));
+    return sleep(ms);
+  }
+}
+
+/** Whole frames off the front of what arrived, and the part still coming. Comments are dropped. */
+export function framesIn(buffer: string): { frames: StreamFrame[]; rest: string } {
+  const normalized = buffer.replace(/\r\n/g, '\n');
+  const parts = normalized.split(FRAME_END);
+  const rest = parts.pop() ?? '';
+  const frames = parts.flatMap((part) => {
+    let event = '';
+    const data: string[] = [];
+    for (const line of part.split('\n')) {
+      if (line.startsWith('event:')) event = line.slice('event:'.length).trim();
+      else if (line.startsWith('data:'))
+        data.push(line.slice('data:'.length).trimStart());
+    }
+    return event === '' ? [] : [{ event, data: data.join('\n') }];
+  });
+  return { frames, rest };
+}
+
+/** A collision the person sorts out, which the Mac app says at once and listens after. */
+function notice(
+  subject: string,
+  agent: string,
+  summary: string,
+  at: string,
+): DaemonEvent {
+  return {
+    kind: DAEMON_EVENT.NOTICE,
+    notice: NOTICE_KIND.COLLISION,
+    subject,
+    agent,
+    agentName: agent,
+    summary,
+    at,
+  };
+}
+
+function parsed(data: string): unknown {
+  try {
+    return JSON.parse(data) as unknown;
+  } catch {
+    return null;
+  }
+}
