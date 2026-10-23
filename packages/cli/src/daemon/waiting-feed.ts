@@ -85,7 +85,7 @@ export class WaitingFeed {
       ...(request.files === undefined ? {} : { files: request.files }),
       ...(request.excerpt === undefined ? {} : { excerpt: request.excerpt }),
       ...(request.pages === undefined ? {} : { pages: request.pages }),
-      ...(request.agents === undefined ? {} : { agents: request.agents }),
+      ...scanOf(request),
       ...(request.trace === undefined ? {} : { trace: request.trace }),
       ...(request.signIn === undefined ? {} : { signIn: request.signIn }),
       ...appOf(request),
@@ -443,5 +443,13 @@ function teamAnswerOf(proposal: Proposal): Pick<DaemonEvent, 'teamAnswer'> {
   if (change.kind !== PROPOSAL_KIND.TEAM) return {};
   return {
     teamAnswer: { callId: change.callId, answer: change.answer, label: change.label },
+  };
+}
+
+/** On AGENTS, the agents and the machine's count of what they can change. */
+function scanOf(request: DisplayRequest): Pick<DaemonEvent, 'agents' | 'capabilities'> {
+  return {
+    ...(request.agents === undefined ? {} : { agents: request.agents }),
+    ...(request.capabilities === undefined ? {} : { capabilities: request.capabilities }),
   };
 }

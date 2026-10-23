@@ -978,8 +978,7 @@ describe('showing every agent on the whole screen', () => {
       await showAgentsTool(
         deps,
         {},
-        async () => report,
-        async () => heard,
+        { scan: async () => report, heard: async () => heard, full: async () => null },
       ),
     ).toMatchObject({
       shown: true,
@@ -1011,7 +1010,7 @@ describe('showing every agent on the whole screen', () => {
   it('says so when the scan finds nothing, rather than an empty screen', async () => {
     const deps = await depsAt();
     const empty = { agents: [], surfaces: [] } as unknown as DiscoveryReport;
-    expect(await showAgentsTool(deps, {}, async () => empty)).toMatchObject({
+    expect(await showAgentsTool(deps, {}, { scan: async () => empty })).toMatchObject({
       shown: false,
     });
   });

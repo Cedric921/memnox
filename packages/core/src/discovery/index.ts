@@ -42,6 +42,8 @@ export * from './browser';
 export * from './desktop';
 export * from './repo-evidence';
 export * from './gap';
+export * from './capabilities';
+export * from './tool-lists';
 export * from './frontmatter';
 export * from './skills';
 export * from './skill-store';

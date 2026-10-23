@@ -15,9 +15,7 @@ import {
   floats,
   foreignHooks,
   launchPinOf,
-  gapLines,
   GRANT,
-  measureGap,
   principalCount,
   SENSITIVITY,
   SURFACE_KIND,
@@ -31,14 +29,16 @@ import { TONE, type FlowRow } from '../flow';
 import type { LocalCounts } from '../local-counts';
 import { describeCount } from '../plural';
 import { renderWhatDidNotLoad } from '../policy-path';
+import { agentKinds, renderGap } from './gap-report';
 
 /** What is on this machine, as one card of counts and then the things that are wrong. */
 export function renderMachine(
   context: CliContext,
   report: DiscoveryReport,
   counts: LocalCounts,
-  lifecycle?: AgentLifecycle,
+  seen: { lifecycle?: AgentLifecycle; unasked?: readonly string[] } = {},
 ): void {
+  const { lifecycle, unasked = [] } = seen;
   if (report.agents.length === 0) {
     // With no fixtures there is no pretty default, so an empty machine reads as an answer.
     context.flow.close('No AI agents found on this machine.');
@@ -66,44 +66,13 @@ export function renderMachine(
   renderReachable(context, report);
   // A broken file is never reported as no rules, and the other repositories stay in force.
   renderWhatDidNotLoad(context, counts);
-  renderGap(context, report, counts);
-}
-
-function agentKinds(report: DiscoveryReport): string[] {
-  return report.agents.map((agent) => agent.kind);
+  renderGap(context, report, counts, unasked);
 }
 
 /** Everything an agent with a shell reaches, whether or not Memnox can see the call. */
 function toolsRow(report: DiscoveryReport): FlowRow[] {
   if (report.tools.length === 0) return [];
   return [{ label: 'tools', value: report.tools.map((tool) => tool.name).join(', ') }];
-}
-
-/** What can reach outside this laptop against how much of it anything checks, as counts. */
-function renderGap(
-  context: CliContext,
-  report: DiscoveryReport,
-  counts: LocalCounts,
-): void {
-  const { flow, style } = context;
-  const surfaces = report.surfaces.filter((surface) => surface.kind !== SURFACE_KIND.MCP);
-  const gap = measureGap(report, counts.policies);
-  flow.close(
-    gap.governed === 0
-      ? style.warn(
-          `${surfaces.length} execution surfaces, and nothing is checking any of them.`,
-        )
-      : `${surfaces.length} execution surfaces.`,
-  );
-  for (const line of gapLines(gap)) flow.hint(line);
-  if (counts.approvedAgents.length === 0) {
-    flow.hint(
-      'No agent has been approved or refused here. Decide with ' +
-        `"memnox config set approvedAgents ${agentKinds(report).join(',')}".`,
-    );
-  }
-  flow.hint('memnox explain <name>   where any of these comes from');
-  flow.hint('memnox protect          put the dangerous ones behind ask or deny');
 }
 
 /** How an agent that is not asking decides, in the words a person repeats. */

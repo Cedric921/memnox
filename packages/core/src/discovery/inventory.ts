@@ -1,3 +1,4 @@
+import { CAPABILITY_AREA, type CapabilityTally } from './capabilities';
 import { HOST_LOCATION, HOST_SIGNATURE } from './agent-host';
 import { APPROVAL_STATE } from './approval-posture';
 import { RESOURCE_KIND, SENSITIVITY } from './discovery.constants';
@@ -123,6 +124,8 @@ export interface CapabilityInventory {
   /** Flat, so a consumer never has to walk a nesting to count the chains. */
   chains: InventoryChain[];
   hooks: InventoryHook[];
+  /** Set by `memnox scan --json`: what can change something outside, counted and by area. */
+  capabilities?: CapabilityTally;
 }
 
 const GIT_BINARIES = ['git', 'gh'];
@@ -467,5 +470,25 @@ export const CAPABILITY_INVENTORY_SCHEMA = {
       },
     },
     hooks: { type: 'array', items: INVENTORY_HOOK_SCHEMA },
+    capabilities: {
+      type: 'object',
+      required: ['areas'],
+      additionalProperties: false,
+      properties: {
+        total: { type: 'integer', minimum: 0 },
+        areas: {
+          type: 'array',
+          items: {
+            type: 'object',
+            required: ['area', 'count'],
+            additionalProperties: false,
+            properties: {
+              area: { enum: Object.values(CAPABILITY_AREA) },
+              count: { type: 'integer', minimum: 1 },
+            },
+          },
+        },
+      },
+    },
   },
 } as const;

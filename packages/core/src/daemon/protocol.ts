@@ -4,6 +4,7 @@
  */
 import type { MachineStanding, PersonStanding } from './person-standing';
 import type { DecisionEffect } from '../constants/decision.constants';
+import type { CapabilityTally } from '../discovery/capabilities';
 import type { RunTally } from '../session/notices';
 import type { TurnTests } from '../session/turn-tests';
 import type { DeliveryProof, Sight, Witness } from './delivery';
@@ -316,6 +317,8 @@ export interface DaemonEvent extends ExtensionEventFields {
   pages?: WalkPage[];
   /** On AGENTS, every agent the scan found. */
   agents?: AgentNode[];
+  /** On AGENTS, what the machine can change outside itself; `total` is absent while still counting. */
+  capabilities?: CapabilityTally;
   /** On TRACE, the waterfall to draw. */
   trace?: TraceCard;
   /** On DRAFT, the message to put in front of the person before it is sent. */
@@ -362,6 +365,11 @@ export interface AgentNode {
   mcp?: AgentServer[];
   /** Command line tools signed in on this Mac that its shell can run, by name. */
   clis?: string[];
+  /**
+   * Each capability on the machine credited to the first agent that reaches it, so adding the
+   * agents up gives the machine's real count. No `total` means still counting, never zero.
+   */
+  capabilities?: CapabilityTally;
 }
 
 /** One MCP server as the scan screen names it; counts are absent where no scan has asked it. */
