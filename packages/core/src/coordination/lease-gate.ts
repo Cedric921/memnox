@@ -124,7 +124,12 @@ function heldElsewhere(result: HeldElsewhere, now: string): string {
     result.leaseId === undefined
       ? ''
       : ` A person can free them now by running \`memnox lock --free ${result.leaseId}\`.`;
-  return `${held}${quiet(result, now)}${free}`;
+  // Agents settle it between themselves first, so a person is only brought in when they must be.
+  const ask =
+    result.leaseId === undefined
+      ? ''
+      : ` Ask it directly with memnox_message_agent, lease "${result.leaseId}".`;
+  return `${held}${quiet(result, now)}${ask}${free}`;
 }
 
 /** The same answer with no lease to name, so no command to free it is offered. */
