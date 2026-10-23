@@ -59,6 +59,8 @@ export interface HoldRequest {
   approvalId?: string;
   /** The rule that asked, by name, so the workspace can put it to that rule's approvers. */
   rule?: string;
+  /** The way forward the rule named, as the agent reads it, so a no still leaves it one. */
+  alternative?: string;
   /**
    * Everything it changes stays inside the session's repository, so a yes needs no
    * fingerprint. Absent asks for one, which is every call that reaches further.

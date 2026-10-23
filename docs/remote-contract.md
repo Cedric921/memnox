@@ -75,7 +75,11 @@ nonzero return code.
 - `wss://api.memnox.com/v1/relay`, overridable with `MEMNOX_RELAY_URL` on the runtime and a
   debug setting on the phone, for a local relay in tests.
 - The connection authenticates with `Authorization: Bearer <token>`:
-  - `mch_` the machine token. The connection carries every mailbox that machine created.
+  - `mch_` the machine token. The connection carries every mailbox that machine created. A Mac
+    with no account has one too: the first pairing registers a personal space for it with
+    `POST /v1/device-spaces` (two public keys and a small proof of work, no credential), whose
+    one machine holds an ordinary `mch_`. Signing in later claims the space, and its mailboxes
+    move to the account's machine, so a paired phone is never paired again.
   - `rlp_` a pairing token, scoped to one mailbox, single use, 120 seconds.
   - `rly_` a phone token, scoped to one mailbox, lasts until revoked.
 - A mailbox id is 16 random bytes, written base64url without padding in JSON and the QR.
@@ -205,7 +209,7 @@ on the Mac changes.
 | Capability | Methods and answers it covers                                                                                                                                   | Phone default                             |
 | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
 | `see`      | `ping`, `sessions-list`, `session-view`, `waiting`, `subscribe`, `trace`, `voice-agents`, `voice-choice` without `voice`, `files-list`, `home`, `voice-release` | on                                        |
-| `ask`      | `ask`, `cancel`, `warm`, `brief`, `speak`, `hand-over`                                                                                                          | on                                        |
+| `ask`      | `ask`, `cancel`, `warm`, `brief`, `speak`, `hand-over`, `rule`                                                                                                  | on                                        |
 | `answer`   | `confirm` on a held call or an `answer` proposal                                                                                                                | on, a yes is signed                       |
 | `steer`    | `confirm` on a stop, freeze or resume proposal, and `follow-up`, which is signed                                                                                | on, a yes is signed                       |
 | `rules`    | `confirm` on a rule proposal                                                                                                                                    | off                                       |
@@ -293,6 +297,13 @@ A remote yes is always signed by that device's key, so the `withinSession` excep
 local socket callers only. A remote deny or decline needs no signature. Pairing, devices,
 `register-key`, setting the voice, and every core method stay local.
 
+A `confirm` that says no to a held call (`deny`, or `never`) may carry `reason`, what the person
+said with it. It is kept as one line of at most 200 characters on the held call, so the agent is
+told "said no to this, and said: ..." beside the rule's own way forward; a reason sent with a yes
+is dropped. `never` is "deny from now on": the call is refused now, unsigned like any no, and a
+deny rule for that agent, action and target goes on a `rules` card with the reason as the rule's
+own, which the person places and signs like `always`.
+
 ## Answering a team's question by voice
 
 A question the workspace routed to the person never reaches this machine; only the devices
@@ -351,6 +362,25 @@ approval, and secrets never appear.
 approved. Nothing changes until that proposal is confirmed, which needs `rules`; a phone without
 that grant shows "Confirm on your Mac, or let this phone change rules". An action that was ever
 refused, or has not been approved often enough, is refused with `ok: false` and a reason.
+
+`rule` (under `ask`) takes `said`, one sentence such as "never let an agent send customer
+records to an unapproved destination", and answers `{ rule }`: the `draft` in the runtime's own
+match fields (`effect`, `operation`, `agent`, `targets` with `!` exclusions,
+`dataClassifications`, `classes`, `branches`, `alternative`), its `readBack` in plain words,
+`openQuestions`, `draftedBy` (`pattern` for a fixed grammar, `model` for the workspace's model),
+`note` where the workspace says why no model read it, and `offeredToTeam`. On an enrolled machine
+the sentence goes to the workspace's `from-sentence` on the machine's own credential, and its plan
+decides whether a model drafts it: a sentence no grammar reads on a plan with no model is refused
+with the workspace's reason, which names the upgrade, and `upgrade: true` so the phone offers the plan. With no account, or offline, this machine's
+own grammar reads it and nothing else does. Either way the draft is checked by the runtime's own
+validator before it is read back. While a question is open
+nothing is proposed: the phone asks it and sends `rule` again with the same `said` and
+`approved`, the destinations the person named, joined by commas. With nothing open the answer
+also carries `proposed`, a `rules` proposal confirmed like any other, which needs `rules` and a
+Face ID signature. Once signed it holds on this machine from the next action, offline and with
+no account, and on an enrolled machine it is also sent to the team as a proposal a second admin
+approves. A sentence nobody could read is refused with `ok: false` and a reason that says how
+to say it.
 
 ## Joining a server from the console
 

@@ -33,6 +33,8 @@ export interface PendingApproval {
   answeredAt?: string;
   /** Who answered, because "who approved this" is the first postmortem question. */
   answeredBy?: string;
+  /** What the person said with a no, in their words, so the agent hears why and not only that. */
+  answerReason?: string;
   /**
    * Where it may be answered: `session` stays on this machine, `both` reaches the
    * workspace too. Absent is every call raised before the field, which the workspace saw.
@@ -143,6 +145,7 @@ export class PendingApprovals {
     answer: HoldAnswer,
     by: string,
     at: string,
+    reason?: string,
   ): Promise<AnswerOutcome> {
     const pending = await this.read(id);
     if (pending === null) return null;
@@ -153,11 +156,13 @@ export class PendingApprovals {
       return settled === null ? null : { alreadyAnswered: settled };
     }
 
+    const said = answer === HOLD_ANSWER.DENY ? answerReasonOf(reason) : undefined;
     const answered: PendingApproval = {
       ...pending,
       answer,
       answeredAt: at,
       answeredBy: by,
+      ...(said === undefined ? {} : { answerReason: said }),
     };
     await this.records.write(id, answered);
     // Granted here, since an answer from a DM used to count only if the agent retried in time.
@@ -259,4 +264,21 @@ export function describePending(pending: PendingApproval, moment: string): strin
   // Parked is the agent carrying on without it, which is why it can wait this long.
   const parked = pending.parkedAt === undefined ? '' : ', parked while it works on';
   return `${pending.id}  ${pending.request.agent} wants to ${what}  (${waited} ago${parked})`;
+}
+
+/** Longer than a person types beside a no, and short enough that it cannot carry a whole instruction set. */
+export const ANSWER_REASON_MAX = 200;
+
+/** A person's reason as the agent may be told it: one line, trimmed, clipped. Undefined when nothing is left. */
+export function answerReasonOf(raw: string | undefined): string | undefined {
+  if (raw === undefined) return undefined;
+  // Control characters and line breaks out, so a reason reads as one sentence and never as a new turn.
+  const line = raw
+    .replace(/[\u0000-\u001f\u007f]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (line === '') return undefined;
+  return line.length > ANSWER_REASON_MAX
+    ? `${line.slice(0, ANSWER_REASON_MAX - 1)}…`
+    : line;
 }

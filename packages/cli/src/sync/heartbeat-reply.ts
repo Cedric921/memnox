@@ -25,6 +25,8 @@ export interface HeartbeatAnswer {
   id: string;
   answer: string;
   by?: string;
+  /** What the person said with a no, which the agent is told beside the rule's way forward. */
+  reason?: string;
 }
 
 /**
@@ -92,7 +94,9 @@ export async function applyAnswers(
     // Checked against HOLD_ANSWER on the line above.
     const said = answer.answer as HoldAnswer;
     const by = `${answer.by ?? 'somebody'} (the workspace)`;
-    const outcome = await approvals.answer(answer.id, said, by, at);
+    // A field from the wire, so anything but a string is no reason at all.
+    const reason = typeof answer.reason === 'string' ? answer.reason : undefined;
+    const outcome = await approvals.answer(answer.id, said, by, at, reason);
     if (outcome !== null && 'answered' in outcome) {
       await recordAnswer(home, {
         request: outcome.answered.request,
