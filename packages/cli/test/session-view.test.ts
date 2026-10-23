@@ -11,7 +11,8 @@ import {
   SqliteEventStore,
   type MemnoxEvent,
 } from '@memnox/core';
-import { deliveredAs, SessionViews } from '../src/daemon/session-view';
+import { SessionViews } from '../src/daemon/session-view';
+import { deliveredAs } from '../src/daemon/session-view-steps';
 
 const NOW = new Date('2026-10-02T12:00:00.000Z');
 

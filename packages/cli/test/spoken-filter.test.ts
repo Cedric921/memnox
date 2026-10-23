@@ -6,7 +6,8 @@ import { BrainTurns } from '../src/daemon/brain-turns';
 import { SpokenFilter } from '../src/daemon/spoken-filter';
 import { streamTurn, withoutHolds } from '../src/daemon/stream-turn';
 import { actedNote } from '../src/daemon/voice-ask';
-import { isAgentProgram, waitingRoute } from '../src/session-tools/instruct-tools';
+import { isAgentProgram } from '../src/session-tools/agent-foreground';
+import { waitingRoute } from '../src/session-tools/instruct-tools';
 
 function spoken(pieces: readonly (string | null)[]): string {
   const filter = new SpokenFilter();

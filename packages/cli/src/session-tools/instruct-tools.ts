@@ -1,5 +1,3 @@
-import { execFileSync } from 'node:child_process';
-import { basename } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import {
   DELIVERY,
@@ -32,6 +30,7 @@ import { isHermesSession } from '../daemon/hermes-view';
 import { typedInItsApp } from './app-follow-up';
 import { HERMES_SAID, resumeHermes, type ResumeHermes } from './hermes-instruct';
 import { FINDS_ITS_TAB } from './session-tools.constants';
+import { agentInForeground } from './agent-foreground';
 
 /**
  * Telling an agent what the person said out loud, read back first since a recognizer hears
@@ -53,18 +52,6 @@ type Route = (typeof ROUTE)[keyof typeof ROUTE];
 
 /** A turn asked longer ago than this and never handed back is an agent that went away, not one working. */
 const WORKING_WITHIN_MS = 2 * HOUR_MS;
-
-/** What runs a coding agent in a terminal, so text is only ever typed into the agent and never a shell. */
-const AGENT_PROGRAMS = /^(claude|node|codex|gemini|cursor-agent|aider|opencode)$/i;
-
-/** A native install runs a binary named for its version, like `~/.local/share/claude/versions/2.1.3`, so its folder names the agent. */
-const AGENT_FOLDERS =
-  /\/(claude|codex|gemini|cursor-agent|aider|opencode)\/(versions\/)?[^/]+$/i;
-
-/** Whether the program in front is an agent, by its name or by the folder a native install keeps it in. */
-export function isAgentProgram(command: string): boolean {
-  return AGENT_PROGRAMS.test(basename(command)) || AGENT_FOLDERS.test(command);
-}
 
 const OPENCLAW = 'openclaw';
 
@@ -396,7 +383,7 @@ function failedTyping(
 }
 
 /** How a send may reach a session beyond what the voice's own sends do. */
-export interface SendOptions {
+interface SendOptions {
   /**
    * The person's own typed words go into a working agent's prompt where it can be typed into, so they appear in
    * the session as their message, which the agent queues itself, rather than as a note nobody sees arrive.
@@ -494,20 +481,3 @@ export async function awaitDelivery(
 
 /** What an editor extension from before the hand over writes when no terminal holds the session. */
 const OLD_EXTENSION_NO_TERMINAL = 'no integrated terminal holds its device';
-
-/** Whether the terminal's foreground program is a coding agent, so the words never land in a bare shell. */
-function agentInForeground(tty: string): boolean {
-  try {
-    const listing = execFileSync('ps', ['-o', 'stat=,comm=', '-t', basename(tty)], {
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-    });
-    return listing.split('\n').some((line) => {
-      const [stat, ...command] = line.trim().split(/\s+/);
-      return stat?.includes('+') === true && isAgentProgram(command.join(' '));
-    });
-  } catch {
-    // No such terminal, or ps refused: nothing is typed anywhere unseen.
-    return false;
-  }
-}

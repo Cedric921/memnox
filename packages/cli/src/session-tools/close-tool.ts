@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { DISPLAY, DisplayRequests, SessionHosts, wentIn } from '@memnox/core';
-import { isAgentProgram } from './instruct-tools';
+import { isAgentProgram } from './agent-foreground';
 import { liveHost } from './live-host';
 import { sessionMarks } from './session-marks';
 import { closePane, paneOn, type Pane } from './multiplexer';

@@ -87,39 +87,59 @@ export function turnsOf(
     const to = starts[index + 1]?.at ?? AFTER_EVERY_MOMENT;
     const said = lines.filter((line) => line.at >= ask.at && line.at < to);
     const done = rows.filter((row) => row.at >= from && row.at < to);
-    const answer = [...said].reverse().find((line) => line.who === SPEAKER.AGENT);
-    // Everything it said before its answer is it explaining itself as it went.
-    const along = said.filter((line) => line.who === SPEAKER.AGENT && line !== answer);
-    const explained = along
-      .slice(-MOST_EXPLAINED)
-      .map((line) => clipped(line.text, MOST_EXPLAINED_CHARS));
     return {
       at: ask.at,
       asked: clipped(ask.text, MOST_ASK_CHARS),
-      ...(answer === undefined
-        ? {}
-        : { answered: clipped(answer.text, MOST_ANSWER_CHARS) }),
-      tools: said.filter((line) => line.who === SPEAKER.TOOL).length,
-      explained,
-      ...(along.length > explained.length
-        ? { moreExplained: along.length - explained.length }
-        : {}),
-      ...wroteIn(done),
-      committed: done.filter((row) => went(row, ACTION.GIT_COMMIT)).length,
-      pushed: done
-        .filter((row) => went(row, ACTION.GIT_PUSH))
-        .map((row) => row.target ?? 'its branch'),
-      refused: done
-        .filter((row) => row.effect === DECISION_EFFECT.DENY)
-        .slice(0, MOST_REFUSALS_NAMED)
-        .map((row) =>
-          [row.operation, row.target].filter((part) => part !== undefined).join(' '),
-        ),
-      askedYou: done.filter((row) => row.effect === DECISION_EFFECT.ASK).length,
-      failed: done.filter((row) => row.exitCode !== undefined && row.exitCode !== 0)
-        .length,
+      ...toldIn(said),
+      ...didIn(done),
     };
   });
+}
+
+/** What the agent said in one turn: its answer, and what it explained on the way there. */
+function toldIn(
+  said: readonly ConversationLine[],
+): Pick<HistoryTurn, 'answered' | 'tools' | 'explained' | 'moreExplained'> {
+  const answer = [...said].reverse().find((line) => line.who === SPEAKER.AGENT);
+  // Everything it said before its answer is it explaining itself as it went.
+  const along = said.filter((line) => line.who === SPEAKER.AGENT && line !== answer);
+  const explained = along
+    .slice(-MOST_EXPLAINED)
+    .map((line) => clipped(line.text, MOST_EXPLAINED_CHARS));
+  return {
+    ...(answer === undefined
+      ? {}
+      : { answered: clipped(answer.text, MOST_ANSWER_CHARS) }),
+    tools: said.filter((line) => line.who === SPEAKER.TOOL).length,
+    explained,
+    ...(along.length > explained.length
+      ? { moreExplained: along.length - explained.length }
+      : {}),
+  };
+}
+
+/** What the ledger saw it do in one turn. */
+function didIn(
+  done: readonly MemnoxEvent[],
+): Omit<
+  HistoryTurn,
+  'at' | 'asked' | 'answered' | 'tools' | 'explained' | 'moreExplained'
+> {
+  return {
+    ...wroteIn(done),
+    committed: done.filter((row) => went(row, ACTION.GIT_COMMIT)).length,
+    pushed: done
+      .filter((row) => went(row, ACTION.GIT_PUSH))
+      .map((row) => row.target ?? 'its branch'),
+    refused: done
+      .filter((row) => row.effect === DECISION_EFFECT.DENY)
+      .slice(0, MOST_REFUSALS_NAMED)
+      .map((row) =>
+        [row.operation, row.target].filter((part) => part !== undefined).join(' '),
+      ),
+    askedYou: done.filter((row) => row.effect === DECISION_EFFECT.ASK).length,
+    failed: done.filter((row) => row.exitCode !== undefined && row.exitCode !== 0).length,
+  };
 }
 
 function wroteIn(
