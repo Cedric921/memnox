@@ -62,6 +62,12 @@ export async function answerPause(
   await recordActivity(pause, context);
   if (pause.moment === SESSION_MOMENT.AFTER_TOOL) await takeOverIfAllowed(pause, context);
   const notes = await notesAt(pause, context);
+  await recordPickedUp(
+    notes.filter(fromAnAgent),
+    pause.sessionId,
+    context,
+    FROM_AN_AGENT,
+  );
   // A collision note goes on the person's screen
   // too, since they are usually in another window.
   const collided = notes.filter((note) => note.kind === NOTE_KIND.COORDINATION);
@@ -172,6 +178,14 @@ async function spokenFor(
   return found;
 }
 
+/** What the hook says it handed over from another agent, so `why` and the timeline show the conversation. */
+const FROM_AN_AGENT =
+  "another agent's message, handed to the session by its own hook at its next step";
+
+function fromAnAgent(note: SessionNote): boolean {
+  return note.kind === NOTE_KIND.AGENT || note.kind === NOTE_KIND.AGENT_ASK;
+}
+
 /** What the hook says it handed over, so the person's words are only called delivered once the session took them. */
 const PICKED_UP = "the session's own hook handing it over at its next step";
 
@@ -179,6 +193,7 @@ async function recordPickedUp(
   spoken: readonly SessionNote[],
   sessionId: string,
   context: EditHookContext,
+  checked: string = PICKED_UP,
 ): Promise<void> {
   if (spoken.length === 0) return;
   const at = context.now().toISOString();
@@ -192,7 +207,7 @@ async function recordPickedUp(
             agent: context.agent,
             text: note.message,
             outcome: DELIVERY.VERIFIED,
-            proof: { checked: PICKED_UP },
+            proof: { checked },
             at,
           }),
         );
