@@ -58,7 +58,8 @@ export interface Classification {
 
 export type ToolOverrides = Readonly<Record<string, ToolClass>>;
 
-function isToolClass(value: string): value is ToolClass {
+/** A class named by a caller or a hand-edited file, narrowed before it is trusted. */
+export function isToolClass(value: string): value is ToolClass {
   // Widened for the lookup, which is what narrows `value`.
   return (Object.values(TOOL_CLASS) as readonly string[]).includes(value);
 }

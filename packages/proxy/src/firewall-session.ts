@@ -1,5 +1,6 @@
 import {
   classifyToolCall,
+  ruledFor,
   type McpToolDeclaration,
   DECISION_EFFECT,
   describeAlternative,
@@ -349,6 +350,12 @@ export class FirewallSession {
       ...(verdict.rule === undefined ? {} : { rule: verdict.rule }),
       ...(verdict.decisionId === undefined ? {} : { decisionId: verdict.decisionId }),
       ...(result === undefined ? {} : { result }),
+      class: classifyToolCall(
+        call.name,
+        call.arguments ?? {},
+        this.deps.manifest?.declaration(call.name),
+      ).class,
+      ...ruledFor(verdict),
     });
   }
 

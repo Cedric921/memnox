@@ -24,6 +24,8 @@ export interface CallVerdict {
   reason: string;
   /** What the local pass found: rule ids only, safe to send onward. */
   signals?: string[];
+  /** The person this was ruled for, as the run named them. */
+  principal?: string;
   /** What the agent may use instead, carried into the denial the client reads. */
   alternative?: Alternative;
   /** The verdict this came from, so a proxied call joins its decision in the ledger. */
@@ -100,6 +102,7 @@ export class LocalGateAuthorizer implements CallAuthorizer {
       effect: verdict.effect,
       reason: verdict.reason,
       signals: verdict.signals,
+      ...(verdict.principal === undefined ? {} : { principal: verdict.principal }),
       // A local refusal names its alternative too, or offline is a dead end.
       ...(verdict.alternative === undefined ? {} : { alternative: verdict.alternative }),
       ...(decided === undefined ? {} : { rule: decided.name }),

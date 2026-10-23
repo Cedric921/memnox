@@ -1,4 +1,5 @@
 import {
+  ruledFor,
   ACTION,
   DECISION_EFFECT,
   describeAlternative,
@@ -61,6 +62,10 @@ export interface ShellDecision {
   alternative?: Alternative;
   environment?: string;
   outOfScope?: boolean;
+  /** What the gate found, as ids, so the row can say which part of the context decided. */
+  signals?: readonly string[];
+  /** The person this was ruled for, as the run named them. */
+  principal?: string;
 }
 
 export interface ShellOutcome {
@@ -408,5 +413,6 @@ function decisionOf(ruling: Ruling, asked: boolean): ShellDecision {
       ? {}
       : { environment: ruling.verdict.environment }),
     ...(ruling.verdict.outOfScope === true ? { outOfScope: true } : {}),
+    ...ruledFor(ruling.verdict),
   };
 }

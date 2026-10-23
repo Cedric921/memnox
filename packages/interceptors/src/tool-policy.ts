@@ -1,4 +1,5 @@
 import {
+  ruledFor,
   AGENT_FROZEN_REASON,
   ACTOR_TYPE,
   applyEnforcementMode,
@@ -55,6 +56,10 @@ export interface ToolRuling {
   alternative?: Alternative;
   /** Outside the task the session declared, which the circuit breaker counts. */
   outOfScope?: boolean;
+  /** What the gate found, as ids, so the row can say which part of the context decided. */
+  signals?: readonly string[];
+  /** The person this was ruled for, as the run named them. */
+  principal?: string;
 }
 
 export interface ToolPolicyDeps {
@@ -104,6 +109,7 @@ export async function ruleOnTool(
     ...(verdict.rule === undefined ? {} : { rule: verdict.rule }),
     ...(verdict.alternative === undefined ? {} : { alternative: verdict.alternative }),
     ...(verdict.outOfScope === true ? { outOfScope: true } : {}),
+    ...ruledFor(verdict),
   };
 }
 
@@ -171,6 +177,7 @@ async function ruleOnLine(call: ToolCall, deps: ToolPolicyDeps): Promise<Ruled> 
         ? {}
         : { environment: decision.environment }),
       ...(decision.outOfScope === true ? { outOfScope: true } : {}),
+      ...ruledFor(decision),
     },
   };
 }
@@ -367,6 +374,7 @@ export function toolEventFor(
       ? {}
       : { conditionsInForce: context.conditionsInForce }),
     ...(context.refused === true ? { execution: EXECUTION.BLOCKED } : {}),
+    ...ruledFor(ruling),
   };
 }
 

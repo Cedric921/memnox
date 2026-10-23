@@ -2,7 +2,9 @@ import {
   FileAllowances,
   parentAgentsOf,
   ENV_AGENT_NAME,
+  ENV_AGENT_ROLE,
   ENV_POLICIES,
+  ENV_PRINCIPAL,
   LocalGate,
   loadPolicySet,
   readPolicyFiles,
@@ -17,6 +19,10 @@ import { MCP_ACTION_PREFIX } from './firewall.constants';
 export interface LocalGateEnvironment {
   policies?: string;
   agentName?: string;
+  /** The job `memnox run --role` enrolled the agent under, which a rule's `roles:` matches. */
+  agentRole?: string;
+  /** The person `memnox run --for` named, which a rule's `principals:` matches. */
+  principal?: string;
 }
 
 /**
@@ -51,6 +57,8 @@ export async function loadLocalGate(
   return new LocalGate(set.policies, {
     agentName: environment.agentName ?? `${MCP_ACTION_PREFIX}:${serverName}`,
     allowances: () => allowances.inForceNow(new Date().toISOString()),
+    ...(environment.agentRole === undefined ? {} : { agentRole: environment.agentRole }),
+    ...(environment.principal === undefined ? {} : { principal: environment.principal }),
     ...(environment.agentName === undefined
       ? {}
       : { parents: parentAgentsOf(process.env, environment.agentName) }),
@@ -61,5 +69,12 @@ export function localGateEnvironment(env: NodeJS.ProcessEnv): LocalGateEnvironme
   return {
     policies: env[ENV_POLICIES],
     agentName: env[ENV_AGENT_NAME],
+    agentRole: named(env[ENV_AGENT_ROLE]),
+    principal: named(env[ENV_PRINCIPAL]),
   };
+}
+
+/** An empty variable names nobody, so it is absent rather than a person called "". */
+function named(value: string | undefined): string | undefined {
+  return value === undefined || value.trim() === '' ? undefined : value;
 }

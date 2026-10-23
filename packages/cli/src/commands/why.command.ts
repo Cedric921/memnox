@@ -9,7 +9,9 @@ import { homedir } from 'node:os';
 import { promisify } from 'node:util';
 import type { Command } from 'commander';
 import {
+  actionContextOf,
   capabilityOf,
+  hasRecordedContext,
   codeownersFor,
   DECISION_EFFECT,
   describeEvidence,
@@ -25,6 +27,7 @@ import {
 import type { CliContext } from '../cli-context';
 import { withEvents } from '../event-store';
 import type { FlowRow } from '../flow';
+import { renderContext } from './why/context';
 import { leadUpTo, renderLeadUp, type LeadUp } from './why/lead-up';
 import { decidedLine, workspaceRuleOf, type WorkspaceRule } from './why/workspace-rule';
 
@@ -71,7 +74,13 @@ async function runWhy(
   await withEvents(deps.home(), async (store) => {
     const event = await findEvent(store, id, options.allowed === true);
     if (options.json === true) {
-      if (event !== undefined) context.out.json(event);
+      if (event !== undefined) {
+        context.out.json(
+          hasRecordedContext(event)
+            ? { ...event, context: actionContextOf(event) }
+            : event,
+        );
+      }
       return;
     }
     context.flow.open('memnox why');
@@ -130,6 +139,7 @@ async function renderAnswer(
 ): Promise<void> {
   const { flow, style } = context;
   renderDecision(context, event, team);
+  renderContext(context, event);
   renderLeadUp(context, leadUp);
   if (withEvidence) {
     renderEvidence(context, event);

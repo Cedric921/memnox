@@ -680,7 +680,8 @@ Declare what you asked for and it becomes enforceable: `--task "<statement>"`
 with `--paths`, `--repos`, `--services`, `--envs` (comma separated) lets a rule
 match on `scope`, and `--expect <count>` is what an action explosion is measured
 against. `--role <name>` is the job the agent is enrolled under, matched by a
-rule's `roles:`. A session that declares nothing is *undeclared* throughout,
+rule's `roles:`, and `--for <person>` is the person it works for, matched by a rule's
+`principals:`, so an agent on a shared credential never does what its person may not. A session that declares nothing is *undeclared* throughout,
 never in violation — nothing is inferred.
 
 **Writes stay in the repository.** A write or delete outside the repository the session
@@ -754,6 +755,26 @@ proxy is bounded in connections and idle time, and starts and stops with the dae
 The last thing that did not simply proceed. `--allowed` for the last allow,
 `--evidence` for the digests and the outcome. Read back from the row, never
 re-evaluated against today's rules.
+
+The **Context** block reads the action against everything that decided it, one row
+per part: `person` (who the agent worked for, from `memnox run --for`), `agent`,
+`intent` (the declared task), `tools` (what the call did), `systems` (where it landed
+and what was in force there) and `history` (what this agent had never done before, and
+what the session did on the way). A part marked `(decided)` is why the verdict came out
+the way it did, so the same DELETE reads as refused for who the agent worked for in one
+row and as new for this agent in another. A part with nothing recorded says so, since
+"no task was declared" is not the same as "inside the task". `--json` carries it as
+`context`.
+
+```
+Context
+  person   working for tier1-sam; rule only-a-dba-deletes on who the agent works for  (decided)
+  agent    support-assistant
+  intent   no task was declared, so nothing was compared
+  tools    mcp.query, a write call
+  systems  on support-db
+  history  nothing about it was new
+```
 
 ### `memnox rewind`
 Puts the working tree back to before an agent touched it. A milestone is a tree object

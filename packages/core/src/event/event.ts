@@ -119,6 +119,13 @@ export interface MemnoxEvent {
    */
   decisionIds?: readonly string[];
 
+  /**
+   * What the gate found, as ids: the rules that matched, the part of the context each was
+   * written about, and what noticing saw. Never the matched text, so `why` can say which
+   * part of the context decided without the row carrying anything the call was handed.
+   */
+  signals?: readonly string[];
+
   /** A hash of the arguments. The arguments themselves never reach a row. */
   argsDigest?: string;
 

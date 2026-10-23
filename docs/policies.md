@@ -56,6 +56,8 @@ denied — it is never invented.
 | `environments` | `production`, `staging`, whatever you name |
 | `classes` | what the action does: `read`, `write`, `destructive`, `communication`, `unknown` |
 | `arguments` | a named argument, e.g. `method = ["POST", "DELETE"]` on `http.request` |
+| `roles` | the job the agent was enrolled under, from `memnox run --role` |
+| `principals` | the person the agent works for, from `memnox run --for` |
 
 Patterns take `*`. A pattern starting with `!` takes matches back out, and `{workspace}`
 stands for the directory the agent is working in:
@@ -76,6 +78,34 @@ A list of exclusions only covers everything it does not name. A request that rep
 target, or no working directory, cannot be shown to be excluded, so the rule still
 applies to it. Claude Code's native permissions and the kernel wall cannot leave
 anything out, so an exclusion is left to the rules there, and those two stay wider.
+
+### The person behind the agent
+
+An agent on a shared database credential can do whatever every workflow on that
+credential needed, so the database cannot tell a support assistant from a DBA. The rules
+can, once the run says who the agent works for. What an agent may do is then what its own
+rules allow *and* what its person's rules allow, never either alone:
+
+```toml
+# Only somebody on the DBA team deletes rows, through whichever agent and credential.
+[[policies]]
+name = "only-a-dba-deletes"
+[policies.match]
+actions = [ "mcp.*", "psql.*" ]
+classes = [ "destructive" ]
+principals = [ "!dba-*" ]
+[policies.decision]
+effect = "deny"
+reason = "the person this agent works for may not delete rows"
+```
+
+The person comes from `memnox run --for <person>` and nothing else. A call that names a
+principal of its own is overruled by the run's, and an agent that sets or clears
+`MEMNOX_PRINCIPAL`, `MEMNOX_AGENT_ROLE`, `MEMNOX_AGENT_NAME` or `MEMNOX_PARENT_AGENTS` in
+a shell line, or runs `memnox run --for` or `--role` itself, is refused, because naming
+whose authority it holds is exactly what an agent must not do for itself. A run that names
+nobody matches no `principals = ["dba-*"]` and every `principals = ["!dba-*"]`, so a rule
+written as an exclusion fails closed.
 
 ### Reads and changes under one name
 

@@ -165,6 +165,19 @@ describe('the event store', () => {
     db.close();
   });
 
+  it('keeps what the gate found, and tells nothing found from never kept', async () => {
+    const db = await store();
+    await db.append(event({ id: 'evt_s', signals: ['policy:a, b', 'person:a, b'] }));
+    await db.append(event({ id: 'evt_e', signals: [] }));
+    await db.append(event({ id: 'evt_o' }));
+    const rows = await db.query({ limit: 10 });
+    const of = (id: string): MemnoxEvent | undefined => rows.find((row) => row.id === id);
+    expect(of('evt_s')?.signals).toEqual(['policy:a, b', 'person:a, b']);
+    expect(of('evt_e')?.signals).toEqual([]);
+    expect(of('evt_o')?.signals).toBeUndefined();
+    db.close();
+  });
+
   it('keeps the rules that were in force, so why reads them back', async () => {
     const db = await store();
     await db.recordPolicyVersion('abc123', '2026-09-05T00:00:00.000Z', 'policies: []');

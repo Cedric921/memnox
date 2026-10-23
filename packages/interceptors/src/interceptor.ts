@@ -2,6 +2,7 @@ import { accessSync, constants, statSync } from 'node:fs';
 import { basename, delimiter, join, win32 } from 'node:path';
 
 import {
+  ruledFor,
   AGENT_FROZEN_REASON,
   applyEnforcementMode,
   DECISION_EFFECT,
@@ -73,6 +74,10 @@ export interface InterceptOutcome {
   mode?: EnforcementMode;
   /** What enforce would have said, where the mode let the command run instead. */
   shadowEffect?: DecisionEffect;
+  /** What the gate found, as ids, so the row can say which part of the context decided. */
+  signals?: readonly string[];
+  /** The person this was ruled for, as the run named them. */
+  principal?: string;
 }
 
 export interface InterceptDeps {
@@ -129,7 +134,8 @@ export async function ruleOnCommand(
     ...(verdict.target === undefined ? {} : { target: verdict.target }),
   };
   const decision = gate.evaluate(request);
-  const scoped = outsideScope(decision) ? { ...base, outOfScope: true } : base;
+  const ruled = { ...base, ...ruledFor(decision) };
+  const scoped = outsideScope(decision) ? { ...ruled, outOfScope: true } : ruled;
   if (decision.effect === DECISION_EFFECT.ALLOW) return observed(scoped, decision);
 
   const decided = { ...scoped, ...decidedBy(decision) };

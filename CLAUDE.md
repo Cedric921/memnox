@@ -636,6 +636,32 @@ as "force-pushing, and hard resets" and matched `git.push`, `git.reset`, `git.cl
 so it denied every ordinary push and permitted `git push --force`, which is the whole
 point inverted. `domains.ts` now names what the verb table actually produces, and
 `domains.test.ts` asserts every destructive git verb is covered.
+
+**One DELETE, two right answers.** The same statement is routine from an agent working
+for a DBA and a breach from a support assistant whose person may only read, and an agent
+on a shared credential holds whatever every workflow on it needed. Two fields closed that.
+`principal` was parsed, matched by `principals:` and set by nothing, the same gap `roles`
+had; `memnox run --for` sets it, `LocalGate` stamps it over whatever a call claims, and
+self-protection refuses an agent that sets or clears its own identity variables, because
+naming whose authority it holds is the one thing an agent must never do for itself. And
+novelty for an MCP call was keyed by the tool's name, so a thousand reads through `query`
+vouched for its first DELETE. `mcpNovelty` keys on what the call was handed where that
+differs from the name, so the first change asks, and the first DELETE with no WHERE asks
+again after any number of bounded ones. The plain key is kept, so nothing seen before is
+forgotten.
+
+**The context has to survive the decision.** The gate already knew which rules matched,
+whether the call sat inside the task and what noticing saw, and dropped all of it before
+the row, so `why` could quote a rule and never say which part of the context it was
+written about. Every row now keeps `signals`, the gate adds one per agreeing rule naming
+its part (`person:`, `agent:`, `intent:`, `systems:`) plus `scope:`, and
+`ledger/action-context.ts` reads a row back into person, agent, intent, tools, systems
+and history with the part that decided marked. Empty and absent differ on purpose: empty
+is a gate that found nothing, absent is a row older than the column. The proxy had its
+own copy of the old gap, classing a row by the tool's name after ruling on its statement,
+and taking neither `--role` nor `--for`. What it does not do is read the agent's
+reasoning: that takes a model on the enforcement path, and matching words in text the
+agent writes is a check the agent can steer.
 ---
 
 ## Sequencing and staffing

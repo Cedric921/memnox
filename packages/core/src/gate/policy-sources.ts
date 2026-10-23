@@ -16,6 +16,16 @@ import { readPolicyRegistry } from './policy-file';
 export const ENV_POLICIES = 'MEMNOX_POLICIES';
 /** Name the local rules match on `agents:`. */
 export const ENV_AGENT_NAME = 'MEMNOX_AGENT_NAME';
+/**
+ * The job an agent was enrolled under, matched by a
+ * rule's `roles:`, which tells a workforce apart.
+ */
+export const ENV_AGENT_ROLE = 'MEMNOX_AGENT_ROLE';
+/**
+ * The person the agent works for, matched by a rule's `principals:`, since an agent that
+ * holds a shared credential must still not do what its person may not.
+ */
+export const ENV_PRINCIPAL = 'MEMNOX_PRINCIPAL';
 
 export const POLICY_PATH_SEPARATOR = ',';
 

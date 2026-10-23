@@ -39,6 +39,23 @@ describe('the row behind why, timeline and trace', () => {
     expect(event.actorType).toBe(ACTOR_TYPE.AGENT);
   });
 
+  /* Signals were found by the gate and dropped before the row, so `why` could name the rule
+     and never which part of the context it was written about. */
+  it('carries what the gate found and who the agent worked for', () => {
+    const event = commandEventFor({
+      outcome: outcome({
+        signals: ['person:only-a-dba-deletes'],
+        principal: 'tier1-sam',
+      }),
+      effect: DECISION_EFFECT.DENY,
+      reason: 'no',
+      at: AT,
+    });
+
+    expect(event.signals).toEqual(['person:only-a-dba-deletes']);
+    expect(event.principal).toBe('tier1-sam');
+  });
+
   /* An argument list is where a secret would be, so the row carries a digest of it and
      the arguments themselves never reach the database. */
   it('carries a digest of the arguments and never the arguments', () => {
