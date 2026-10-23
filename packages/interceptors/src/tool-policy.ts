@@ -1,5 +1,6 @@
 import {
   ruledFor,
+  alternativeFor,
   AGENT_FROZEN_REASON,
   ACTOR_TYPE,
   applyEnforcementMode,
@@ -127,21 +128,42 @@ async function worstOf(
       ...(request.arguments === undefined ? {} : { arguments: request.arguments }),
       ...(request.content === undefined ? {} : { content: request.content }),
       ...(request.environment === undefined ? {} : { environment: request.environment }),
+      ...(request.dataClassification === undefined
+        ? {}
+        : { dataClassification: request.dataClassification }),
       // Where the agent works, so a rule about `{workspace}` can tell inside from outside.
       ...(workingDirectory === undefined ? {} : { workingDirectory }),
     });
     const next = {
       request,
-      verdict:
+      verdict: withStatementAlternative(
         request.environment === undefined
           ? verdict
           : { ...verdict, environment: request.environment },
+        request,
+      ),
     };
     if (worst === null || severityOf(next) > severityOf(worst)) worst = next;
   }
   // A call is only built with at least one request, so this is the unreachable case.
   if (worst === null) throw new Error('a tool call with nothing to rule on');
   return worst;
+}
+
+/** A refused or held statement names the bounded one on its table, as the shell seam does. */
+function withStatementAlternative(
+  verdict: HookVerdict,
+  request: ToolRequest,
+): HookVerdict {
+  if (verdict.effect === DECISION_EFFECT.ALLOW || request.alternative === undefined) {
+    return verdict;
+  }
+  const alternative = alternativeFor(
+    verdict.alternative,
+    request.alternative,
+    request.action,
+  );
+  return alternative === undefined ? verdict : { ...verdict, alternative };
 }
 
 function severityOf(ruled: Ruled): number {

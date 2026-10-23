@@ -11,6 +11,9 @@ import {
   TOOL_CLASS,
   type ToolClass,
   type ToolDeclarations,
+  withOutgoingData,
+  databaseToolCall,
+  withStatement,
 } from '@memnox/core';
 
 import {
@@ -64,6 +67,10 @@ export interface ToolRequest {
   content?: readonly string[];
   /** The environment the call named, for a rule's `environments` and the refusal. */
   environment?: string;
+  /** What the call's payload carries about people, read where it is made, never the payload. */
+  dataClassification?: string;
+  /** The way forward a database statement names for itself, used where a rule names none. */
+  alternative?: string;
 }
 
 /** A tool call about to run, and what it does. */
@@ -338,16 +345,33 @@ function mcpRequests(
   declared: ToolDeclarations,
 ): ToolRequest[] {
   const environment = environmentOfArguments(input);
+  const database = databaseToolCall(tool, input, { server });
+  const alternative =
+    database?.alternative === undefined ? {} : { alternative: database.alternative };
   const common = {
     ...(environment === undefined ? {} : { environment }),
     target: server,
     // As the proxy classifies it, so a rule about changes lets `list_issues` through.
     class: classifyToolCall(tool, input, declared(server, tool)).class,
-    arguments: flatArguments(input),
+    arguments: flatArguments(withStatement(input, database)),
+    ...alternative,
   };
-  return [
+  // Each spelling, and each place its payload is going where it carries a customer.
+  const requests: ToolRequest[] = [
     { action: `${MCP_PREFIX}.${server}.${tool}`, ...common },
     { action: `${MCP_PREFIX}.${tool}`, ...common },
+  ].flatMap((request) => withOutgoingData(request, input));
+  if (database === null) return requests;
+  // And as a database client on PATH would be ruled on, last so a tie keeps the tool's name.
+  return [
+    ...requests,
+    {
+      action: database.action,
+      ...(database.target === undefined ? {} : { target: database.target }),
+      class: database.class,
+      ...(environment === undefined ? {} : { environment }),
+      ...alternative,
+    },
   ];
 }
 

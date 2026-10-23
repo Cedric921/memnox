@@ -132,6 +132,9 @@ export async function ruleOnCommand(
     action: verdict.action,
     toolClass: verdict.class,
     ...(verdict.target === undefined ? {} : { target: verdict.target }),
+    ...(verdict.dataClassification === undefined
+      ? {}
+      : { dataClassification: verdict.dataClassification }),
   };
   const decision = gate.evaluate(request);
   const ruled = { ...base, ...ruledFor(decision) };
@@ -379,5 +382,8 @@ export function verdictFor(
     because: resolved.because,
     ...(resolved.target === undefined ? {} : { target: resolved.target }),
     ...(resolved.alternative === undefined ? {} : { alternative: resolved.alternative }),
+    ...(resolved.dataClassification === undefined
+      ? {}
+      : { dataClassification: resolved.dataClassification }),
   };
 }

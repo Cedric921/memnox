@@ -24,6 +24,7 @@ import {
   ProbationRegister,
   quoteShellWords,
   type ActionRequest,
+  type ResolvedAction,
   type Alternative,
   type DecisionEffect,
   type HoldService,
@@ -180,14 +181,11 @@ export class ShellSeam {
     for (const resolved of resolveShellLine(line, this.deps.env ?? {}).actions) {
       if (resolved.action === SHELL_ACTION) continue;
       for (const target of targetsRuledOn(resolved, line)) {
-        const request = this.requestFor(resolved.action, target ?? line, {
-          toolClass: String(resolved.class),
-          ...(resolved.method === undefined ? {} : { method: resolved.method }),
-          ...(resolved.environment === undefined
-            ? {}
-            : { environment: resolved.environment }),
-          ...(resolved.content === undefined ? {} : { content: resolved.content }),
-        });
+        const request = this.requestFor(
+          resolved.action,
+          target ?? line,
+          detailsOf(resolved),
+        );
         const verdict = await this.deps.authorizer.authorize(request);
         const alternative = alternativeFor(
           verdict.alternative,
@@ -352,22 +350,13 @@ export class ShellSeam {
   private requestFor(
     action: string,
     target: string,
-    {
-      toolClass,
-      method,
-      environment,
-      content,
-    }: {
-      toolClass?: string;
-      method?: string;
-      environment?: string;
-      content?: readonly string[];
-    } = {},
+    { toolClass, method, environment, content, dataClassification }: RequestDetails = {},
   ): ActionRequest {
     return {
       action,
       target,
       ...(toolClass === undefined ? {} : { toolClass }),
+      ...(dataClassification === undefined ? {} : { dataClassification }),
       ...(environment === undefined ? {} : { environment }),
       // LOCAL ONLY, as an edit's content is: read by a `content` convention, never recorded.
       ...(content === undefined ? {} : { content }),
@@ -382,6 +371,27 @@ export class ShellSeam {
         : { workingDirectory: this.deps.workingDirectory }),
     };
   }
+}
+
+/** What a request carries beyond its action and target, as a resolved command names it. */
+interface RequestDetails {
+  toolClass?: string;
+  method?: string;
+  environment?: string;
+  content?: readonly string[];
+  dataClassification?: string;
+}
+
+function detailsOf(resolved: ResolvedAction): RequestDetails {
+  return {
+    toolClass: String(resolved.class),
+    ...(resolved.method === undefined ? {} : { method: resolved.method }),
+    ...(resolved.environment === undefined ? {} : { environment: resolved.environment }),
+    ...(resolved.content === undefined ? {} : { content: resolved.content }),
+    ...(resolved.dataClassification === undefined
+      ? {}
+      : { dataClassification: resolved.dataClassification }),
+  };
 }
 
 function nothingToRun(): ShellOutcome {

@@ -5,7 +5,9 @@
  */
 import { classifyBinary, classifyReader, COMMAND_CLASS } from './binary-class';
 import { classifyWriter } from './writers';
+import { bodyClassification } from './request-body';
 import {
+  boundedAlternative,
   inspectStatement,
   isDatabaseClient,
   nonLocalHost,
@@ -44,6 +46,8 @@ export interface ResolvedAction {
   environment?: string;
   /** LOCAL ONLY: the lines a write adds, where the line itself shows them. Never recorded. */
   content?: readonly string[];
+  /** What a request's body carries about people, as `customer-record`. A label, never the body. */
+  dataClassification?: string;
 }
 
 export interface ResolveOptions {
@@ -68,8 +72,7 @@ export function resolveCommand(
   env: NodeJS.ProcessEnv = {},
   options: ResolveOptions & CommandIo = {},
 ): ResolvedAction {
-  return (
-    resolveSqlStatement(binary, args, env, options) ??
+  const resolved = resolveSqlStatement(binary, args, env, options) ??
     resolveFromVerbTable(binary, args, env) ??
     resolveReader(binary, args, env) ??
     resolveWriter(binary, args, env) ??
@@ -77,8 +80,9 @@ export function resolveCommand(
       action: ACTION.SHELL_EXECUTE,
       class: COMMAND_CLASS.NORMAL,
       because: binary,
-    }
-  );
+    };
+  const carried = bodyClassification(binary, args);
+  return carried === undefined ? resolved : { ...resolved, dataClassification: carried };
 }
 
 /** So `psql -c "DROP TABLE users"` is ruled on as a drop rather than as opening psql. */
@@ -100,11 +104,13 @@ function resolveSqlStatement(
   const host = nonLocalHost(args, env);
   // An unbounded delete is its own action, the same way `git.push-force` is not `git.push`.
   const suffix = sql.risk === SQL_RISK.UNBOUNDED ? '-unbounded' : '';
+  const alternative = boundedAlternative(sql, binary === 'mongosh' ? 'mongo' : 'sql');
   return {
     action: `${binary}.${sql.statement.toLowerCase()}${suffix}`,
     class: sql.class,
     because: host === null ? sql.because : `${sql.because}, on ${host}`,
     ...(host === null ? {} : { target: host }),
+    ...(alternative === null ? {} : { alternative }),
   };
 }
 
