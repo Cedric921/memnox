@@ -57,6 +57,73 @@ export async function sessionTranscript(
   return transcriptPath(transcripts, host?.agentSession ?? sessionId);
 }
 
+/**
+ * What a session is about as its agent keeps it current, rather than the first thing it was
+ * asked: Claude Code's own title for the session, rewritten as the work moves on, else the
+ * name it was given. Null where the agent keeps neither, which leaves the opening ask.
+ */
+export async function sessionFocus(
+  home: string,
+  sessionId: string,
+  transcripts: string = home,
+): Promise<string | null> {
+  const path = await sessionTranscript(home, sessionId, transcripts);
+  if (path === null) return null;
+  const changedAt = modifiedAt(path);
+  const known = focusSeen.get(path);
+  if (known !== undefined && known.changedAt === changedAt) return known.focus;
+  const focus = focusIn(tailOf(path, FOCUS_TAIL_BYTES));
+  focusSeen.set(path, { changedAt, focus });
+  return focus;
+}
+
+/** The agent retitles every few turns, so the last stretch always holds the current title. */
+const FOCUS_TAIL_BYTES = 256 * 1_024;
+
+/** Each transcript's focus as of its last change, so the switcher refreshing reads nothing new. */
+const focusSeen = new Map<string, { changedAt: number; focus: string | null }>();
+
+function modifiedAt(path: string): number {
+  try {
+    return statSync(path).mtimeMs;
+  } catch {
+    return 0;
+  }
+}
+
+/** The newest title in a stretch of transcript, else the newest name, as plain words. */
+export function focusIn(raw: string): string | null {
+  let named: string | null = null;
+  const lines = raw.split('\n');
+  for (let at = lines.length - 1; at >= 0; at -= 1) {
+    const line = lines[at] ?? '';
+    // Only the two record kinds, so a reply quoting one is never taken for it.
+    if (!line.startsWith(TITLE_RECORD) && !line.startsWith(NAME_RECORD)) continue;
+    const record = recordOf(line);
+    const title = record?.['aiTitle'];
+    if (typeof title === 'string' && title.trim() !== '') return title.trim();
+    const name = record?.['agentName'];
+    if (named === null && typeof name === 'string' && name.trim() !== '') {
+      named = name.trim().replace(/[-_]+/g, ' ');
+    }
+  }
+  return named;
+}
+
+const TITLE_RECORD = '{"type":"ai-title"';
+const NAME_RECORD = '{"type":"agent-name"';
+
+function recordOf(line: string): Record<string, unknown> | null {
+  try {
+    const parsed: unknown = JSON.parse(line);
+    return parsed !== null && typeof parsed === 'object'
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 /** The last stretch of the conversation, oldest first. */
 export function readConversation(path: string): ConversationLine[] {
   return conversationIn(tailOf(path));

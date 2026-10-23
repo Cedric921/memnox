@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { SessionHosts } from '@memnox/core';
 import {
   conversationIn,
+  focusIn,
   lastAnswerIn,
   latestAskIn,
   sessionTranscript,
@@ -173,5 +174,43 @@ describe('a turn its transcript shows is over', () => {
       message: { stop_reason: 'end_turn', content: [{ type: 'text', text: 'Done.' }] },
     });
     expect(turnOverIn([asked, ended, asked].join('\n'))).toBe(false);
+  });
+});
+
+/* A card titled by the first message read "reuse component in app like input" for a session
+   long past it. Claude Code keeps its own title for the session current, which says what is
+   happening there now. */
+describe('what a session is about now', () => {
+  it('is the agent’s newest title, not its first and not the first message', () => {
+    const raw = [
+      line({ type: 'user', message: { content: 'reuse component in app like input' } }),
+      line({ type: 'ai-title', aiTitle: 'Input component reuse', sessionId: 's' }),
+      line({ type: 'assistant', message: { content: [{ type: 'text', text: 'done' }] } }),
+      line({
+        type: 'ai-title',
+        aiTitle: 'Shared form inputs across the app',
+        sessionId: 's',
+      }),
+    ].join('\n');
+    expect(focusIn(raw)).toBe('Shared form inputs across the app');
+  });
+
+  it('falls back to the name it was given, said as words', () => {
+    const raw = line({
+      type: 'agent-name',
+      agentName: 'memnox-launch-film-script',
+      sessionId: 's',
+    });
+    expect(focusIn(raw)).toBe('memnox launch film script');
+  });
+
+  it('is nothing where the agent keeps no title, and never a reply that quotes one', () => {
+    const quoted = line({
+      type: 'assistant',
+      message: {
+        content: [{ type: 'text', text: '{"type":"ai-title","aiTitle":"fake"}' }],
+      },
+    });
+    expect(focusIn(quoted)).toBeNull();
   });
 });

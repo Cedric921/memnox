@@ -36,6 +36,7 @@ import {
   latestPersonLine,
   readLatestAsk,
   readOpeningAsk,
+  sessionFocus,
   sessionTranscript,
 } from './transcript';
 import { branchAt, repositoryAround } from '../session-tools/repository-root';
@@ -124,7 +125,14 @@ export class SessionViews {
     const names = await readNames(this.home);
     const hosts = new SessionHosts(this.home);
     const cards = await Promise.all(
-      rows.map(async (row) => cardOf(row, names, await hosts.read(row.session))),
+      rows.map(async (row) =>
+        cardOf(
+          row,
+          names,
+          await hosts.read(row.session),
+          await sessionFocus(this.home, row.session, this.transcripts).catch(() => null),
+        ),
+      ),
     );
     // Hermes keys no session in the ledger, so its own are read beside, newest first with the rest.
     const hermes = hermesCards(this.transcripts, this.now(), nameOf(names, 'hermes'), {
@@ -332,7 +340,12 @@ function nameOf(names: Names, agent: string): string {
   return displayName(names, { id, kind: agent });
 }
 
-function cardOf(row: SessionRow, names: Names, host: SessionHost | null): SessionCard {
+function cardOf(
+  row: SessionRow,
+  names: Names,
+  host: SessionHost | null,
+  focus: string | null,
+): SessionCard {
   const repository = row.repositories[0];
   return {
     sessionId: row.session,
@@ -341,6 +354,7 @@ function cardOf(row: SessionRow, names: Names, host: SessionHost | null): Sessio
     state: row.state,
     thinking: row.turn === 'in progress',
     ...(row.task === undefined ? {} : { task: row.task }),
+    ...(focus === null ? {} : { focus }),
     ...(repository === undefined ? {} : { repository: basename(repository) }),
     ...(row.runningIn === undefined ? {} : { runningIn: row.runningIn }),
     ...(row.where === undefined ? {} : { where: row.where }),

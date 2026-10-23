@@ -27,6 +27,11 @@ export interface SessionCard {
   agent: string;
   agentName: string;
   task?: string;
+  /**
+   * What the session is about now, as its agent titles it, which a screen shows before the
+   * task: the first thing asked is rarely what a long session turned into.
+   */
+  focus?: string;
   state: string;
   thinking: boolean;
   repository?: string;
