@@ -38,7 +38,7 @@ export function guardAgentsTools<RunContext, Tool extends AgentsFunctionTool<Run
       if (!decision.allowed) return refusalText(decision);
       try {
         const output = await tool.invoke(runContext, input, details);
-        guard.outcome(tool.name, args, context, { failed: false });
+        guard.outcome(tool.name, args, context, { failed: false, output });
         return output;
       } catch (err) {
         guard.outcome(tool.name, args, context, {

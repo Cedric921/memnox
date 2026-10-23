@@ -69,7 +69,10 @@ export function preToolUseHook(guard: Guard): ToolHook {
   };
 }
 
-/** Tells the circuit breaker how each call ended, so a loop of the same failure is paused. */
+/**
+ * Tells the circuit breaker how each call ended, so a loop of the same failure is paused,
+ * and hands over what the tool answered, so text written to steer the agent taints the run.
+ */
 export function postToolUseHook(guard: Guard): ToolHook {
   return async (input) => {
     guard.outcome(
@@ -79,7 +82,7 @@ export function postToolUseHook(guard: Guard): ToolHook {
         sessionId: input.session_id ?? NO_SESSION,
         ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
       },
-      failureOf(input.tool_response),
+      { ...failureOf(input.tool_response), output: input.tool_response },
     );
     return {};
   };

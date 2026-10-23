@@ -12,6 +12,7 @@ import {
   normalizeShellCommand,
   resolveCommand,
   TOOL_CLASS,
+  withOutgoingData,
   type ActionRequest,
 } from '@memnox/core/engine';
 
@@ -52,7 +53,7 @@ export function requestsFor(
   }
   if (FETCH_TOOLS.includes(tool)) return [fetchRequest(textOf(input, ['url', 'prompt']))];
   if (SEARCH_TOOLS.includes(tool)) return [fetchRequest(undefined)];
-  return [functionRequest(tool, input)];
+  return functionRequests(tool, input);
 }
 
 /** Both spellings of one MCP call, as the runtime asks, so a rule written either way holds. */
@@ -68,10 +69,11 @@ function mcpRequests(
     arguments: flatArguments(input),
     ...(environment === undefined ? {} : { environment }),
   };
+  // Each spelling, and each place its payload is going where it carries a customer.
   return [
     { action: `mcp.${server}.${tool}`, ...common },
     { action: `mcp.${tool}`, ...common },
-  ];
+  ].flatMap((request) => withOutgoingData(request, input));
 }
 
 /** Each command on the line, resolved as the runtime resolves it, or one shell action where nothing parses. */
@@ -95,6 +97,12 @@ function shellRequests(line: string): ActionRequest[] {
         ...(resolved.environment === undefined
           ? {}
           : { environment: resolved.environment }),
+        ...(resolved.dataClassification === undefined
+          ? {}
+          : { dataClassification: resolved.dataClassification }),
+        ...(resolved.method === undefined
+          ? {}
+          : { arguments: { [HTTP_METHOD_ARGUMENT]: resolved.method } }),
       },
     ];
   });
@@ -130,17 +138,18 @@ function fetchRequest(text: string | undefined): ActionRequest {
   };
 }
 
-function functionRequest(
+function functionRequests(
   tool: string,
   input: Readonly<Record<string, unknown>>,
-): ActionRequest {
+): ActionRequest[] {
   const environment = environmentOfArguments(input);
-  return {
+  const request: ActionRequest = {
     action: `${FUNCTION_TOOL_PREFIX}${tool}`,
     toolClass: classifyToolCall(tool, input).class,
     arguments: flatArguments(input),
     ...(environment === undefined ? {} : { environment }),
   };
+  return withOutgoingData(request, input);
 }
 
 /** Each field as text, the shape a rule's argument patterns read. */

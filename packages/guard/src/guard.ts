@@ -7,15 +7,23 @@
 import { createPublicKey, randomUUID, verify } from 'node:crypto';
 
 import {
+  ACTION,
+  answerHasInstructionShape,
+  CHANGING_HTTP_METHODS,
   CircuitBreaker,
   DECISION_EFFECT,
+  HTTP_METHOD_ARGUMENT,
+  TOOL_CLASS,
   digest,
   PolicyEngine,
   policiesFrom,
   policiesFromBundle,
   recommendedAnswers,
   redactSecrets,
+  setDataPatterns,
+  validatePolicyDocument,
   type ActionRequest,
+  type DataPattern,
   type BreakerBreach,
   type EvaluationResult,
   type Policy,
@@ -80,7 +88,13 @@ export interface CallOutcome {
   failed: boolean;
   /** Distinguishes failing the same way from failing differently every time. */
   failureKind?: string;
+  /** What the tool answered, read for text written to steer the agent and never kept. */
+  output?: unknown;
 }
+
+/** Said when a tainted session's send or loss is put to a person, as the gateway says it. */
+export const TAINTED_REASON =
+  'this agent recently read text written to give it instructions, so a person decides before it speaks or loses anything';
 
 const STRICTNESS: Readonly<Record<string, number>> = {
   [DECISION_EFFECT.ALLOW]: 0,
@@ -108,6 +122,8 @@ export class Guard {
   private readonly paused = new Map<string, Pause>();
   private readonly sessionGrants = new Set<string>();
   private readonly sessionsSeen = new Set<string>();
+  /** Sessions that read instruction-shaped text, and the tool it came through. */
+  private readonly tainted = new Map<string, string>();
   private readonly pending: GuardRecord[] = [];
 
   constructor(
@@ -166,7 +182,7 @@ export class Guard {
       );
     }
     const strictest = this.strictest(requests, context);
-    const ruled = strictest.result;
+    const ruled = this.steered(strictest.result, requests, tool, context);
     const effect = ruled.effect;
     if (effect === DECISION_EFFECT.ALLOW) {
       return this.settle(
@@ -215,6 +231,9 @@ export class Guard {
     context: CallContext,
     result: CallOutcome,
   ): void {
+    if (result.output !== undefined && answerHasInstructionShape(result.output)) {
+      this.taint(context.sessionId, tool);
+    }
     const first = requestsFor(tool, input, context)[0];
     const action = first?.action ?? tool;
     const breach = this.breaker.observe({
@@ -262,6 +281,33 @@ export class Guard {
       // Unreachable is not a resume.
     }
     return pause;
+  }
+
+  /**
+   * Marks a session as having read text that addresses the model, so from now on its
+   * sends, posts and losses ask a person even where a rule allows them. The rule trusted
+   * the agent, not what it just read. A hook that reads results itself calls this.
+   */
+  taint(sessionId: string, source: string): void {
+    if (!this.tainted.has(sessionId)) this.tainted.set(sessionId, source);
+  }
+
+  /** The tool the session's instruction-shaped text came through, or null where none has. */
+  taintedBy(sessionId: string): string | null {
+    return this.tainted.get(sessionId) ?? null;
+  }
+
+  /** An allow turned into an ask, where a tainted session is about to speak or lose something. */
+  private steered(
+    ruled: EvaluationResult,
+    requests: readonly ActionRequest[],
+    tool: string,
+    context: CallContext,
+  ): EvaluationResult {
+    if (ruled.effect !== DECISION_EFFECT.ALLOW) return ruled;
+    if (!this.tainted.has(context.sessionId)) return ruled;
+    if (!requests.some((request) => steerable(request, tool))) return ruled;
+    return { ...ruled, effect: DECISION_EFFECT.ASK, reason: TAINTED_REASON };
   }
 
   /** Lift a pause, as a person resuming the session does. */
@@ -451,6 +497,11 @@ export class Guard {
         ...defaultPolicies(),
         ...policiesFromBundle(fetched.bundle, this.options.machineClass),
       ]);
+      // The workspace's own words for what must not leave, read by every call from now on.
+      setDataPatterns(
+        WORKSPACE_PATTERNS,
+        workspacePatterns(fetched.bundle.classifications),
+      );
       this.bundleHash = fetched.bundle.hash;
       this.etag = fetched.etag;
     } catch {
@@ -550,6 +601,66 @@ export class Guard {
 
   private now(): Date {
     return this.options.now?.() ?? new Date();
+  }
+}
+
+/** Verbs that open a tool's name when the call speaks to somebody or hands something over. */
+const SENDING_VERBS: ReadonlySet<string> = new Set([
+  'send',
+  'post',
+  'publish',
+  'email',
+  'mail',
+  'forward',
+  'upload',
+  'share',
+  'notify',
+  'reply',
+  'message',
+  'transfer',
+  'invite',
+]);
+
+/** The verb a tool's own name opens with, past an MCP server's prefix and in any case style. */
+function leadingVerb(tool: string): string {
+  const name = tool.split('__').pop() ?? tool;
+  return (name.split(/[._\s-]|(?=[A-Z])/)[0] ?? '').toLowerCase();
+}
+
+/** What a steered agent could be talked into: speaking, losing something, or carrying a customer out. */
+function steerable(request: ActionRequest, tool: string): boolean {
+  if (request.dataClassification !== undefined) return true;
+  if (
+    request.toolClass === TOOL_CLASS.COMMUNICATION ||
+    request.toolClass === TOOL_CLASS.DESTRUCTIVE
+  ) {
+    return true;
+  }
+  const method = request.arguments?.[HTTP_METHOD_ARGUMENT];
+  if (
+    request.action === ACTION.HTTP_REQUEST &&
+    method !== undefined &&
+    CHANGING_HTTP_METHODS.includes(method.toUpperCase())
+  ) {
+    return true;
+  }
+  return SENDING_VERBS.has(leadingVerb(tool));
+}
+
+/** The source a workspace's patterns are kept under, beside any a policy file adds. */
+const WORKSPACE_PATTERNS = 'workspace';
+
+/** Only the patterns the validator takes, so one bad regex from the plane cannot match everything. */
+function workspacePatterns(published: readonly DataPattern[] | undefined): DataPattern[] {
+  if (published === undefined || published.length === 0) return [];
+  try {
+    return (
+      validatePolicyDocument({ version: 1, policies: [], classifications: published })
+        .classifications ?? []
+    );
+  } catch {
+    // Patterns that will not validate add nothing rather than taking the rules down with them.
+    return [];
   }
 }
 
