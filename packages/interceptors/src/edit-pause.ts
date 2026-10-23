@@ -13,6 +13,7 @@ import {
   SECOND_MS,
   SpokenInstructions,
   SqliteEventStore,
+  type NoteKind,
   type SessionNote,
 } from '@memnox/core';
 
@@ -45,6 +46,9 @@ const NOTES_EVERY_MS = 10 * SECOND_MS;
  * at most, since this runs after every call.
  */
 const RENEW_EVERY_MS = MINUTE_MS;
+
+/** How often another agent's question may wake a session whose turn ended. */
+const AGENT_WAKE_EVERY_MS = 2 * MINUTE_MS;
 
 /**
  * What the host reads back at this pause, with a trailing newline, or empty for nothing.
@@ -118,7 +122,11 @@ async function notesAt(
   if (pause.moment === SESSION_MOMENT.TURN_END) {
     return [
       ...spoken,
-      ...(await inbox.collect(agent, pause.sessionId, [NOTE_KIND.OPERATOR])),
+      ...(await inbox.collect(
+        agent,
+        pause.sessionId,
+        await turnEndKinds(pause, context),
+      )),
     ];
   }
   if (pause.moment === SESSION_MOMENT.PROMPT)
@@ -132,6 +140,23 @@ async function notesAt(
     ),
   ]);
   return [...spoken, ...notes];
+}
+
+/**
+ * What may wake a session whose turn ended: a person's turn always, and another agent's
+ * question at most every few minutes, so two agents can never keep each other running.
+ */
+export async function turnEndKinds(
+  pause: SessionEvent,
+  context: EditHookContext,
+): Promise<NoteKind[]> {
+  const chore = {
+    name: 'woken',
+    sessionId: pause.sessionId,
+    everyMs: AGENT_WAKE_EVERY_MS,
+  };
+  const wakes = await markIfDue(context.home, chore, context.now());
+  return wakes ? [NOTE_KIND.OPERATOR, NOTE_KIND.AGENT_ASK] : [NOTE_KIND.OPERATOR];
 }
 
 /** What the person said to this session out loud, under either id it goes by. */
