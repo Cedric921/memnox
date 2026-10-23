@@ -6,6 +6,8 @@ import {
   HANDOVER_EVENT,
   Handovers,
   describeMessage,
+  describeTogether,
+  WORK_TOGETHER_EVENT,
   NOTICE_KIND,
   PERSON_MESSAGE_EVENT,
   PersonMessages,
@@ -81,6 +83,10 @@ export class WorkspaceStream {
       await this.messaged(data);
       return;
     }
+    if (frame.event === WORK_TOGETHER_EVENT) {
+      await this.together(data, frame.id);
+      return;
+    }
     if (frame.event === HANDOVER_EVENT.ASKED) {
       const ask = askFrom(data);
       if (ask === null) return;
@@ -100,6 +106,22 @@ export class WorkspaceStream {
       return;
     }
     await this.askedOf(frame.event, data);
+  }
+
+  /** This person's agent and a teammate's found on one feature, shown and said only to somebody listening. */
+  private async together(data: unknown, id: string | undefined): Promise<void> {
+    const person = await readPerson(this.deps.home).catch(() => null);
+    const summary = person === null ? null : describeTogether(data, person.personId);
+    if (summary === null) return;
+    const at = this.deps.now();
+    this.deps.tell({
+      kind: DAEMON_EVENT.NOTICE,
+      notice: NOTICE_KIND.TOGETHER,
+      subject: `ntc_together_${id ?? at}`,
+      agent: WORKSPACE_AGENT,
+      summary,
+      at,
+    });
   }
 
   /** A teammate speaking to this person, said at once and listened after, like a collision. */

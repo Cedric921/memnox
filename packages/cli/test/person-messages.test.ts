@@ -134,6 +134,33 @@ describe('a teammate speaking to this person', () => {
     expect(opened[1]?.['last-event-id']).toBe('evt_7');
   });
 
+  it('shows that their agent and a teammate\u2019s were found on one feature', async () => {
+    const home = await signedIn();
+    const told: DaemonEvent[] = [];
+    const together = {
+      featureName: 'ENG-40',
+      members: [
+        { agent: 'claude-code', ownerPersonId: 'usr_ana', ownerName: 'Ana' },
+        { agent: 'codex', ownerPersonId: 'usr_andre', ownerName: 'Andre' },
+      ],
+    };
+    const { fetcher } = streaming([
+      `id: evt_9\nevent: work.together\ndata: ${JSON.stringify(together)}\n\n`,
+    ]);
+    const stream = new WorkspaceStream({
+      home,
+      tell: (event) => told.push(event),
+      now: () => ASKED.sentAt,
+      fetcher,
+      sleep: async () => undefined,
+    });
+    stream.start();
+    await until(() => told.length > 0);
+    stream.stop();
+    expect(told[0]).toMatchObject({ notice: 'together', subject: 'ntc_together_evt_9' });
+    expect(told[0]?.summary).toContain("Andre's codex");
+  });
+
   it('reads the id a frame carries', () => {
     expect(framesIn('id: evt_1\nevent: x\ndata: {}\n\n').frames).toEqual([
       { event: 'x', data: '{}', id: 'evt_1' },
