@@ -142,6 +142,11 @@ export function readWholeConversation(path: string): ConversationLine[] {
   return everyLineIn(tailOf(path, WHOLE_BYTES));
 }
 
+/** Every line in the last stretch of a transcript, for a reader that looks further back than the window does. */
+export function readLinesFromEnd(path: string, bytes: number): ConversationLine[] {
+  return everyLineIn(tailOf(path, bytes));
+}
+
 function everyLineIn(raw: string): ConversationLine[] {
   const lines: ConversationLine[] = [];
   for (const text of raw.split('\n')) {

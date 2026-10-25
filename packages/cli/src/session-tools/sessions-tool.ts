@@ -22,6 +22,7 @@ import {
   type SessionHost,
 } from '@memnox/core';
 import { readTurnOver, sessionTranscript } from '../daemon/transcript';
+import { sessionSpokenToAt } from '../daemon/spoken-to';
 import { withEvents } from '../event-store';
 import {
   DESKTOP_APP_SPOKEN,
@@ -285,6 +286,7 @@ async function describe(
     new SessionSubagents(deps.home).of(sessionId),
   ]);
   const last = work[work.length - 1]?.at;
+  const spokenToAt = await sessionSpokenToAt(deps.home, sessionId, turn?.promptAt);
   const activeAt = latestOf([summary?.ended, last, turn?.promptAt, turn?.endedAt]);
   // Being opened is not work, so it dates the session without making it look busy.
   const lastActive =
@@ -328,6 +330,9 @@ async function describe(
       events[0]?.at ??
       '',
     lastActive,
+    // The hook's word for when they last prompted, for an agent whose transcript Memnox cannot read.
+    ...(turn?.promptAt === undefined ? {} : { promptedAt: turn.promptAt }),
+    ...(spokenToAt === undefined ? {} : { spokenToAt }),
     quietForMinutes: msToMinutes(moment.getTime() - Date.parse(lastActive)),
     state: stateOf({
       closed: host?.endedAt !== undefined,

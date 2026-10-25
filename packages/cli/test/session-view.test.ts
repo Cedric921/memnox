@@ -210,6 +210,39 @@ describe('the live window on a session', () => {
     });
     expect(view?.repository).toBe(basename(repo));
   });
+
+  it('orders the cards by when the person last wrote to each, not by which agent last ran something', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'memnox-live-'));
+    const line = (value: unknown): string => JSON.stringify(value);
+    await mkdir(join(home, '.claude', 'projects', 'repo'), { recursive: true });
+    const said = async (id: string, at: string): Promise<void> => {
+      await writeFile(
+        join(home, '.claude', 'projects', 'repo', `${id}.jsonl`),
+        [
+          line({ type: 'user', timestamp: at, message: { content: 'fix the relay' } }),
+          line({
+            type: 'assistant',
+            timestamp: '2026-10-02T11:59:00.000Z',
+            message: { content: [{ type: 'text', text: 'Working on it.' }] },
+          }),
+        ].join('\n'),
+      );
+    };
+    const busy = 'b0000000-0000-4000-8000-000000000001';
+    const mine = 'b0000000-0000-4000-8000-000000000002';
+    await said(busy, '2026-10-02T10:00:00.000Z');
+    await said(mine, '2026-10-02T11:40:00.000Z');
+    const store = SqliteEventStore.forHome(home);
+    await store.append(row({ sessionId: busy, at: '2026-10-02T11:59:00.000Z' }));
+    await store.append(row({ sessionId: mine, at: '2026-10-02T11:41:00.000Z' }));
+    store.close();
+
+    const cards = await new SessionViews(home, () => NOW).list();
+    expect(cards.map((each) => [each.sessionId, each.spokenToAt])).toEqual([
+      [mine, '2026-10-02T11:40:00.000Z'],
+      [busy, '2026-10-02T10:00:00.000Z'],
+    ]);
+  });
 });
 
 describe('what became of a message, as a step reads', () => {

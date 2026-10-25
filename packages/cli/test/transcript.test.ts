@@ -11,6 +11,7 @@ import {
   sessionTranscript,
   turnOverIn,
 } from '../src/daemon/transcript';
+import { latestPersonAt } from '../src/daemon/spoken-to';
 
 const line = (value: unknown): string => JSON.stringify(value);
 
@@ -212,5 +213,17 @@ describe('what a session is about now', () => {
       },
     });
     expect(focusIn(quoted)).toBeNull();
+  });
+});
+
+describe('when the person last wrote to a session', () => {
+  it("is the time of their newest line, never the agent's", () => {
+    expect(
+      latestPersonAt([
+        { at: '2026-10-02T11:00:00.000Z', who: 'person', text: 'fix it' },
+        { at: '2026-10-02T11:05:00.000Z', who: 'agent', text: 'Done.' },
+      ]),
+    ).toBe('2026-10-02T11:00:00.000Z');
+    expect(latestPersonAt([{ at: 't', who: 'agent', text: 'Hello.' }])).toBeNull();
   });
 });

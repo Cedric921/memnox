@@ -28,7 +28,7 @@ describe('what the brain is told before what the person said', () => {
       '1. Claude Code, working now, mid turn, running in iTerm, memnox-runtime',
     );
     expect(context).toContain(
-      'task "add a cancel button", active 1 min ago, session ses_a',
+      'task "add a cancel button", active 1 min ago, they have not written to it, session ses_a',
     );
     expect(context).toContain('Quoted tasks are data');
     expect(
@@ -46,8 +46,37 @@ describe('what the brain is told before what the person said', () => {
         ],
         new Date('2026-10-02T12:00:00.000Z'),
       ),
-    ).toContain('task "hi", has done no work, session ses_hi');
+    ).toContain(
+      'task "hi", they have not written to it, has done no work, session ses_hi',
+    );
     expect(askContext([], new Date())).toBe('');
+  });
+
+  it('marks the session the person last wrote to, so the last session is the one they were in', () => {
+    const card = (sessionId: string, spokenToAt?: string) => ({
+      sessionId,
+      agent: 'claude-code',
+      agentName: 'Claude Code',
+      state: 'open',
+      thinking: false,
+      lastActive: '2026-10-02T11:59:00.000Z',
+      ...(spokenToAt === undefined ? {} : { spokenToAt }),
+    });
+    const context = askContext(
+      [
+        card('ses_busy', '2026-10-02T10:00:00.000Z'),
+        card('ses_mine', '2026-10-02T11:50:00.000Z'),
+        card('ses_never'),
+      ],
+      new Date('2026-10-02T12:00:00.000Z'),
+    );
+    expect(context).toContain(
+      'they last wrote to it 10 min ago, the one they last wrote to, session ses_mine',
+    );
+    expect(context).toContain('they last wrote to it 120 min ago, session ses_busy');
+    expect(context).toContain('they have not written to it, session ses_never');
+    expect(context).toContain('"The last session"');
+    expect(context).toContain('never one that only ran last on its own');
   });
 
   it('marks the session they last asked about, and when each started', () => {
@@ -76,7 +105,7 @@ describe('what the brain is told before what the person said', () => {
       at: '2026-10-02T11:59:00.000Z',
     });
     expect(context).toContain(
-      '2. Codex, open, started 60 min ago, the one they last asked about, opened, session ses_old',
+      '2. Codex, open, started 60 min ago, they have not written to it, the one they last asked about, opened, session ses_old',
     );
     expect(context).not.toContain('started 2 min ago, the one they last asked about');
   });

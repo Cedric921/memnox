@@ -35,6 +35,7 @@ import {
   sessionFocus,
   sessionTranscript,
 } from './transcript';
+import { sessionSpokenToAt } from './spoken-to';
 import { branchAt, repositoryAround } from '../session-tools/repository-root';
 import {
   desktopConversation,
@@ -79,6 +80,7 @@ interface SessionRow {
   where?: string;
   started?: string;
   lastActive?: string;
+  promptedAt?: string;
   waitingOnYou: number;
   actions?: number;
   paused?: string;
@@ -104,38 +106,51 @@ export class SessionViews {
     private readonly transcripts: string = home,
   ) {}
 
-  /** The sessions lately as cards, the most recently active first, for the switcher. */
+  /**
+   * The sessions lately as cards, in the order the person last worked in them, for the switcher and the voice.
+   * Ordered before the cut, since an agent busy on its own would otherwise push the one they were in off it.
+   */
   async list(): Promise<SessionCard[]> {
-    const rows = ((await sessionsTool(this.deps(), { hours: '72' })) as SessionRow[])
-      .filter((each) => each.notAnAgent === undefined)
-      // A session the person closed is not theirs to track any more, on screen or in what the voice knows.
-      .filter((each) => each.state !== SESSION_STATE.ENDED)
-      // Work happening now first, since a turn in progress records little while it thinks.
-      .sort(
-        (a, b) =>
-          Number(workingNow(b)) - Number(workingNow(a)) ||
-          (b.lastActive ?? '').localeCompare(a.lastActive ?? ''),
-      )
-      .slice(0, MOST_CARDS);
     const names = await readNames(this.home);
     const hosts = new SessionHosts(this.home);
     const cards = await Promise.all(
-      rows.map(async (row) =>
-        cardOf(
-          row,
-          names,
-          await hosts.read(row.session),
-          await sessionFocus(this.home, row.session, this.transcripts).catch(() => null),
-        ),
+      (await this.rowsInOrder()).slice(0, MOST_CARDS).map(async ({ row, spokenToAt }) =>
+        cardOf(row, names, {
+          host: await hosts.read(row.session),
+          focus: await sessionFocus(this.home, row.session, this.transcripts).catch(
+            () => null,
+          ),
+          spokenToAt,
+        }),
       ),
     );
-    // Hermes keys no session in the ledger, so its own are read beside, newest first with the rest.
+    // Hermes keys no session in the ledger, so its own are read beside, ordered with the rest.
     const hermes = hermesCards(this.transcripts, this.now(), nameOf(names, 'hermes'), {
       ownSessions: await readBrainSessions(this.home),
     });
     return [...cards, ...hermes]
-      .sort((a, b) => (b.lastActive ?? '').localeCompare(a.lastActive ?? ''))
+      .sort((a, b) => byPersonFirst(a.spokenToAt, a, b.spokenToAt, b))
       .slice(0, MOST_CARDS);
+  }
+
+  /** Every open session with when the person last wrote to it, newest first, read before any is cut. */
+  private async rowsInOrder(): Promise<{ row: SessionRow; spokenToAt?: string }[]> {
+    const rows = ((await sessionsTool(this.deps(), { hours: '72' })) as SessionRow[])
+      .filter((each) => each.notAnAgent === undefined)
+      // A session the person closed is not theirs to track any more, on screen or in what the voice knows.
+      .filter((each) => each.state !== SESSION_STATE.ENDED);
+    const read = await Promise.all(
+      rows.map(async (row) => {
+        const at = await sessionSpokenToAt(
+          this.home,
+          row.session,
+          row.promptedAt,
+          this.transcripts,
+        );
+        return at === undefined ? { row } : { row, spokenToAt: at };
+      }),
+    );
+    return read.sort((a, b) => byPersonFirst(a.spokenToAt, a.row, b.spokenToAt, b.row));
   }
 
   async view(sessionId: string): Promise<SessionView | null> {
@@ -321,8 +336,19 @@ function clipped(text: string): string {
   return `${space > 0 ? cut.slice(0, space) : cut}…`;
 }
 
-function workingNow(row: SessionRow): boolean {
-  return row.turn === 'in progress' || row.state === 'working';
+/**
+ * Newest first by when the person last wrote to each, so "the last session" is the one they were in; one they
+ * never wrote to is placed by when it was last active, which is how a session started for them still shows.
+ */
+function byPersonFirst(
+  aSpokenToAt: string | undefined,
+  a: { lastActive?: string },
+  bSpokenToAt: string | undefined,
+  b: { lastActive?: string },
+): number {
+  const aAt = aSpokenToAt ?? a.lastActive ?? '';
+  const bAt = bSpokenToAt ?? b.lastActive ?? '';
+  return bAt.localeCompare(aAt) || (b.lastActive ?? '').localeCompare(a.lastActive ?? '');
 }
 
 /** As many cards as the switcher turns through before it is a list nobody can follow. */
@@ -335,11 +361,17 @@ function nameOf(names: Names, agent: string): string {
   return displayName(names, { id, kind: agent });
 }
 
+/** What a card shows beside its session's row, read from where the session runs and its transcript. */
+interface CardExtras {
+  host: SessionHost | null;
+  focus: string | null;
+  spokenToAt?: string | undefined;
+}
+
 function cardOf(
   row: SessionRow,
   names: Names,
-  host: SessionHost | null,
-  focus: string | null,
+  { host, focus, spokenToAt }: CardExtras,
 ): SessionCard {
   const repository = row.repositories[0];
   return {
@@ -354,6 +386,7 @@ function cardOf(
     ...(row.runningIn === undefined ? {} : { runningIn: row.runningIn }),
     ...(row.where === undefined ? {} : { where: row.where }),
     ...(row.lastActive === undefined ? {} : { lastActive: row.lastActive }),
+    ...(spokenToAt === undefined ? {} : { spokenToAt }),
     ...(row.actions === undefined ? {} : { actions: row.actions }),
     ...(row.started === undefined || row.started === ''
       ? {}
