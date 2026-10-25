@@ -11,8 +11,7 @@ import { NOT_SIGNED_IN, type CloudSend } from './person-post';
 /** Long enough for a slow network, short enough that a person talking is not kept waiting. */
 const SHARED_WORK_TIMEOUT_MS = 5_000;
 
-type SharedWorkRead =
-  { ok: true; features: unknown[] } | { ok: false; said: string };
+type SharedWorkRead = { ok: true; features: unknown[] } | { ok: false; said: string };
 
 export async function sharedWorkOf(
   home: string,
