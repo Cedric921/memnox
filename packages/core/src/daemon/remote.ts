@@ -159,6 +159,11 @@ export interface RemoteEventFields {
   voiceOn?: VoiceOn;
   /** On an event done for a phone's ask: the phone that asked, so the Mac stays quiet and that phone hears it. */
   origin?: { deviceId: string };
+  /**
+   * On a held call or a proposal while a paired phone may answer it: that phone, which puts the yes to Face ID,
+   * so the Mac leaves it there rather than putting it to Touch ID, since the person may be far from the Mac.
+   */
+  answerOn?: VoiceHolder;
 }
 
 /** What the Mac signs to let a phone in: the pairing and the phone's two keys. */

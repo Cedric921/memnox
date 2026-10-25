@@ -549,6 +549,8 @@ describe('a paired phone through its tunnel', () => {
 
   it('wakes the phone when something new waits and its tunnel is closed, once', async () => {
     const at = await paired();
+    // The app open and following events hears what waits on its stream, so it is not woken.
+    await through(at, { id: 30, method: DAEMON_METHOD.SUBSCRIBE });
     const proposals = new Proposals(at.home);
     const resume = { kind: PROPOSAL_KIND.RESUME, sessionId: 'ses_1' } as const;
     await proposals.propose({
@@ -565,6 +567,23 @@ describe('a paired phone through its tunnel', () => {
     const later = { kind: PROPOSAL_KIND.RESUME, sessionId: 'ses_2' } as const;
     await proposals.propose({
       change: later,
+      rationale: 'r',
+      proposedBy: 'memnox',
+      at: NOW,
+      ttlMs: 60_000,
+    });
+
+    expect(await at.endpoint.wakePhones()).toBe(1);
+    expect(at.cloud.calls).toContain(`wake ${MAILBOX}`);
+    expect(await at.endpoint.wakePhones()).toBe(0);
+  });
+});
+
+describe('a phone asked from the island with its app in the background', () => {
+  it('is woken for what its turn raised, since its tunnel carries no events', async () => {
+    const at = await paired();
+    await new Proposals(at.home).propose({
+      change: { kind: PROPOSAL_KIND.RESUME, sessionId: 'ses_1' },
       rationale: 'r',
       proposedBy: 'memnox',
       at: NOW,

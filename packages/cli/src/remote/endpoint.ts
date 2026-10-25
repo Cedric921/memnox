@@ -60,8 +60,8 @@ export const SILENT_PHONE_MS = 90_000;
 export interface RemoteVoice {
   respond(peer: Peer, request: DaemonRequest, principal?: RemotePrincipal): Promise<void>;
   broadcast(event: DaemonEvent): void;
-  /** Which phone holds the voice: a drive holds it while it lasts, and a revoked phone holds it no longer. */
-  readonly hold: Pick<VoiceHold, 'driven' | 'forget' | 'released'>;
+  /** Which phone holds the voice, and whose app follows events: a revoked phone holds and follows nothing. */
+  readonly hold: Pick<VoiceHold, 'driven' | 'forget' | 'released' | 'listening'>;
   drop(peer: Peer): void;
 }
 
@@ -396,7 +396,7 @@ export class RemoteEndpoint {
     return null;
   }
 
-  /** Wakes a phone with no tunnel open when something new waits on its person. */
+  /** Wakes a phone whose app follows no events when something new waits on its person. */
   private watchWaiting(): void {
     if (this.wakeTimer !== null) return;
     const feed = new WaitingFeed(this.deps.home);
@@ -431,7 +431,10 @@ export class RemoteEndpoint {
     if (account === null) return 0;
     const waiting = (await feed.current(this.deps.now())).map((event) => event.subject);
     const due = this.wakes.due(waiting, await this.phones(), {
-      live: (deviceId) => this.sessionOf(deviceId) !== null,
+      // A tunnel open for a turn asked from the island carries no events, so only a following app counts.
+      live: (deviceId) =>
+        this.sessionOf(deviceId) !== null &&
+        (this.deps.voice()?.hold.listening(deviceId) ?? false),
       now: Date.parse(this.deps.now()),
     });
     for (const phone of due) {

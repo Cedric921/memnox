@@ -105,6 +105,11 @@ export class VoiceHold {
     return this.current;
   }
 
+  /** Whether that phone's app is open with a live stream, so what waits reaches it there rather than by a wake. */
+  listening(deviceId: string): boolean {
+    return (this.phones.get(deviceId)?.subscribed ?? 0) > 0;
+  }
+
   /** An event as it leaves the daemon, naming the phone that holds the voice so the Mac shows it without a sound. */
   stamp(event: DaemonEvent): DaemonEvent {
     return this.current === null ? event : { ...event, heardOn: this.current };

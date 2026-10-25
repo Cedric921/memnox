@@ -293,6 +293,18 @@ name, until }`, and the Mac island shows "Driven from <name>" for its whole leng
     the Mac". It is noticed on a timer, so the voice comes back with no other event, and it
     never goes through the relay.
 
+- **Pairing a phone is enough for every yes to go to it.** The person who paired it may be far
+  from the Mac, so while a phone is paired, every held call and proposal it may answer carries
+  `answerOn: { deviceId, name }`, the phone paired last that holds the capability the yes takes.
+  The Mac app puts a spoken yes to that phone's Face ID rather than Touch ID and says "Answer it
+  on <name>, which asks for Face ID"; a press on the Mac's own card is a hand at the Mac and still
+  signs with Touch ID unless a phone holds the voice or drives, and whichever answer lands first
+  stands. A `mac` proposal also carries `origin` naming the phone whose ask raised it, so that
+  phone signs it whether or not it still holds the voice, and the Mac never declines it as
+  unasked. A phone whose app follows no `subscribe` stream, such as one asked from the island
+  with the app away, is woken for what waits even while its tunnel is open for that turn, and
+  reads `waiting` once its turn has been said, where the same stamps are found.
+
 A remote yes is always signed by that device's key, so the `withinSession` exception applies to
 local socket callers only. A remote deny or decline needs no signature. Pairing, devices,
 `register-key`, setting the voice, and every core method stay local.
