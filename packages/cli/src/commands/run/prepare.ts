@@ -23,6 +23,8 @@ import {
   ENV_PARENT_AGENTS,
   parentAgentsOf,
   SESSION_VAR,
+  ENV_AGENT_ROLE,
+  ENV_PRINCIPAL,
   isWorkBriefId,
   WORK_BRIEF_VAR,
   MISSION_VAR,
@@ -30,11 +32,7 @@ import {
   type Mission,
   type SessionHost,
 } from '@memnox/core';
-import {
-  DEFAULT_AGENT_NAME,
-  ENV_AGENT_ROLE,
-  repositoryRootOf,
-} from '@memnox/interceptors';
+import { DEFAULT_AGENT_NAME, repositoryRootOf } from '@memnox/interceptors';
 import { transcriptPathFor } from '../../memnox-paths';
 import { NodeGit, NodeWorktree } from '../../node-git';
 import { familiarityOf, untrustedHint, type Familiarity } from './familiar';
@@ -105,6 +103,8 @@ export interface RunOptions {
   envs?: string;
   expect?: string;
   role?: string;
+  /** The person this agent works for, so it never does what they may not. */
+  for?: string;
   brief?: string;
   investigate?: boolean;
   holdCredentials?: boolean;
@@ -181,6 +181,7 @@ function startingPoint(input: PrepareRunInput): StartingPoint {
       : untrustedHint((deps.familiarity ?? familiarityOf)(home, root));
   const env = input.environment(home, sessionId);
   if (options.role !== undefined) env[ENV_AGENT_ROLE] = options.role;
+  if (options.for !== undefined) env[ENV_PRINCIPAL] = options.for;
   if (options.brief !== undefined) env[WORK_BRIEF_VAR] = briefIdOf(options.brief);
   const agent = agentOfRun(env, binary);
   // Every seam the agent's children reach reads this, so none of them reports it anonymous.

@@ -1,4 +1,6 @@
 import { PROPOSAL_ANSWER, PROPOSAL_KIND, type Proposal } from '@memnox/core';
+import { isLocalSlug } from '../local-tools/local-run';
+import { runLocal } from '../local-tools/local-tools';
 import { claimAccount, runPersonalTool } from '../sync/personal-work';
 
 /**
@@ -14,6 +16,13 @@ export async function applyPersonal(
   proposal: Proposal,
 ): Promise<Settled | null> {
   const change = proposal.change;
+  if (change.kind === PROPOSAL_KIND.WORK && isLocalSlug(change.tool)) {
+    // Confirmed with Touch ID over this exact tool and these arguments, and still through the gate.
+    const ran = await runLocal(home, change.tool, change.argumentsText, true);
+    return ran.ok
+      ? { ok: true, outcome: `${PROPOSAL_ANSWER.CONFIRMED}: ${change.label}` }
+      : { ok: false, error: ran.said };
+  }
   if (change.kind === PROPOSAL_KIND.WORK) {
     const ran = await runPersonalTool(home, change.tool, change.argumentsText, {
       proposalId: proposal.id,

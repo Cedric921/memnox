@@ -124,11 +124,7 @@ export function appLaunch(start: SessionStart): AppLaunch {
         ...(start.app === undefined ? {} : { appPath: start.app }),
         links: [
           `cursor://file${encodeURI(folder)}/`,
-          ...(task === ''
-            ? []
-            : [
-                `cursor://anysphere.cursor-deeplink/prompt?${query({ text: task, workspace: basename(folder) })}`,
-              ]),
+          ...(task === '' ? [] : [cursorPromptLink(task, folder)]),
         ],
       };
     case 'hermes':
@@ -149,11 +145,18 @@ function chatLaunch(
   if (start.agent !== 'cursor') return { ...opened, links: [] };
   return {
     ...(start.app === undefined ? {} : { appPath: start.app }),
-    links:
-      task === ''
-        ? []
-        : [`cursor://anysphere.cursor-deeplink/prompt?${query({ text: task })}`],
+    links: task === '' ? [] : [cursorPromptLink(task)],
   };
+}
+
+/**
+ * Cursor's own link to its agent chat with the words already in it, on the folder's window where one is named. Typing
+ * into Cursor instead lands wherever its focus is, which once a folder is open is the code or its welcome page.
+ */
+export function cursorPromptLink(text: string, folder?: string): string {
+  const values: Record<string, string> = { text };
+  if (folder !== undefined) values['workspace'] = basename(folder);
+  return `cursor://anysphere.cursor-deeplink/prompt?${query(values)}`;
 }
 
 /** Every value percent encoded, spaces as %20, since an app's handler decodes it and never `+`. */

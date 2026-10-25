@@ -44,6 +44,15 @@ export async function readApprovalRoute(home: string): Promise<ApprovalRoute> {
   }
 }
 
+/** Whether the autopilot may grant, read without creating the file: off wherever it is unsaid. */
+export async function readAutopilot(home: string): Promise<boolean> {
+  try {
+    return parseConfig(await readFile(configPathFor(home), 'utf8')).autopilot;
+  } catch {
+    return false;
+  }
+}
+
 export async function saveConfig(home: string, config: MemnoxConfig): Promise<void> {
   const path = configPathFor(home);
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });

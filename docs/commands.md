@@ -680,7 +680,8 @@ Declare what you asked for and it becomes enforceable: `--task "<statement>"`
 with `--paths`, `--repos`, `--services`, `--envs` (comma separated) lets a rule
 match on `scope`, and `--expect <count>` is what an action explosion is measured
 against. `--role <name>` is the job the agent is enrolled under, matched by a
-rule's `roles:`. A session that declares nothing is *undeclared* throughout,
+rule's `roles:`, and `--for <person>` is the person it works for, matched by a rule's
+`principals:`, so an agent on a shared credential never does what its person may not. A session that declares nothing is *undeclared* throughout,
 never in violation — nothing is inferred.
 
 **Writes stay in the repository.** A write or delete outside the repository the session
@@ -733,6 +734,18 @@ its reads do not. The notice that announced it says so, and `memnox status` list
 is on probation and until when. `trust` ends one now, on the record. A probation that
 was served or ended is never started again because a config was rewritten.
 
+### `memnox agents pause <agent>` / `memnox agents resume <agent>`
+Stops one agent on this machine, every session of it, and leaves every other agent
+working. The agent is named the way a person says it (`codex`, `Claude Code`, the name
+you gave it), and a name that fits two agents is refused with both named. The pause is a
+local freeze the gate reads on the very next call, so it bites before any heartbeat, and
+the agent is told a person paused it and to wait. When this machine is enrolled and you
+are signed in with `memnox signin`, the same freeze is declared to the workspace scoped to
+this machine, so teammates see it; a workspace that cannot be reached never undoes the
+pause here. It lifts itself after a day. `resume` lifts it here and every workspace freeze
+on that agent this machine knows of, and says so when the workspace still holds one. By
+voice, "pause Codex" happens at once, and letting it carry on waits for Touch ID.
+
 ### `memnox daemon`
 Holds the rules in one process so an interceptor pays a connect instead of a file
 read. Optional: an interceptor that cannot reach it evaluates in process instead.
@@ -754,6 +767,26 @@ proxy is bounded in connections and idle time, and starts and stops with the dae
 The last thing that did not simply proceed. `--allowed` for the last allow,
 `--evidence` for the digests and the outcome. Read back from the row, never
 re-evaluated against today's rules.
+
+The **Context** block reads the action against everything that decided it, one row
+per part: `person` (who the agent worked for, from `memnox run --for`), `agent`,
+`intent` (the declared task), `tools` (what the call did), `systems` (where it landed
+and what was in force there) and `history` (what this agent had never done before, and
+what the session did on the way). A part marked `(decided)` is why the verdict came out
+the way it did, so the same DELETE reads as refused for who the agent worked for in one
+row and as new for this agent in another. A part with nothing recorded says so, since
+"no task was declared" is not the same as "inside the task". `--json` carries it as
+`context`.
+
+```
+Context
+  person   working for tier1-sam; rule only-a-dba-deletes on who the agent works for  (decided)
+  agent    support-assistant
+  intent   no task was declared, so nothing was compared
+  tools    mcp.query, a write call
+  systems  on support-db
+  history  nothing about it was new
+```
 
 ### `memnox rewind`
 Puts the working tree back to before an agent touched it. A milestone is a tree object
@@ -998,6 +1031,21 @@ one you trust most and the one most likely to be subtly wrong.
 Capabilities no rule covers are counted separately and never filed under "runs
 on its own". It refuses to call a boundary ready when something destructive
 would run unasked, or when more of what the agent can do is unruled than ruled.
+
+### `memnox autopilot`
+What the daemon handed each agent on its own record, and the way to take it back.
+It is off until a person runs `memnox config set autopilot true`, and an agent can
+never turn it on or run `next --hand-over` itself.
+
+Once it is on, the daemon reads the last thirty days of the ledger every pass and,
+per agent, hands over exactly what `next --hand-over` would offer: an action that
+agent was asked about and approved at least five times, with no refusal, never
+destructive or outward, on the targets it was approved for and none named like
+production. The grant is an allowance for that one agent, for seven days, so it
+only answers a question a rule would have asked and never overrules a refusal or a
+workspace ask. One refusal of that action for that agent takes it back on the next
+pass. Every grant and every revocation is a row in the ledger and a notice on the
+desktop naming the command that undoes it. `--revoke <id>` takes one back now.
 
 ### `memnox unattended [--agent <name>] [--json]`
 Whether an agent can be left running, as one screen: how many of its actions run

@@ -12,6 +12,8 @@ export interface BrainCheck {
   works: boolean;
   /** Why it does not, in words a person can act on. */
   because?: string;
+  /** Its own account's words when it answered something else, whole enough to read on a card. */
+  reply?: string;
 }
 
 const CHECK_PHRASE = 'memnox ready';
@@ -20,6 +22,8 @@ const CHECK_QUESTION = `This is a setup check, not the person speaking. Call the
 const CHECK_TIMEOUT_MS = 90_000;
 /** Enough of a wrong answer to recognise it, such as a plan asking to be upgraded. */
 const SHOWN_CHARS = 120;
+/** The reply kept for the card, long enough that a model error is not cut before it names the fix. */
+const REPLY_CHARS = 400;
 
 /** What a check heard: the words, whether a Memnox tool was read, and what went wrong. */
 interface Heard {
@@ -45,11 +49,17 @@ export async function checkBrain(
   }
   if (heard.failure !== undefined) return { spec, works: false, because: heard.failure };
   if (!heard.said.toLowerCase().includes(CHECK_PHRASE)) {
-    const answer = heard.said.trim().replace(/\s+/g, ' ').slice(0, SHOWN_CHARS);
+    const reply = heard.said.trim().replace(/\s+/g, ' ');
+    const answer = reply.slice(0, SHOWN_CHARS);
     return {
       spec,
       works: false,
-      because: answer === '' ? 'it said nothing' : `it answered "${answer}"`,
+      ...(reply === '' ? {} : { reply: reply.slice(0, REPLY_CHARS) }),
+      // Its own account's reply, such as a spent plan, named as its own so nobody takes it for a Memnox limit.
+      because:
+        answer === ''
+          ? 'it said nothing'
+          : `its own account replied "${answer}", so it cannot be the voice yet`,
     };
   }
   if (!heard.toolCalled) {

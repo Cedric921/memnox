@@ -75,7 +75,11 @@ nonzero return code.
 - `wss://api.memnox.com/v1/relay`, overridable with `MEMNOX_RELAY_URL` on the runtime and a
   debug setting on the phone, for a local relay in tests.
 - The connection authenticates with `Authorization: Bearer <token>`:
-  - `mch_` the machine token. The connection carries every mailbox that machine created.
+  - `mch_` the machine token. The connection carries every mailbox that machine created. A Mac
+    with no account has one too: the first pairing registers a personal space for it with
+    `POST /v1/device-spaces` (two public keys and a small proof of work, no credential), whose
+    one machine holds an ordinary `mch_`. Signing in later claims the space, and its mailboxes
+    move to the account's machine, so a paired phone is never paired again.
   - `rlp_` a pairing token, scoped to one mailbox, single use, 120 seconds.
   - `rly_` a phone token, scoped to one mailbox, lasts until revoked.
 - A mailbox id is 16 random bytes, written base64url without padding in JSON and the QR.
@@ -102,7 +106,9 @@ nonzero return code.
   - `POST /v1/workspaces/:ws/machines/:id/relay/mailboxes/:mailbox/wake` with
     `{ reason: 'waiting' }` sends the phone a push with generic text only.
 - Phone HTTP route, authenticated with `rly_`:
-  - `PUT /v1/relay/push` with `{ apnsToken, pushToStartToken? }`.
+  - `PUT /v1/relay/push` with `{ apnsToken, pushToStartToken? }` from an iPhone, or
+    `{ fcmToken }` from an Android phone. One phone is on one push service, so a body naming both
+    is refused. Either way the wake carries no text, and the question arrives through the tunnel.
 
 ## Payload framing inside a mailbox
 
@@ -203,7 +209,7 @@ on the Mac changes.
 | Capability | Methods and answers it covers                                                                                                                                   | Phone default                             |
 | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
 | `see`      | `ping`, `sessions-list`, `session-view`, `waiting`, `subscribe`, `trace`, `voice-agents`, `voice-choice` without `voice`, `files-list`, `home`, `voice-release` | on                                        |
-| `ask`      | `ask`, `cancel`, `warm`, `brief`, `speak`, `hand-over`                                                                                                          | on                                        |
+| `ask`      | `ask`, `cancel`, `warm`, `brief`, `speak`, `hand-over`, `rule`                                                                                                  | on                                        |
 | `answer`   | `confirm` on a held call or an `answer` proposal                                                                                                                | on, a yes is signed                       |
 | `steer`    | `confirm` on a stop, freeze or resume proposal, and `follow-up`, which is signed                                                                                | on, a yes is signed                       |
 | `rules`    | `confirm` on a rule proposal                                                                                                                                    | off                                       |
@@ -287,9 +293,28 @@ name, until }`, and the Mac island shows "Driven from <name>" for its whole leng
     the Mac". It is noticed on a timer, so the voice comes back with no other event, and it
     never goes through the relay.
 
+- **Pairing a phone is enough for every yes to go to it.** The person who paired it may be far
+  from the Mac, so while a phone is paired, every held call and proposal it may answer carries
+  `answerOn: { deviceId, name }`, the phone paired last that holds the capability the yes takes.
+  The Mac app puts a spoken yes to that phone's Face ID rather than Touch ID and says "Answer it
+  on <name>, which asks for Face ID"; a press on the Mac's own card is a hand at the Mac and still
+  signs with Touch ID unless a phone holds the voice or drives, and whichever answer lands first
+  stands. A `mac` proposal also carries `origin` naming the phone whose ask raised it, so that
+  phone signs it whether or not it still holds the voice, and the Mac never declines it as
+  unasked. A phone whose app follows no `subscribe` stream, such as one asked from the island
+  with the app away, is woken for what waits even while its tunnel is open for that turn, and
+  reads `waiting` once its turn has been said, where the same stamps are found.
+
 A remote yes is always signed by that device's key, so the `withinSession` exception applies to
 local socket callers only. A remote deny or decline needs no signature. Pairing, devices,
 `register-key`, setting the voice, and every core method stay local.
+
+A `confirm` that says no to a held call (`deny`, or `never`) may carry `reason`, what the person
+said with it. It is kept as one line of at most 200 characters on the held call, so the agent is
+told "said no to this, and said: ..." beside the rule's own way forward; a reason sent with a yes
+is dropped. `never` is "deny from now on": the call is refused now, unsigned like any no, and a
+deny rule for that agent, action and target goes on a `rules` card with the reason as the rule's
+own, which the person places and signs like `always`.
 
 ## Answering a team's question by voice
 
@@ -349,6 +374,25 @@ approval, and secrets never appear.
 approved. Nothing changes until that proposal is confirmed, which needs `rules`; a phone without
 that grant shows "Confirm on your Mac, or let this phone change rules". An action that was ever
 refused, or has not been approved often enough, is refused with `ok: false` and a reason.
+
+`rule` (under `ask`) takes `said`, one sentence such as "never let an agent send customer
+records to an unapproved destination", and answers `{ rule }`: the `draft` in the runtime's own
+match fields (`effect`, `operation`, `agent`, `targets` with `!` exclusions,
+`dataClassifications`, `classes`, `branches`, `alternative`), its `readBack` in plain words,
+`openQuestions`, `draftedBy` (`pattern` for a fixed grammar, `model` for the workspace's model),
+`note` where the workspace says why no model read it, and `offeredToTeam`. On an enrolled machine
+the sentence goes to the workspace's `from-sentence` on the machine's own credential, and its plan
+decides whether a model drafts it: a sentence no grammar reads on a plan with no model is refused
+with the workspace's reason, which names the upgrade, and `upgrade: true` so the phone offers the plan. With no account, or offline, this machine's
+own grammar reads it and nothing else does. Either way the draft is checked by the runtime's own
+validator before it is read back. While a question is open
+nothing is proposed: the phone asks it and sends `rule` again with the same `said` and
+`approved`, the destinations the person named, joined by commas. With nothing open the answer
+also carries `proposed`, a `rules` proposal confirmed like any other, which needs `rules` and a
+Face ID signature. Once signed it holds on this machine from the next action, offline and with
+no account, and on an enrolled machine it is also sent to the team as a proposal a second admin
+approves. A sentence nobody could read is refused with `ok: false` and a reason that says how
+to say it.
 
 ## Joining a server from the console
 

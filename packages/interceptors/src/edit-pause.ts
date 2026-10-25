@@ -13,6 +13,7 @@ import {
   SECOND_MS,
   SpokenInstructions,
   SqliteEventStore,
+  type NoteKind,
   type SessionNote,
 } from '@memnox/core';
 
@@ -22,6 +23,7 @@ import { EDIT_IDLE_MINUTES } from './edit-hook';
 import { markIfDue } from './edit-marks';
 import {
   activityOf,
+  readsNotesAt,
   SESSION_MOMENT,
   sessionAnswer,
   withDecisions,
@@ -45,6 +47,9 @@ const NOTES_EVERY_MS = 10 * SECOND_MS;
  */
 const RENEW_EVERY_MS = MINUTE_MS;
 
+/** How often another agent's question may wake a session whose turn ended. */
+const AGENT_WAKE_EVERY_MS = 2 * MINUTE_MS;
+
 /**
  * What the host reads back at this pause, with a trailing newline, or empty for nothing.
  * `said` is anything else this pause carries, such as a decision the prompt names.
@@ -57,6 +62,12 @@ export async function answerPause(
   await recordActivity(pause, context);
   if (pause.moment === SESSION_MOMENT.AFTER_TOOL) await takeOverIfAllowed(pause, context);
   const notes = await notesAt(pause, context);
+  await recordPickedUp(
+    notes.filter(fromAnAgent),
+    pause.sessionId,
+    context,
+    FROM_AN_AGENT,
+  );
   // A collision note goes on the person's screen
   // too, since they are usually in another window.
   const collided = notes.filter((note) => note.kind === NOTE_KIND.COORDINATION);
@@ -107,9 +118,8 @@ async function notesAt(
   const inbox = new CloudNotes(home);
   // The holds are filed under the session `memnox run` set, where there is one.
   const holder = context.runSession ?? pause.sessionId;
-  // Windsurf reads nothing back, so a note collected
-  // here would be marked delivered and never seen.
-  if (pause.host === EDIT_HOST.WINDSURF) {
+  // A host that reads nothing back here would have a collected note marked delivered and never seen.
+  if (!readsNotesAt(pause.host, pause.moment)) {
     await keepHoldsAlive(holder, context);
     return [];
   }
@@ -118,7 +128,11 @@ async function notesAt(
   if (pause.moment === SESSION_MOMENT.TURN_END) {
     return [
       ...spoken,
-      ...(await inbox.collect(agent, pause.sessionId, [NOTE_KIND.OPERATOR])),
+      ...(await inbox.collect(
+        agent,
+        pause.sessionId,
+        await turnEndKinds(pause, context),
+      )),
     ];
   }
   if (pause.moment === SESSION_MOMENT.PROMPT)
@@ -134,6 +148,23 @@ async function notesAt(
   return [...spoken, ...notes];
 }
 
+/**
+ * What may wake a session whose turn ended: a person's turn always, and another agent's
+ * question at most every few minutes, so two agents can never keep each other running.
+ */
+export async function turnEndKinds(
+  pause: SessionEvent,
+  context: EditHookContext,
+): Promise<NoteKind[]> {
+  const chore = {
+    name: 'woken',
+    sessionId: pause.sessionId,
+    everyMs: AGENT_WAKE_EVERY_MS,
+  };
+  const wakes = await markIfDue(context.home, chore, context.now());
+  return wakes ? [NOTE_KIND.OPERATOR, NOTE_KIND.AGENT_ASK] : [NOTE_KIND.OPERATOR];
+}
+
 /** What the person said to this session out loud, under either id it goes by. */
 async function spokenFor(
   home: string,
@@ -147,6 +178,14 @@ async function spokenFor(
   return found;
 }
 
+/** What the hook says it handed over from another agent, so `why` and the timeline show the conversation. */
+const FROM_AN_AGENT =
+  "another agent's message, handed to the session by its own hook at its next step";
+
+function fromAnAgent(note: SessionNote): boolean {
+  return note.kind === NOTE_KIND.AGENT || note.kind === NOTE_KIND.AGENT_ASK;
+}
+
 /** What the hook says it handed over, so the person's words are only called delivered once the session took them. */
 const PICKED_UP = "the session's own hook handing it over at its next step";
 
@@ -154,6 +193,7 @@ async function recordPickedUp(
   spoken: readonly SessionNote[],
   sessionId: string,
   context: EditHookContext,
+  checked: string = PICKED_UP,
 ): Promise<void> {
   if (spoken.length === 0) return;
   const at = context.now().toISOString();
@@ -167,7 +207,7 @@ async function recordPickedUp(
             agent: context.agent,
             text: note.message,
             outcome: DELIVERY.VERIFIED,
-            proof: { checked: PICKED_UP },
+            proof: { checked },
             at,
           }),
         );

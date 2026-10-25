@@ -2,7 +2,7 @@ import { mkdir, mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { DisplayRequests, SpokenInstructions } from '@memnox/core';
+import { DisplayRequests, SessionHosts, SpokenInstructions } from '@memnox/core';
 import { installedAppNamed } from '../src/session-tools/app-tools';
 import { callOperatorTool } from '../src/session-tools/operator-tools';
 import type { SessionToolDeps } from '../src/session-tools/read-tools';
@@ -11,6 +11,47 @@ import type { RewindSeams } from '../src/session-tools/rewind-tool';
 const NOW = new Date('2026-10-09T12:00:00.000Z');
 
 describe('typing into any app the person names', () => {
+  it('sends a follow up to Cursor through its own prompt link, and calls it sent only once the Mac saw it go', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'memnox-cursor-prompt-'));
+    const answered = async (
+      outcome: 'typed' | 'verified',
+    ): Promise<{ said: string; typed: boolean }> => {
+      const deps: SessionToolDeps = {
+        home,
+        cwd: home,
+        agent: 'claude-code',
+        env: {},
+        now: () => NOW,
+        readStatus: async () => ({}),
+        milestonesAt: async () => [],
+        brief: async () => null,
+        resolveApp: (agent) => (agent === 'cursor' ? '/Applications/Cursor.app' : null),
+        delivered: async () => ({ outcome, at: NOW.toISOString() }),
+      };
+      return (await callOperatorTool(deps, {} as RewindSeams, 'type_in_app', {
+        agent: 'cursor',
+        message: 'start a React Native Expo app',
+      })) as { said: string; typed: boolean };
+    };
+    const sent = await answered('verified');
+    expect(sent.typed).toBe(true);
+    expect(sent.said).toContain('Sent to Cursor');
+    const [request] = await new DisplayRequests(home).open(NOW.toISOString());
+    expect(request).toMatchObject({
+      display: 'app',
+      appPath: '/Applications/Cursor.app',
+      via: 'send-prefilled',
+    });
+    expect(request?.text).toBeUndefined();
+    expect(request?.links).toEqual([
+      'cursor://anysphere.cursor-deeplink/prompt?text=start%20a%20React%20Native%20Expo%20app',
+    ]);
+    const waiting = await answered('typed');
+    expect(waiting.typed).toBe(false);
+    expect(waiting.said).toContain('press Return');
+    expect(waiting.said).not.toContain('Sent to');
+  });
+
   it('finds it by the name they said, spaces and case aside', async () => {
     const folder = await mkdtemp(join(tmpdir(), 'memnox-apps-'));
     for (const app of [
@@ -96,5 +137,81 @@ describe('typing into any app the person names', () => {
       appPath: '/Applications/Codex.app',
       text: 'check the files changed',
     });
+  });
+  it('keeps words typed into a terminal under the agent session running there, never one made up for the app', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'memnox-terminal-app-'));
+    const deps: SessionToolDeps = {
+      home,
+      cwd: home,
+      agent: 'claude-code',
+      env: {},
+      now: () => NOW,
+      readStatus: async () => ({}),
+      milestonesAt: async () => [],
+      brief: async () => null,
+      findApp: () => '/Applications/iTerm.app',
+      delivered: async () => ({ outcome: 'typed', at: NOW.toISOString() }),
+    };
+    const hosts = new SessionHosts(home);
+    await hosts.note({
+      sessionId: 'ses_older',
+      agent: 'codex',
+      pid: process.pid,
+      app: 'iTerm',
+      appPath: '/Applications/iTerm.app',
+      seenAt: '2026-10-09T10:00:00.000Z',
+    });
+    await hosts.note({
+      sessionId: 'ses_in_iterm',
+      agent: 'claude-code',
+      pid: process.pid,
+      app: 'iTerm',
+      appPath: '/Applications/iTerm.app',
+      seenAt: '2026-10-09T11:00:00.000Z',
+    });
+    await hosts.note({
+      sessionId: 'ses_gone',
+      agent: 'claude-code',
+      pid: 2 ** 22 + 7,
+      app: 'iTerm',
+      seenAt: '2026-10-09T11:30:00.000Z',
+    });
+
+    await callOperatorTool(deps, {} as RewindSeams, 'type_in_app', {
+      app: 'iTerm',
+      message: 'run the tests',
+    });
+    const [request] = await new DisplayRequests(home).open(NOW.toISOString());
+
+    expect(request).toMatchObject({
+      sessionId: 'ses_in_iterm',
+      agent: 'claude-code',
+      title: 'iTerm',
+      appPath: '/Applications/iTerm.app',
+    });
+  });
+
+  it('keys a terminal with no agent session in it by the app, as before', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'memnox-terminal-app-'));
+    const deps: SessionToolDeps = {
+      home,
+      cwd: home,
+      agent: 'claude-code',
+      env: {},
+      now: () => NOW,
+      readStatus: async () => ({}),
+      milestonesAt: async () => [],
+      brief: async () => null,
+      findApp: () => '/Applications/iTerm.app',
+      delivered: async () => ({ outcome: 'typed', at: NOW.toISOString() }),
+    };
+
+    await callOperatorTool(deps, {} as RewindSeams, 'type_in_app', {
+      app: 'iTerm',
+      message: 'ls',
+    });
+    const [request] = await new DisplayRequests(home).open(NOW.toISOString());
+
+    expect(request).toMatchObject({ sessionId: 'app_iterm', agent: 'iTerm' });
   });
 });

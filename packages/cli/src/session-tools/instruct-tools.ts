@@ -1,5 +1,3 @@
-import { execFileSync } from 'node:child_process';
-import { basename } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import {
   DELIVERY,
@@ -32,6 +30,7 @@ import { isHermesSession } from '../daemon/hermes-view';
 import { typedInItsApp } from './app-follow-up';
 import { HERMES_SAID, resumeHermes, type ResumeHermes } from './hermes-instruct';
 import { FINDS_ITS_TAB } from './session-tools.constants';
+import { agentInForeground } from './agent-foreground';
 
 /**
  * Telling an agent what the person said out loud, read back first since a recognizer hears
@@ -54,18 +53,6 @@ type Route = (typeof ROUTE)[keyof typeof ROUTE];
 /** A turn asked longer ago than this and never handed back is an agent that went away, not one working. */
 const WORKING_WITHIN_MS = 2 * HOUR_MS;
 
-/** What runs a coding agent in a terminal, so text is only ever typed into the agent and never a shell. */
-const AGENT_PROGRAMS = /^(claude|node|codex|gemini|cursor-agent|aider|opencode)$/i;
-
-/** A native install runs a binary named for its version, like `~/.local/share/claude/versions/2.1.3`, so its folder names the agent. */
-const AGENT_FOLDERS =
-  /\/(claude|codex|gemini|cursor-agent|aider|opencode)\/(versions\/)?[^/]+$/i;
-
-/** Whether the program in front is an agent, by its name or by the folder a native install keeps it in. */
-export function isAgentProgram(command: string): boolean {
-  return AGENT_PROGRAMS.test(basename(command)) || AGENT_FOLDERS.test(command);
-}
-
 const OPENCLAW = 'openclaw';
 
 /** Said plainly, since its actions are seen and recorded but nothing on this machine can hand it work yet. */
@@ -82,7 +69,7 @@ const SAID: Record<Route, string> = {
   prefilled:
     'The Mac typed it into its message box in the editor, sent it and saw the box take it, so it is starting on it now. Say so in a few words.',
   later:
-    'It is idle where Memnox cannot type, so it has not got this yet: it only reads it when the person next prompts that session. Never say it will pick it up at its next step or on its own. Say in one sentence that it has not reached it yet, and offer to type it in there for them now. On a yes, call type_in_app with its agent and these same words when it lives in its desktop app, and otherwise show it with display open and call send_instruction again. Never ask them to send it themselves.',
+    'It is idle where Memnox cannot type, so it has not got this yet: it only reads it when the person next prompts that session. Never say it will pick it up at its next step or on its own. Say in one sentence that it has not reached it yet, and offer to type it in there for them now. On a yes, show it with display open and call send_instruction again. It runs in a terminal or an editor, never in a desktop app, since one there is typed into before this is said, so never call type_in_app for it: that types into a different chat. A session just started may not have come up yet, so if it is still not reached, say so and offer to try again in a moment. Never ask them to send it themselves.',
 };
 
 /** Sent, but the Mac could not read it back, so it is never called done. */
@@ -188,6 +175,7 @@ export async function sendInstructionTool(
   args: ToolArgs,
   inForeground: (tty: string) => boolean = agentInForeground,
   resume: ResumeHermes = resumeHermes,
+  { typedWhileWorking = false }: SendOptions = {},
 ): Promise<unknown> {
   const id = textArg(args, 'instruction');
   const moment = deps.now().toISOString();
@@ -199,7 +187,13 @@ export async function sendInstructionTool(
   const recorded = await new SessionHosts(deps.home).read(instruction.sessionId);
   // Where it runs now, since a tab recorded when it began may since be closed or someone else's.
   const host = recorded === null ? null : liveHost(recorded);
-  const route = await routeFor(deps, instruction.sessionId, host, inForeground);
+  const route = await routeFor(
+    deps,
+    instruction.sessionId,
+    host,
+    inForeground,
+    typedWhileWorking,
+  );
   const inApp = await typedInItsApp(deps, instruction, host, route === ROUTE.LATER);
   if (inApp !== null) return inApp;
   // A tmux or WezTerm pane is typed into through its own command line, whatever app shows it.
@@ -388,12 +382,22 @@ function failedTyping(
   return fresh && failed.tty === host?.tty ? failed : null;
 }
 
+/** How a send may reach a session beyond what the voice's own sends do. */
+interface SendOptions {
+  /**
+   * The person's own typed words go into a working agent's prompt where it can be typed into, so they appear in
+   * the session as their message, which the agent queues itself, rather than as a note nobody sees arrive.
+   */
+  typedWhileWorking?: boolean;
+}
+
 /** How it reaches the session: its next step when working, else whatever it waits in. */
 async function routeFor(
   deps: SessionToolDeps,
   sessionId: string,
   host: SessionHost | null,
   inForeground: (tty: string) => boolean,
+  typedWhileWorking = false,
 ): Promise<Route> {
   const turn = await new SessionTurns(deps.home).read(sessionId);
   const asked = turn?.promptAt;
@@ -404,8 +408,11 @@ async function routeFor(
     // Read the way the sessions tool reads it: Codex, and a turn the person stopped, end with no hook,
     // and a session told it is working when it waits on them is handed a note it never reads.
     !(await turnOverByTranscript(deps.home, sessionId, deps.now()));
-  if (working) return ROUTE.QUEUED;
-  return waitingRoute(host, inForeground);
+  if (!working) return waitingRoute(host, inForeground);
+  // Only a terminal prompt queues what is typed into it; an editor's panel would take it as a second chat.
+  if (typedWhileWorking && waitingRoute(host, inForeground) === ROUTE.TYPED)
+    return ROUTE.TYPED;
+  return ROUTE.QUEUED;
 }
 
 /** A prompt in a terminal is typed into, an editor's own terminal too; an editor's chat panel is prefilled. */
@@ -474,20 +481,3 @@ export async function awaitDelivery(
 
 /** What an editor extension from before the hand over writes when no terminal holds the session. */
 const OLD_EXTENSION_NO_TERMINAL = 'no integrated terminal holds its device';
-
-/** Whether the terminal's foreground program is a coding agent, so the words never land in a bare shell. */
-function agentInForeground(tty: string): boolean {
-  try {
-    const listing = execFileSync('ps', ['-o', 'stat=,comm=', '-t', basename(tty)], {
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-    });
-    return listing.split('\n').some((line) => {
-      const [stat, ...command] = line.trim().split(/\s+/);
-      return stat?.includes('+') === true && isAgentProgram(command.join(' '));
-    });
-  } catch {
-    // No such terminal, or ps refused: nothing is typed anywhere unseen.
-    return false;
-  }
-}

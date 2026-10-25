@@ -151,6 +151,34 @@ describe('memnox why', () => {
     expect(out.text).toContain('the payload never left');
   });
 
+  /* The same DELETE is a breach for one person and routine for another, so a refusal
+     has to say which part of the context it came from rather than only the rule. */
+  it('reads the decision against who the agent worked for, and marks what decided', async () => {
+    const home = await machine([
+      event({
+        operation: 'mcp.query',
+        target: 'support-db',
+        principal: 'tier1-sam',
+        signals: ['policy:only-a-dba-deletes', 'person:only-a-dba-deletes'],
+      }),
+    ]);
+    const out = await run(registerWhyCommand as Register, ['why'], home);
+    expect(out.text).toContain('Context');
+    expect(out.text).toMatch(
+      /person\s+working for tier1-sam; rule only-a-dba-deletes on who the agent works for {2}\(decided\)/,
+    );
+    expect(out.text).toMatch(/history\s+nothing about it was new/);
+
+    const json = await run(registerWhyCommand as Register, ['why', '--json'], home);
+    expect(json.text).toContain('"context"');
+  });
+
+  it('says a row from before context was kept knows only its rule', async () => {
+    const home = await machine([event()]);
+    const out = await run(registerWhyCommand as Register, ['why'], home);
+    expect(out.text).toContain('recorded before Memnox kept it');
+  });
+
   it('says what to do when nothing has happened yet', async () => {
     const out = await run(registerWhyCommand as Register, ['why'], await machine([]));
     expect(out.text).toContain('mcp wrap');

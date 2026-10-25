@@ -37,7 +37,8 @@ export function wrapTool<Input, Output>(
     if (!decision.allowed) throw new ToolRefused(decision);
     try {
       const output = await run(input);
-      guard.outcome(name, args, context, { failed: false });
+      // The answer is read for instructions, so a ticket that steers the agent taints the run.
+      guard.outcome(name, args, context, { failed: false, output });
       return output;
     } catch (err) {
       guard.outcome(name, args, context, {

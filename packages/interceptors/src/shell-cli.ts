@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { homedir } from 'node:os';
 
 import {
+  ruledFor,
   DECISION_EFFECT,
   digest,
   ENV_AGENT_NAME,
@@ -110,6 +111,7 @@ async function keep(ran: ShellRun): Promise<void> {
       class: decision.class,
       argsDigest: digest(ran.line),
       ...(decision.target === undefined ? {} : { target: decision.target }),
+      ...ruledFor(decision),
     },
     effect: decision.effect,
     reason: decision.reason,

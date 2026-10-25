@@ -1,4 +1,5 @@
 import type { AgentQuestionItem } from '../session/agent-questions';
+import type { ConnectionsRequestFields, ConnectionsResponseFields } from './connections';
 import type { FilesRequestFields, FilesResponseFields } from './files';
 import type { HomeResponseFields } from './home';
 import type { InterceptRequestFields, InterceptResponseFields } from './intercept';
@@ -8,6 +9,7 @@ import type {
   RemoteResponseFields,
 } from './remote';
 import type { SpeechRequestFields, SpeechResponseFields } from './speech';
+import type { SpokenRuleRequestFields, SpokenRuleResponseFields } from './spoken-rule';
 import type { TeamAnswerBrief, TeamCallBrief } from './team-calls';
 import type { SignedIn, ToolSignIn, WorkDraft } from './work-cards';
 
@@ -29,6 +31,8 @@ interface TeamEventFields {
 interface WorkRequestFields {
   /** On CONFIRM of a draft: the words the person rewrote on its card, which the signature then covers. */
   edited?: string;
+  /** On CONFIRM of a mail: the addresses the person typed on its card, joined by commas, which the signature covers too. */
+  editedTo?: string;
 }
 
 interface QuestionRequestFields {
@@ -68,7 +72,9 @@ export interface ExtensionRequestFields
     WorkRequestFields,
     AccountRequestFields,
     QuestionRequestFields,
-    InterceptRequestFields {}
+    ConnectionsRequestFields,
+    InterceptRequestFields,
+    SpokenRuleRequestFields {}
 
 export interface ExtensionResponseFields
   extends
@@ -76,7 +82,9 @@ export interface ExtensionResponseFields
     FilesResponseFields,
     SpeechResponseFields,
     HomeResponseFields,
-    InterceptResponseFields {}
+    ConnectionsResponseFields,
+    InterceptResponseFields,
+    SpokenRuleResponseFields {}
 
 export interface ExtensionEventFields
   extends RemoteEventFields, TeamEventFields, WorkEventFields, QuestionEventFields {}

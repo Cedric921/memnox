@@ -1,4 +1,4 @@
-import { basename } from 'node:path';
+import { basename, isAbsolute } from 'node:path';
 import {
   HOUR_MS,
   LEDGER_SCAN_LIMIT,
@@ -9,6 +9,7 @@ import {
 import { withEvents } from '../event-store';
 import { repositoriesOf } from './changes-tool';
 import { MOST_ROWS } from './bounded';
+import { knownRepositories, repositoryNamed } from './known-repositories';
 import { textArg, type SessionToolDeps, type ToolArgs } from './read-tools';
 import { repositoryAround } from './repository-root';
 import { scopeOf } from './session-scope';
@@ -59,11 +60,14 @@ export async function repositoryTool(
   });
   const startedAt = found.mine.map((each) => each.at).sort()[0] ?? since;
   const opened = await openedIn(deps, found.scope.sessionId);
-  const places = chosen(
+  const asked = textArg(args, 'repository');
+  const touched = chosen(
     [...new Set([...opened, ...repositoriesOf(found.mine)])],
     repositoriesOf(found.recent),
-    textArg(args, 'repository'),
+    asked,
   );
+  const places =
+    touched.length > 0 || asked === undefined ? touched : await onDisk(deps, asked);
   const repositories = [];
   for (const place of places.slice(0, MOST_REPOSITORIES)) {
     repositories.push(await describeRepository(place, startedAt));
@@ -107,6 +111,17 @@ function chosen(
   return exact.length > 0
     ? exact
     : pool.filter((each) => basename(each).toLowerCase().includes(wanted));
+}
+
+/** A named repository no session touched lately, found on the disk rather than reported missing. */
+async function onDisk(deps: SessionToolDeps, asked: string): Promise<string[]> {
+  if (isAbsolute(asked)) {
+    const root = repositoryAround(asked);
+    return root === null ? [] : [root];
+  }
+  // Only a name that matches, since a merely similar one would read out another project's commits.
+  const named = repositoryNamed(asked, await knownRepositories(deps), false);
+  return named === null ? [] : [named];
 }
 
 async function describeRepository(

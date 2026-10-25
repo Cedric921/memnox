@@ -12,6 +12,7 @@ const FIELD_TYPES: Readonly<Record<string, 'string' | 'number' | 'boolean'>> = {
   agent: 'string',
   action: 'string',
   target: 'string',
+  dataClassification: 'string',
   argsDigest: 'string',
   reason: 'string',
   exitCode: 'number',
@@ -23,6 +24,7 @@ const FIELD_TYPES: Readonly<Record<string, 'string' | 'number' | 'boolean'>> = {
   signature: 'string',
   // A phone's rewritten words reach the confirm from afar, so anything but text is refused before it is trimmed.
   edited: 'string',
+  editedTo: 'string',
   questionNumber: 'number',
   point: 'string',
   said: 'string',
@@ -40,6 +42,10 @@ const FIELD_TYPES: Readonly<Record<string, 'string' | 'number' | 'boolean'>> = {
   recheck: 'boolean',
   voiceAgent: 'string',
   told: 'boolean',
+  toolkit: 'string',
+  again: 'boolean',
+  query: 'string',
+  approved: 'string',
 };
 const LIST_FIELDS: readonly string[] = ['learned', 'spans', 'vocabulary'];
 const OBJECT_FIELDS: readonly string[] = ['proof', 'sight', 'evidence'];

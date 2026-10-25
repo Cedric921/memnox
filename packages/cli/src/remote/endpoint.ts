@@ -9,7 +9,6 @@ import {
   holds,
   isRemoteCapability,
   PER_SUBJECT,
-  readAccount,
   REMOTE_CAPABILITY,
   REMOTE_METHOD,
   REMOTE_OUTCOME,
@@ -31,6 +30,8 @@ import { write, type Peer } from '../daemon/socket-write';
 import { WaitingFeed } from '../daemon/waiting-feed';
 import type { HeartbeatBeats } from '../sync/beat';
 import { cloudRelay, type RelayCloud } from '../sync/relay';
+import { defaultBaseUrl } from '../sync/cloud-url';
+import { ensureDeviceSpace, relayMachine, spaceBaseUrl } from '../sync/device-space';
 import { DriveGrants, driveRefusal } from './drive';
 import { loadNoise, type Noise } from './noise';
 import { PairingBook, refused } from './pairings';
@@ -59,8 +60,8 @@ export const SILENT_PHONE_MS = 90_000;
 export interface RemoteVoice {
   respond(peer: Peer, request: DaemonRequest, principal?: RemotePrincipal): Promise<void>;
   broadcast(event: DaemonEvent): void;
-  /** Which phone holds the voice: a drive holds it while it lasts, and a revoked phone holds it no longer. */
-  readonly hold: Pick<VoiceHold, 'driven' | 'forget' | 'released'>;
+  /** Which phone holds the voice, and whose app follows events: a revoked phone holds and follows nothing. */
+  readonly hold: Pick<VoiceHold, 'driven' | 'forget' | 'released' | 'listening'>;
   drop(peer: Peer): void;
 }
 
@@ -105,7 +106,8 @@ export class RemoteEndpoint {
       home: deps.home,
       now: deps.now,
       noise: () => this.noise(),
-      account: () => this.account(),
+      // Pairing is the one need that registers this Mac's personal space, so a phone pairs with no account.
+      account: () => this.account(true),
       cloud: this.cloud(),
       relayUrl: relayUrl(),
       machineName: () => hostname().replace(/\.local$/, ''),
@@ -394,7 +396,7 @@ export class RemoteEndpoint {
     return null;
   }
 
-  /** Wakes a phone with no tunnel open when something new waits on its person. */
+  /** Wakes a phone whose app follows no events when something new waits on its person. */
   private watchWaiting(): void {
     if (this.wakeTimer !== null) return;
     const feed = new WaitingFeed(this.deps.home);
@@ -429,7 +431,10 @@ export class RemoteEndpoint {
     if (account === null) return 0;
     const waiting = (await feed.current(this.deps.now())).map((event) => event.subject);
     const due = this.wakes.due(waiting, await this.phones(), {
-      live: (deviceId) => this.sessionOf(deviceId) !== null,
+      // A tunnel open for a turn asked from the island carries no events, so only a following app counts.
+      live: (deviceId) =>
+        this.sessionOf(deviceId) !== null &&
+        (this.deps.voice()?.hold.listening(deviceId) ?? false),
       now: Date.parse(this.deps.now()),
     });
     for (const phone of due) {
@@ -458,8 +463,16 @@ export class RemoteEndpoint {
     return this.deps.speaks?.() ?? kokoroAnswers();
   }
 
-  private account(): Promise<Account | null> {
-    return this.deps.account?.() ?? readAccount(this.deps.home);
+  /** The account's machine, else this Mac's personal space, which the relay carries a phone to just the same. */
+  private account(create = false): Promise<Account | null> {
+    if (this.deps.account !== undefined) return this.deps.account();
+    const home = this.deps.home;
+    return relayMachine(
+      home,
+      create
+        ? async () => ensureDeviceSpace(home, await spaceBaseUrl(home, defaultBaseUrl()))
+        : null,
+    );
   }
 
   private noise(): Noise {

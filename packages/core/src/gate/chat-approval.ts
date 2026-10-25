@@ -36,6 +36,8 @@ export interface ChatQuestion {
   withinSession?: boolean;
   /** The rule that asked, by name. */
   rule?: string;
+  /** The rule's way forward, as `describeAlternative` words it. */
+  alternative?: string;
 }
 
 function grantKeyOf(question: Pick<ChatQuestion, 'action' | 'target'>): string {
@@ -100,6 +102,7 @@ export async function holdInChat(
     grantKey: grantKeyOf(question),
     ...(question.withinSession === true ? { withinSession: true } : {}),
     ...(question.rule === undefined ? {} : { rule: question.rule }),
+    ...(question.alternative === undefined ? {} : { alternative: question.alternative }),
   };
   const raised = await approvals.raise(request, moment, CHAT_APPROVAL_MS);
   const routed: PendingApproval = {
@@ -376,7 +379,18 @@ export function answeredText(held: PendingApproval): string {
           : '';
     return `Memnox: ${by} said yes for the rest of this session: you may ${what} (${held.id}).${scope} Try the same call again now and carry on.`;
   }
-  return `Memnox: ${by} said no: do not ${what}, and do not get the same result another way (${held.id}). Carry on without it, or tell them what you need instead.`;
+  return `Memnox: ${by} said no: do not ${what}, and do not get the same result another way (${held.id}).${saidWithNo(held)} Carry on without it, or tell them what you need instead.`;
+}
+
+/** The person's reason and the rule's way forward, which together are how a no becomes a narrower try. */
+function saidWithNo(held: PendingApproval): string {
+  const reason =
+    held.answerReason === undefined
+      ? ''
+      : ` They said: ${held.answerReason.replace(/[.!?]+$/, '')}.`;
+  const instead =
+    held.request.alternative === undefined ? '' : ` ${held.request.alternative}`;
+  return `${reason}${instead}`;
 }
 
 /**

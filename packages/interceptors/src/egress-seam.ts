@@ -9,6 +9,7 @@ import {
   isAllowed as holdAllowed,
   UNNAMED_AGENT,
   UNNAMED_SESSION,
+  withOutgoingData,
   type ActionRequest,
   type Containment,
   type DecisionEffect,
@@ -85,6 +86,24 @@ export interface EgressSeamDeps {
   ruled?: (ruling: EgressRuling) => Promise<void>;
 }
 
+const SEVERITY: Readonly<Record<DecisionEffect, number>> = {
+  [DECISION_EFFECT.ALLOW]: 0,
+  [DECISION_EFFECT.ASK]: 1,
+  [DECISION_EFFECT.DENY]: 2,
+};
+
+/**
+ * A plain HTTP body carrying a customer, ruled on again at the host it goes to, so a rule
+ * naming approved destinations reads a host rather than a whole URL.
+ */
+function carrying(request: ActionRequest, attempt: HttpAttempt): ActionRequest[] {
+  if (attempt.body === undefined || attempt.body === '') return [];
+  const host = hostOfDestination(attempt.url);
+  return withOutgoingData(request, attempt.body, host === null ? [] : [host]).filter(
+    (each) => each.dataClassification !== undefined,
+  );
+}
+
 /** Headers worth ruling on. The rest are transport noise and are not carried. */
 const CARRIED_HEADERS: readonly string[] = [
   'authorization',
@@ -114,7 +133,11 @@ export class EgressSeam {
       const refused = { allowed: false, message: describeEgress(inspection) };
       return this.told(request, caller, refused);
     }
-    return this.told(request, caller, await this.rule(request, caller));
+    return this.told(
+      request,
+      caller,
+      await this.rule([request, ...carrying(request, attempt)], caller),
+    );
   }
 
   /**
@@ -129,7 +152,7 @@ export class EgressSeam {
       target: authority,
       ...this.session(caller),
     };
-    return this.told(request, caller, await this.rule(request, caller));
+    return this.told(request, caller, await this.rule([request], caller));
   }
 
   private session(caller: EgressCaller): { sessionId?: string } {
@@ -137,15 +160,21 @@ export class EgressSeam {
     return sessionId === undefined ? {} : { sessionId };
   }
 
+  /** The strictest ruling among the requests, then a person where it asks. */
   private async rule(
-    request: ActionRequest,
+    requests: readonly [ActionRequest, ...ActionRequest[]],
     caller: EgressCaller,
   ): Promise<EgressOutcome> {
-    const verdict = await this.contained(
-      request,
-      caller,
-      await this.deps.authorizer.authorize(request),
-    );
+    let [request] = requests;
+    let ruled = await this.deps.authorizer.authorize(request);
+    for (const next of requests.slice(1)) {
+      const verdict = await this.deps.authorizer.authorize(next);
+      if (SEVERITY[verdict.effect] > SEVERITY[ruled.effect]) {
+        request = next;
+        ruled = verdict;
+      }
+    }
+    const verdict = await this.contained(request, caller, ruled);
     if (verdict.effect === DECISION_EFFECT.ALLOW) return { allowed: true };
     if (verdict.effect === DECISION_EFFECT.ASK) {
       const asked = await this.ask(request, verdict, caller);

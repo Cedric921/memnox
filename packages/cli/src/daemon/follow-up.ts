@@ -12,6 +12,7 @@ import {
   type FollowUpOutcome,
 } from '@memnox/core';
 import { refused } from '../remote/pairings';
+import { HOW_IN_APP } from '../session-tools/app-follow-up';
 import { sendInstructionTool } from '../session-tools/instruct-tools';
 import type { RemotePrincipal } from './confirm';
 import type { OriginRouter } from './origin-routing';
@@ -47,7 +48,9 @@ export function followUpDeps(
     send: (instruction) => {
       // A question the Mac began, so what the Mac types for it is never read as a phone's show to sign again.
       router.asked(undefined, voice.now());
-      return sendInstructionTool(views.deps(), { instruction });
+      return sendInstructionTool(views.deps(), { instruction }, undefined, undefined, {
+        typedWhileWorking: true,
+      });
     },
   };
 }
@@ -65,6 +68,7 @@ const OUTCOME_OF: Readonly<Record<string, FollowUpOutcome>> = {
   typed: FOLLOW_UP_OUTCOME.TYPED,
   prefilled: FOLLOW_UP_OUTCOME.TYPED,
   resumed: FOLLOW_UP_OUTCOME.TYPED,
+  [HOW_IN_APP]: FOLLOW_UP_OUTCOME.TYPED,
   later: FOLLOW_UP_OUTCOME.LATER,
 };
 

@@ -87,6 +87,7 @@ export function registerRunCommand(
       'the task is an investigation: nothing outside this machine changes',
     )
     .option('--role <name>', 'the job this agent is enrolled under, matched by roles:')
+    .option('--for <person>', 'the person this agent works for, matched by principals:')
     .option(
       '--brief <id>',
       'a workspace brief the voice gathered, handed to the agent before its first turn',

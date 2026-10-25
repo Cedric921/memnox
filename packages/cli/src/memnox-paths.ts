@@ -84,6 +84,13 @@ export function voiceAgentsPath(home: string): string {
   return join(home, MEMNOX_HOME, VOICE_DIR, VOICE_AGENTS_FILE);
 }
 
+const BRAIN_SESSIONS_FILE = 'brain-sessions.json';
+
+/** The sessions the voice's brain opened in an agent, so the agent's own list of sessions can leave them out. */
+export function brainSessionsPath(home: string): string {
+  return join(home, MEMNOX_HOME, VOICE_DIR, BRAIN_SESSIONS_FILE);
+}
+
 const KOKORO_VOICE_FILE = 'kokoro-voice.json';
 const REMOTE_DIR = 'remote';
 const NOISE_KEY_FILE = 'noise-key.json';

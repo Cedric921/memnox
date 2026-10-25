@@ -4,6 +4,7 @@ import {
   EVENT_SCHEMA_VERSION,
   EVENT_SURFACE,
   newEventId,
+  ruledFor,
   TOOL_CLASS,
   UNNAMED_AGENT,
   UNNAMED_SESSION,
@@ -88,6 +89,7 @@ function optionalFields(input: RecordInput): Partial<MemnoxEvent> {
       : { conditionsInForce: input.conditionsInForce }),
     ...(input.exitCode === undefined ? {} : { exitCode: input.exitCode }),
     ...(input.durationMs === undefined ? {} : { durationMs: input.durationMs }),
+    ...ruledFor(input.outcome),
   };
 }
 

@@ -25,6 +25,10 @@ export const NOTE_KIND = {
   COORDINATION: 'coordination',
   /** The person running the agent, said out loud to Memnox and confirmed. */
   SPOKEN: 'spoken',
+  /** Another agent on another machine, whose message already says who it is and how to answer. */
+  AGENT: 'agent',
+  /** Another agent's question, which reaches an agent that already finished its turn. */
+  AGENT_ASK: 'agent-ask',
 } as const;
 
 export type NoteKind = (typeof NOTE_KIND)[keyof typeof NOTE_KIND];
@@ -104,9 +108,12 @@ export function renderNotes(notes: readonly SessionNote[]): string {
   const spoken = notes.filter((note) => note.kind === NOTE_KIND.SPOKEN);
   const others = notes.filter((note) => note.kind !== NOTE_KIND.SPOKEN);
   const lines = others.map((note) => {
+    if (note.kind === NOTE_KIND.AGENT || note.kind === NOTE_KIND.AGENT_ASK) {
+      return `- ${note.message}`;
+    }
     const from =
       note.issuedBy === MEMNOX_AUTHOR
-        ? 'Memnox, about another agent'
+        ? 'Memnox, about other work on these files'
         : `${note.issuedBy}, through Memnox`;
     return `- From ${from}: ${note.message}`;
   });

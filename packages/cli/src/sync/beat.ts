@@ -1,10 +1,10 @@
 /**
- * The beat the control plane sends over the relay when an answer waits for this machine, and
- * the sleep it cuts short, shared by the relay link that hears it and the sync loop that acts.
+ * The beat the control plane sends over the relay when an answer waits for this machine or what
+ * it pulls changed, and the sleep it cuts short, shared by the relay link and the sync loop.
  */
 
-/** The soonest one beat may follow the last, so a control plane sending a burst is one pass a second. */
-const BEAT_FLOOR_MS = 1_000;
+/** The soonest one beat may follow the last: a single beat is acted on at once, and a burst is four passes a second at most. */
+export const BEAT_FLOOR_MS = 250;
 
 export class HeartbeatBeats {
   private pending = false;

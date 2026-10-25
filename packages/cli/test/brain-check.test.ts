@@ -52,7 +52,9 @@ describe('checkBrain', () => {
 
     expect(checked).toMatchObject({
       works: false,
-      because: 'it answered "Upgrade your plan to continue"',
+      because:
+        'its own account replied "Upgrade your plan to continue", so it cannot be the voice yet',
+      reply: 'Upgrade your plan to continue',
     });
   });
 

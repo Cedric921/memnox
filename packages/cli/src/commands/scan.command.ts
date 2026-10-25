@@ -7,10 +7,12 @@ import { homedir } from 'node:os';
 import type { Command } from 'commander';
 import {
   agentLifecycle,
+  capabilitiesOf,
   failOnValues,
   inventoryOf,
   renderShareCard,
   shareCardFor,
+  tallyOf,
   EXIT,
   type AgentLifecycle,
   type DiscoveryReport,
@@ -55,6 +57,8 @@ interface ScanInput {
 
 interface ReportInput {
   report: DiscoveryReport;
+  /** Servers never asked what they hold, which leave the capability count uncounted. */
+  unasked: readonly string[];
   lifecycle: AgentLifecycle;
   takenAt: string;
   options: ScanOptions;
@@ -127,13 +131,14 @@ async function runScan(
   }
 
   // Kept only when asked: a scan every command runs would churn the history.
-  const { report, snapshot } = await scanMachine(seams, {
+  const { report, snapshot, unasked } = await scanMachine(seams, {
     probe: options.probe,
     save: options.save === true,
   });
   const lifecycle = agentLifecycle(report.agents, await seams.snapshots.history());
   return renderReport(context, deps, {
     report,
+    unasked,
     takenAt: snapshot.takenAt,
     options,
     lifecycle,
@@ -146,7 +151,7 @@ async function renderReport(
   deps: ScanDeps,
   input: ReportInput,
 ): Promise<void> {
-  const { report, takenAt, options, lifecycle } = input;
+  const { report, unasked, takenAt, options, lifecycle } = input;
   const asJson = options.json === true;
   if (options.share === true) return renderShare(context, report, takenAt, asJson);
   if (options.usage !== undefined) {
@@ -157,11 +162,14 @@ async function renderReport(
   }
   if (asJson) {
     // The inventory rather than the raw report: this is the shape that leaves the process.
-    context.out.json(inventoryOf(report, takenAt));
+    context.out.json({
+      ...inventoryOf(report, takenAt),
+      capabilities: tallyOf(capabilitiesOf(report), unasked.length === 0),
+    });
     return;
   }
   if (options.tools === true) return renderTools(context, report);
-  return renderMachine(context, report, await deps.counts(), lifecycle);
+  return renderMachine(context, report, await deps.counts(), { lifecycle, unasked });
 }
 
 /** The share card is meant to be pasted elsewhere, so nothing of ours is drawn through it. */

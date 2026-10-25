@@ -4,6 +4,7 @@ export * from './pause';
 export * from './budget';
 export * from './budget-store';
 export * from './autonomy';
+export * from './earned';
 export * from './operations';
 export * from './autopilot';
 export * from './unattended';

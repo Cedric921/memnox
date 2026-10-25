@@ -143,7 +143,10 @@ describe('sessions in the agents’ desktop apps', () => {
       runningIn: string;
       state: string;
       task?: string;
+      waitingOnYou: number;
     }[];
+    // The phones read every session view with the count, so an app's session carries it too.
+    expect(rows.map((each) => each.waitingOnYou)).toEqual([0, 0]);
     expect(rows.map((each) => [each.runningIn, each.task, each.state])).toEqual([
       ['the Codex app', 'check the git history', 'working'],
       ['Claude desktop', 'Project overview', expect.any(String)],

@@ -38,6 +38,16 @@ async function hermesHome(): Promise<string> {
     null,
     0,
   );
+  db.prepare('INSERT INTO sessions VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(
+    's_voice',
+    'acp',
+    null,
+    day + 3_000,
+    null,
+    '/home/me/.memnox',
+    null,
+    0,
+  );
   const say = db.prepare(
     'INSERT INTO messages (session_id, role, content, tool_name, timestamp, active) VALUES (?, ?, ?, ?, ?, ?)',
   );
@@ -62,6 +72,60 @@ describe("Hermes's own sessions, read on a machine where it runs", () => {
         lastActive: '2026-10-06T01:00:20.000Z',
         directory: '/srv/billing',
         toolCalls: 4,
+        source: 'cli',
+      },
+      {
+        id: 's_voice',
+        startedAt: '2026-10-06T00:50:00.000Z',
+        lastActive: '2026-10-06T00:50:00.000Z',
+        directory: '/home/me/.memnox',
+        toolCalls: 0,
+        source: 'acp',
+      },
+    ]);
+  });
+
+  it('leaves out the sources it is asked to skip', async () => {
+    const home = await hermesHome();
+    const sessions = readHermesSessions(home, new Date('2026-10-05T00:00:00.000Z'), [
+      'acp',
+    ]);
+
+    expect(sessions.map((each) => each.id)).toEqual(['s_new']);
+  });
+
+  it('still reads a Hermes that keeps no source, and skips nothing there', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'memnox-hermes-'));
+    await mkdir(join(home, '.hermes'));
+    const db = new Database(join(home, '.hermes', 'state.db'));
+    db.exec(`
+      CREATE TABLE sessions (id TEXT PRIMARY KEY, display_name TEXT, started_at REAL NOT NULL,
+        ended_at REAL, cwd TEXT, git_repo_root TEXT, tool_call_count INTEGER);
+      CREATE TABLE messages (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL,
+        role TEXT NOT NULL, content TEXT, tool_name TEXT, timestamp REAL NOT NULL,
+        active INTEGER NOT NULL DEFAULT 1);
+    `);
+    db.prepare('INSERT INTO sessions VALUES (?, ?, ?, ?, ?, ?, ?)').run(
+      's_old_schema',
+      null,
+      Date.parse('2026-10-06T00:00:00.000Z') / 1_000,
+      null,
+      null,
+      null,
+      1,
+    );
+    db.close();
+
+    const sessions = readHermesSessions(home, new Date('2026-10-05T00:00:00.000Z'), [
+      'acp',
+    ]);
+
+    expect(sessions).toEqual([
+      {
+        id: 's_old_schema',
+        startedAt: '2026-10-06T00:00:00.000Z',
+        lastActive: '2026-10-06T00:00:00.000Z',
+        toolCalls: 1,
       },
     ]);
   });

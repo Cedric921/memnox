@@ -105,7 +105,7 @@ async function depsAt(seen: Seen, world: World = {}): Promise<SessionToolDeps> {
 }
 
 describe("the person's own tools by voice", () => {
-  it('puts the icon of each tool still to sign in to in the notch', async () => {
+  it('opens the sign in of each tool still to sign in to in front of them', async () => {
     const deps = await depsAt(
       { ran: [] },
       { signInFirst: ['linear'], signInAgain: ['slack'] },
@@ -121,7 +121,7 @@ describe("the person's own tools by voice", () => {
       { toolkit: 'linear', url: 'https://consent/linear' },
       { toolkit: 'slack', url: 'https://consent/slack', again: true },
     ]);
-    expect(found.said).toContain('notch');
+    expect(found.said).toContain('sign in is now open in front of them');
   });
 
   it('says why a tool they named cannot be used rather than reaching for another', async () => {
@@ -132,7 +132,8 @@ describe("the person's own tools by voice", () => {
     })) as {
       said?: string;
     };
-    expect(waits.said).toContain('Airtable is a team tool');
+    expect(waits.said).toContain('Airtable could not be connected for them');
+    expect(waits.said).not.toMatch(/admin/);
     const none = await depsAt({ ran: [] }, { unknown: ['frobly'] });
     const missing = (await findToolTool(none, { what: 'post', toolkit: 'frobly' })) as {
       said?: string;
@@ -190,6 +191,7 @@ describe("the person's own tools by voice", () => {
     })) as { proposed: string; said: string };
     expect(seen.ran).toHaveLength(0);
     expect(answer.said).toContain('As maya on GitHub');
+    expect(answer.said).toContain('though not who it goes to');
     const proposal = await new Proposals(deps.home).read(answer.proposed);
     expect(proposal?.change).toEqual({
       kind: PROPOSAL_KIND.WORK,
@@ -255,6 +257,17 @@ describe("the person's own tools by voice", () => {
     expect(await new PendingSignIns(deps.home).all()).toEqual([]);
   });
 
+  it('lays out a Gmail reply as a mail with its words in the box', () => {
+    const draft = workDraftOf('gmail', 'GMAIL_REPLY_TO_THREAD', {
+      thread_id: '18f2',
+      recipient_email: 'sara@acme.test',
+      message_body: 'Thank you, I will send it soon.',
+    });
+    expect(draft.kind).toBe(WORK_DRAFT_KIND.EMAIL);
+    expect(draft.body).toBe('Thank you, I will send it soon.');
+    expect(draft.fields).toEqual([]);
+  });
+
   it('names who a message goes to by name, not by the id the tool takes', () => {
     const draft = workDraftOf(
       'slack',
@@ -265,7 +278,7 @@ describe("the person's own tools by voice", () => {
     expect(draft.to).toEqual(['Deco Mukendi']);
   });
 
-  it('opens the sign in for a tool an admin connected', async () => {
+  it('opens the sign in for any tool the person names', async () => {
     const deps = await depsAt({ ran: [] });
     const signed = (await signInTool(deps, { toolkit: 'linear' })) as { said: string };
     expect(signed.said).toContain('Linear sign in is open');

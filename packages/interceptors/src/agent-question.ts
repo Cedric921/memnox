@@ -56,7 +56,7 @@ export async function answerAgentQuestion(
     at: context.now().toISOString(),
     waitMs,
   });
-  const answered = await untilAnswered(store, question.id, Date.now() + waitMs, seams);
+  const answered = await untilAnswered(store, question.id, seams);
   await store.close(question.id);
   return answered === null ? null : filledIn(asked.input, answered);
 }
@@ -125,10 +125,10 @@ function optionsOf(value: unknown): AgentQuestionOption[] {
   return found;
 }
 
+/** Until every step has its answer, or the record's own deadline passes, which each answer moves on. */
 async function untilAnswered(
   store: AgentQuestions,
   id: string,
-  deadline: number,
   seams: AgentQuestionSeams,
 ): Promise<AgentQuestion | null> {
   const sleep =
@@ -138,7 +138,7 @@ async function untilAnswered(
     const question = await store.read(id).catch(() => null);
     if (question === null) return null;
     if (fullyAnswered(question)) return question;
-    if (Date.now() >= deadline) return null;
+    if (Date.now() >= Date.parse(question.expiresAt)) return null;
     await sleep(POLL_MS);
   }
 }

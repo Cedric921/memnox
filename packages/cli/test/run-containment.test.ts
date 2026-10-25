@@ -480,6 +480,7 @@ describe('memnox status', () => {
         daemon: 'keeping',
         agents: 1,
         hooked: [],
+        unhooked: [],
         mcpServers: 1,
         mcpWrapped: 1,
         rules: 0,

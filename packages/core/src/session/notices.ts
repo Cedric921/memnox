@@ -24,6 +24,10 @@ export const NOTICE_KIND = {
   ENDED: 'ended',
   /** Two agents on one piece of work, here or across machines, which the person sorts out. */
   COLLISION: 'collision',
+  /** A teammate speaking to the person through the workspace, said at once and listened after. */
+  MESSAGE: 'message',
+  /** The person's agent and a teammate's were found on one feature and introduced, which is shown. */
+  TOGETHER: 'together',
   /** A session has failures it has not got past, so its changes outside this machine ask first. */
   STRUGGLING: 'struggling',
   /** A session began, by its own start hook or its first action, which is shown and kept for the voice. */

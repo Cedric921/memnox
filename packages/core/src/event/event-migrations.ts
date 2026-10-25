@@ -39,6 +39,7 @@ export const IMMUTABLE_COLUMNS = [
   'decisionIds',
   'subagent',
   'subagentType',
+  'signals',
 ] as const;
 
 /** The column a held call's release fills in, and the only one that may change. */
@@ -161,6 +162,15 @@ export const MIGRATIONS: readonly Migration[] = [
     sql: `
       ALTER TABLE events ADD COLUMN subagent TEXT;
       ALTER TABLE events ADD COLUMN subagentType TEXT;
+      DROP TRIGGER IF EXISTS events_no_update;
+      ${appendOnlyTrigger()}
+    `,
+  },
+  {
+    // What the gate found, so `why` can say which part of the context decided.
+    version: 7,
+    sql: `
+      ALTER TABLE events ADD COLUMN signals TEXT;
       DROP TRIGGER IF EXISTS events_no_update;
       ${appendOnlyTrigger()}
     `,

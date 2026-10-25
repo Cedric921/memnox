@@ -26,6 +26,8 @@ export interface Clash {
   what: string;
   /** Who has it, where and since when, in the words the agent was given. */
   said: string;
+  /** The workspace lease in the way, where another machine holds it, so its owner can be asked for it. */
+  leaseId?: string;
 }
 
 /** Only what actually touched something: a refused attempt is not shared work. */
@@ -55,7 +57,12 @@ export class Clashes {
   private readonly records: JsonRecordDir<Clash>;
 
   constructor(home: string) {
-    this.records = new JsonRecordDir(join(home, MEMNOX_HOME, CLASHES_DIR));
+    this.records = new JsonRecordDir(Clashes.directory(home));
+  }
+
+  /** Where clashes land, so the daemon can watch for one rather than look every few seconds. */
+  static directory(home: string): string {
+    return join(home, MEMNOX_HOME, CLASHES_DIR);
   }
 
   /**

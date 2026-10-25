@@ -8,6 +8,7 @@ import { changesTool, readingFor } from './changes-tool';
 import { readReach } from '../operator/vocabulary';
 import { proposeInstructionTool, sendInstructionTool } from './instruct-tools';
 import { proposeAnswerTool, proposeRuleTool } from './propose-tools';
+import { PROPOSE_RULE_TOOL } from './spoken-rule-tool';
 import { outsideTool } from './outside-tool';
 import { repositoryTool } from './repository-tool';
 import { showAgentsTool } from './agents-tool';
@@ -20,6 +21,7 @@ import { PERSONAL_CALLS, PERSONAL_TOOLS } from './personal-catalogue';
 import { answerQuestionTool } from './question-tool';
 import { proposeRewindTool } from './rewind-proposal';
 import { pauseSessionTool, proposeResumeTool } from './session-actions';
+import { AGENT_PAUSE_CALLS, AGENT_PAUSE_TOOLS } from './agent-pause-tools';
 import { proposeStartTool, startSessionTool } from './start-tools';
 import { controlAppTool, typeInAppTool } from './app-tools';
 import { walkThroughTool } from './walk-tool';
@@ -45,6 +47,8 @@ import { heldInGuess } from './guess-hold';
 import type { ToolCatalogue } from './session-server';
 import { ACTING_TOOLS } from './acting-tools';
 import { FOLDER_CALLS, FOLDER_TOOLS } from './folder-tools';
+import { HANDOVER_CALLS, HANDOVER_TOOLS } from './handover-tools';
+import { WORKSPACE_ASK_CALLS, WORKSPACE_ASK_TOOLS } from './workspace-ask-tools';
 import { HEARD_WORD_CALLS, HEARD_WORD_TOOLS } from './heard-words-tools';
 import { PROFILE_CALLS, PROFILE_TOOLS } from './profile-tools';
 import { AGENT_ARG, proposeTool, SAID_ARG } from './operator-args';
@@ -76,7 +80,7 @@ export const OPERATOR_TOOLS: readonly ToolDefinition[] = [
   ),
   readTool(
     'reach',
-    'What the agents on this machine can use: the agents themselves, each MCP server and which agents start it, and the CLIs Memnox watches, which any agent with a shell can run, and which of those are signed in, so an agent running them acts as the person, and for each agent whether it approves its own actions or asks first and where its program was installed from and who signed it. Answer "is Claude Code connected to Railway" and "which agents act without asking" from here.',
+    'What the agents on this machine can use: the agents themselves, each MCP server and which agents start it, and the CLIs Memnox watches, which any agent with a shell can run, and which of those are signed in, so an agent running them acts as the person, and for each agent whether it approves its own actions or asks first and where its program was installed from and who signed it. Answer "is Claude Code connected to Railway" and "which agents act without asking" from here. It knows only this machine, never the apps their workspace connected, such as Gmail, Slack or Linear, which my_accounts lists.',
   ),
   readTool(
     'cloud_agents',
@@ -195,7 +199,7 @@ export const OPERATOR_TOOLS: readonly ToolDefinition[] = [
   ),
   readTool(
     'repository',
-    'Which branch a session\'s repository is on, the commits made there since the session started, each with its short id, time, message and files, latestCommits, the branch\'s newest commits whoever made them and however long ago, each with its short id, time, author and message, and uncommitted, what git status lists as not yet committed. Answer "which branch", "read the commit it just made", "what did it commit", "what was the last commit", "the last commit message" and "check the git status" from here, yourself, rather than asking the agent to run it: the last commit is the first of latestCommits. Pass repository with a folder name such as "memnox-runtime" when they name a project rather than a session.',
+    'Which branch a session\'s repository is on, the commits made there since the session started, each with its short id, time, message and files, latestCommits, the branch\'s newest commits whoever made them and however long ago, each with its short id, time, author and message, and uncommitted, what git status lists as not yet committed. Answer "which branch", "read the commit it just made", "what did it commit", "what was the last commit", "the last commit message" and "check the git status" from here, yourself, rather than asking the agent to run it: the last commit is the first of latestCommits. Pass repository with a folder name such as "shop-api" when they name a project rather than a session.',
     {
       agent: AGENT_ARG,
       session: SESSION_ARG,
@@ -271,6 +275,7 @@ export const OPERATOR_TOOLS: readonly ToolDefinition[] = [
     // It holds an agent back and lets nothing happen, the same as a refusal.
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   },
+  ...AGENT_PAUSE_TOOLS,
   proposeTool(
     'propose_instruction',
     'Tell an agent session to do something the person said, such as "push it" or "add a test for the cart". Nothing is sent: it returns an id and the words to read back, so a misheard instruction is caught first. Pass message as a clear instruction to the agent in the person\'s words, with misheard names fixed, like "git push" for "guitar push"; never add work they did not ask for.',
@@ -314,6 +319,8 @@ export const OPERATOR_TOOLS: readonly ToolDefinition[] = [
   ...HEARD_WORD_TOOLS,
   ...PROFILE_TOOLS,
   ...FOLDER_TOOLS,
+  ...HANDOVER_TOOLS,
+  ...WORKSPACE_ASK_TOOLS,
   ...PERSONAL_TOOLS,
   LOOK_TOOL,
   FORGET_SCREEN_TOOL,
@@ -357,34 +364,7 @@ export const OPERATOR_TOOLS: readonly ToolDefinition[] = [
       said: SAID_ARG,
     },
   ),
-  proposeTool(
-    'propose_rule',
-    'Write down a rule the person asked for: allow, ask or deny an action, optionally only on some branches or paths. The Mac shows it with where it could hold, the whole Mac or one of their repositories, and nothing is in force until they pick and confirm with Touch ID.',
-    {
-      action: {
-        type: 'string',
-        description:
-          'a command such as "railway deploy", or a verb such as "npm.publish" or "filesystem.read"',
-      },
-      effect: { type: 'string', description: 'allow, ask or deny' },
-      reason: { type: 'string', description: 'why, as the person put it' },
-      branches: {
-        type: 'string',
-        description: 'only on these branches, comma separated, such as "main, release/*"',
-      },
-      paths: {
-        type: 'string',
-        description:
-          'only for these files or folders, comma separated globs, such as "*.env, secrets/*"',
-      },
-      project: {
-        type: 'string',
-        description:
-          'the repository they named, by folder name or full path; leave it out when they named none, and the whole Mac is suggested',
-      },
-      said: SAID_ARG,
-    },
-  ),
+  PROPOSE_RULE_TOOL,
 ];
 
 /** The same reads the session server makes, pointed at whichever agent the person named. */
@@ -444,8 +424,11 @@ const OPERATOR_CALLS: Record<string, OperatorCall> = {
   ...HEARD_WORD_CALLS,
   ...PROFILE_CALLS,
   ...FOLDER_CALLS,
+  ...HANDOVER_CALLS,
+  ...WORKSPACE_ASK_CALLS,
   ...LOOK_CALLS,
   ...ANSWER_AGENT_CALLS,
+  ...AGENT_PAUSE_CALLS,
 };
 
 export async function callOperatorTool(
@@ -481,7 +464,7 @@ export async function callOperatorTool(
 }
 
 const ABOUT_OPERATOR =
-  'You are the voice of Memnox, speaking with the person who runs these agents. Answer out loud: short sentences, the answer first, numbers said plainly, never a list read aloud. Read the machine through these tools before you answer, and never guess. What an agent changed is in changes, with the lines of one file when you pass its path; what it reached outside this machine is in outside. Several sessions can be open at once, even for one agent: call sessions first, pass the session id to every other tool, and when the person did not say which, take the most recently active and say so. When the person answers a held call or asks for a rule, in whatever words, call propose_answer or propose_rule. When they want an agent to do something, call propose_instruction, read it back, and send_instruction only after their yes. You can never allow anything yourself: every allow waits for the person to confirm with Touch ID on the Mac, so tell them that.';
+  'You are the voice of Memnox, speaking with the person who runs these agents. Answer out loud: short sentences, the answer first, numbers said plainly, never a list read aloud. Read the machine through these tools before you answer, and never guess. What an agent changed is in changes, with the lines of one file when you pass its path; what it reached outside this machine is in outside. Several sessions can be open at once, even for one agent: call sessions first, pass the session id to every other tool, and when the person did not say which, take the one they last wrote to, its spokenToAt, and say so. When the person answers a held call or asks for a rule, in whatever words, call propose_answer or propose_rule. When they want an agent to do something, call propose_instruction, read it back, and send_instruction only after their yes. You can never allow anything yourself: every allow waits for the person to confirm with Touch ID on the Mac, so tell them that.';
 
 export const OPERATOR_CATALOGUE: ToolCatalogue = {
   info: { name: 'memnox-operator', version: '1' },

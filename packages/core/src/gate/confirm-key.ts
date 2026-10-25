@@ -3,6 +3,9 @@ import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { MEMNOX_HOME } from '../config/config';
 import { readJsonFile, writeJsonFile } from '../store/json-records';
+import { confirmationMessage } from './confirm-message';
+
+export { confirmationMessage };
 
 /**
  * The public half of a key only a person's fingerprint can use. The Mac app keeps the private
@@ -32,19 +35,6 @@ export type RegisterOutcome =
 
 export function confirmKeyPathFor(home: string): string {
   return join(home, MEMNOX_HOME, CONFIRM_KEY_FILE);
-}
-
-/**
- * What gets signed. The subject is a proposal or pending id, so an old signature confirms nothing new.
- * Words the person rewrote on a draft card go last and whole, so the signature covers exactly what is sent.
- */
-export function confirmationMessage(
-  subject: string,
-  answer: string,
-  edited?: string,
-): string {
-  if (edited === undefined) return `memnox-confirm:v1:${subject}:${answer}`;
-  return `memnox-confirm:v2:${subject}:${answer}:${edited}`;
 }
 
 export function isP256Point(point: string): boolean {

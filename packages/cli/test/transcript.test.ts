@@ -5,10 +5,13 @@ import { describe, expect, it } from 'vitest';
 import { SessionHosts } from '@memnox/core';
 import {
   conversationIn,
+  focusIn,
   lastAnswerIn,
+  latestAskIn,
   sessionTranscript,
   turnOverIn,
 } from '../src/daemon/transcript';
+import { latestPersonAt } from '../src/daemon/spoken-to';
 
 const line = (value: unknown): string => JSON.stringify(value);
 
@@ -55,6 +58,29 @@ describe('the conversation in a live session window', () => {
       { at: 't3', who: 'agent', text: 'I will add it to the cart page.' },
       { at: 't3', who: 'tool', text: 'Edit: Cart.tsx' },
     ]);
+  });
+});
+
+describe('what the person asked last', () => {
+  it('is their own latest words, never a helper report the agent marks as not theirs', () => {
+    const raw = [
+      line({ type: 'user', message: { content: 'make the modal draggable' } }),
+      line({
+        type: 'assistant',
+        message: { content: [{ type: 'text', text: 'On it.' }] },
+      }),
+      line({
+        type: 'user',
+        isMeta: true,
+        origin: { kind: 'peer' },
+        message: {
+          content:
+            'Another Claude session sent a message:\n<agent-message from="a1">\n[Subagent hand-back] The text below is the final report of a subagent.',
+        },
+      }),
+    ];
+    expect(latestAskIn(raw.join('\n'))).toBe('make the modal draggable');
+    expect(latestAskIn(line({ type: 'assistant', message: { content: [] } }))).toBeNull();
   });
 });
 
@@ -149,5 +175,55 @@ describe('a turn its transcript shows is over', () => {
       message: { stop_reason: 'end_turn', content: [{ type: 'text', text: 'Done.' }] },
     });
     expect(turnOverIn([asked, ended, asked].join('\n'))).toBe(false);
+  });
+});
+
+/* A card titled by the first message read "reuse component in app like input" for a session
+   long past it. Claude Code keeps its own title for the session current, which says what is
+   happening there now. */
+describe('what a session is about now', () => {
+  it('is the agent’s newest title, not its first and not the first message', () => {
+    const raw = [
+      line({ type: 'user', message: { content: 'reuse component in app like input' } }),
+      line({ type: 'ai-title', aiTitle: 'Input component reuse', sessionId: 's' }),
+      line({ type: 'assistant', message: { content: [{ type: 'text', text: 'done' }] } }),
+      line({
+        type: 'ai-title',
+        aiTitle: 'Shared form inputs across the app',
+        sessionId: 's',
+      }),
+    ].join('\n');
+    expect(focusIn(raw)).toBe('Shared form inputs across the app');
+  });
+
+  it('falls back to the name it was given, said as words', () => {
+    const raw = line({
+      type: 'agent-name',
+      agentName: 'memnox-launch-film-script',
+      sessionId: 's',
+    });
+    expect(focusIn(raw)).toBe('memnox launch film script');
+  });
+
+  it('is nothing where the agent keeps no title, and never a reply that quotes one', () => {
+    const quoted = line({
+      type: 'assistant',
+      message: {
+        content: [{ type: 'text', text: '{"type":"ai-title","aiTitle":"fake"}' }],
+      },
+    });
+    expect(focusIn(quoted)).toBeNull();
+  });
+});
+
+describe('when the person last wrote to a session', () => {
+  it("is the time of their newest line, never the agent's", () => {
+    expect(
+      latestPersonAt([
+        { at: '2026-10-02T11:00:00.000Z', who: 'person', text: 'fix it' },
+        { at: '2026-10-02T11:05:00.000Z', who: 'agent', text: 'Done.' },
+      ]),
+    ).toBe('2026-10-02T11:00:00.000Z');
+    expect(latestPersonAt([{ at: 't', who: 'agent', text: 'Hello.' }])).toBeNull();
   });
 });

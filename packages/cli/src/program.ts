@@ -47,6 +47,7 @@ import { registerTaskCommand } from './commands/task.command';
 import { registerMissionCommand } from './commands/mission.command';
 import { registerModeCommand } from './commands/mode.command';
 import { registerAllowCommand } from './commands/allow.command';
+import { registerAutopilotCommand } from './commands/autopilot.command';
 import { unwrapEveryServer } from './mcp/wrap-servers';
 import { registerPolicyCommand } from './commands/policy.command';
 import { registerLoginCommand } from './commands/login.command';
@@ -113,6 +114,7 @@ function registerTerminalCommands(program: Command, context: CliContext): void {
   // How a person shapes the work: the mode, the task, and what a clone may do.
   registerModeCommand(program, context);
   registerAllowCommand(program, context);
+  registerAutopilotCommand(program, context);
   registerTaskCommand(program, context);
   registerMissionCommand(program, context);
   registerRepoCommand(program, context);

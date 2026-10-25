@@ -1,10 +1,6 @@
 import { basename, isAbsolute } from 'node:path';
 import {
-  answeredBy,
-  confirmationMessage,
-  Devices,
   driveCovers,
-  holds,
   SessionPauses,
   HOLD_ANSWER,
   Milestones,
@@ -18,24 +14,29 @@ import {
   readAccount,
   REMOTE_CAPABILITY,
   RULE_SCOPE,
-  verifiesSigned,
   type DaemonEvent,
   type DeviceRecord,
   type HoldAnswer,
+  type HoldRequest,
   type Policy,
   type Proposal,
-  type RemoteCapability,
   type RuleScope,
 } from '@memnox/core';
 import { machinePolicyPath } from '../protect/machine-rules';
 import { mergeRules, WRITTEN_POLICY_FILE } from '../protect/merge-rules';
 import { fileForScope, scopeAnswered, scopedRules } from '../protect/rule-scope';
-import { recordLocalDecisions } from '../sync/local-decisions';
-import { editedProposal } from './confirm-edit';
+import { decisionsOfRules, recordLocalDecisions } from '../sync/local-decisions';
+import { editedProposal, ranOf } from './confirm-edit';
 import { applyPersonal } from './confirm-work';
-import { FROM_NOW_ON, proposeFromNowOn } from './from-now-on';
+import {
+  FROM_NOW_ON,
+  NEVER_FROM_NOW_ON,
+  proposeFromNowOn,
+  proposeNeverFromNowOn,
+} from './from-now-on';
 import { registerPolicyFile } from '../policy-registry';
 import { recordAnswer } from './record-answer';
+import { consentFor, type Needs } from './confirm-consent';
 import {
   commandResults,
   runMemnox,
@@ -62,6 +63,10 @@ export interface ConfirmInput {
   signature?: string;
   /** The words the person rewrote on a draft card, which the signature covers and which go out instead. */
   edited?: string;
+  /** The addresses the person typed on a mail's card, joined by commas, which the signature covers with the words. */
+  editedTo?: string;
+  /** What the person said with a no, which the agent hears beside the rule's way forward; a yes drops it. */
+  reason?: string;
   at: string;
   /** How a confirmed memnox command is run; memnox itself unless a test hands in another. */
   run?: CommandRunner;
@@ -72,6 +77,9 @@ export interface ConfirmInput {
 /** A confirmed command still running on its own, such as a login waiting on its browser page. */
 const STARTED = 'started';
 
+/** A spoken rule signed on an enrolled machine, which holds here at once and waits on the team. */
+const OFFERED_TOO = `${PROPOSAL_ANSWER.CONFIRMED}: in force on this machine, and offered to the team, where a second admin approves it`;
+
 /** A held call let through: allowed, and still the agent's to run, so the Mac never calls it done. */
 const LET_THROUGH = 'let-through';
 
@@ -79,11 +87,6 @@ const LET_THROUGH = 'let-through';
 export type ConfirmResult =
   | { ok: true; outcome: string; release?: { event: DaemonEvent; deviceId: string } }
   | { ok: false; error: string; refused?: true };
-
-/** Who the ledger says answered, since a refusal arrives unsigned and an allow does not. */
-const BY_VOICE = 'person (voice)';
-/** A yes to a call that stays inside its session's repository, which needs no fingerprint. */
-const IN_SESSION = 'person (inside the session)';
 
 const PENDING_PREFIX = 'apr_';
 const PROPOSAL_PREFIX = 'prp_';
@@ -95,6 +98,13 @@ const SPOKEN_HOLD_ANSWERS: readonly string[] = [
   HOLD_ANSWER.DENY,
 ];
 
+/** This call once or refused once, as said by an answer that also puts a rule card up for the next one. */
+function heldAnswerOf(said: string): HoldAnswer | null {
+  if (said === FROM_NOW_ON) return HOLD_ANSWER.ONCE;
+  if (said === NEVER_FROM_NOW_ON) return HOLD_ANSWER.DENY;
+  return SPOKEN_HOLD_ANSWERS.includes(said) ? (said as HoldAnswer) : null;
+}
+
 export async function confirmAnswer(
   home: string,
   input: ConfirmInput,
@@ -105,12 +115,11 @@ export async function confirmAnswer(
 }
 
 async function answerHeld(home: string, input: ConfirmInput): Promise<ConfirmResult> {
-  const fromNowOn = input.answer === FROM_NOW_ON;
-  if (!fromNowOn && !SPOKEN_HOLD_ANSWERS.includes(input.answer)) {
+  // This call runs once or is refused; what settles the next one is a rule the person places and signs.
+  const answer = heldAnswerOf(input.answer);
+  if (answer === null) {
     return { ok: false, error: `"${input.answer}" is not an answer a held call takes` };
   }
-  // This call runs once; what stops the next one asking is a rule the person places and signs.
-  const answer = fromNowOn ? HOLD_ANSWER.ONCE : (input.answer as HoldAnswer);
   const approvals = new PendingApprovals(home);
   const held = await approvals.read(input.subject);
   const consent = await consentFor(home, input, {
@@ -121,7 +130,13 @@ async function answerHeld(home: string, input: ConfirmInput): Promise<ConfirmRes
   });
   if ('refused' in consent) return { ok: false, error: consent.refused, refused: true };
   const by = consent.by;
-  const outcome = await approvals.answer(input.subject, answer, by, input.at);
+  const outcome = await approvals.answer(
+    input.subject,
+    answer,
+    by,
+    input.at,
+    input.reason,
+  );
   if (outcome === null || held === null)
     return { ok: false, error: `${input.subject} is no longer held` };
   if ('alreadyAnswered' in outcome) {
@@ -131,15 +146,40 @@ async function answerHeld(home: string, input: ConfirmInput): Promise<ConfirmRes
     };
   }
   await recordAnswer(home, { request: held.request, answer, by, at: input.at });
-  if (!fromNowOn) return { ok: true, outcome: answer };
+  return offerNextTime(home, input, {
+    request: held.request,
+    answer,
+    reason: outcome.answered.answerReason,
+  });
+}
+
+/** The rule card a from now on answer puts up for the next call like this one. */
+async function offerNextTime(
+  home: string,
+  input: ConfirmInput,
+  held: { request: HoldRequest; answer: HoldAnswer; reason: string | undefined },
+): Promise<ConfirmResult> {
+  if (input.answer === NEVER_FROM_NOW_ON) {
+    const offered = await proposeNeverFromNowOn(
+      home,
+      held.request,
+      input.at,
+      held.reason,
+    );
+    return { ok: true, outcome: fromNowOnOutcome(held.answer, offered) };
+  }
+  if (input.answer !== FROM_NOW_ON) return { ok: true, outcome: held.answer };
   const offered = await proposeFromNowOn(home, held.request, input.at);
-  return {
-    ok: true,
-    outcome:
-      'proposed' in offered
-        ? `${answer}, and the rule for from now on waits on the Mac as ${offered.proposed}`
-        : `${answer}, and nothing from now on: ${offered.notProposed}`,
-  };
+  return { ok: true, outcome: fromNowOnOutcome(held.answer, offered) };
+}
+
+function fromNowOnOutcome(
+  answer: HoldAnswer,
+  offered: { proposed: string } | { notProposed: string },
+): string {
+  return 'proposed' in offered
+    ? `${answer}, and the rule for from now on waits on the Mac as ${offered.proposed}`
+    : `${answer}, and nothing from now on: ${offered.notProposed}`;
 }
 
 /** A rule's answer may be the place the person picked, which the signature then covers. */
@@ -162,9 +202,9 @@ async function answerProposal(home: string, input: ConfirmInput): Promise<Confir
   const consent = await consentFor(home, input, await proposalNeeds(home, input, found));
   if ('refused' in consent) return { ok: false, error: consent.refused, refused: true };
   if (found === null) return { ok: false, error: `${input.subject} was never proposed` };
-  const edited = confirming ? editedProposal(found, input.edited) : found;
+  const edited = confirming ? editedProposal(found, input.edited, input.editedTo) : found;
   if (edited === null)
-    return { ok: false, error: `${input.subject} has no words to rewrite` };
+    return { ok: false, error: `${input.subject} cannot be rewritten so` };
   // Checked before it is marked, so a proposal aimed at another file is refused rather than half done.
   if (confirming && !writesOnlyAPolicyFile(home, found, scope)) {
     return {
@@ -205,8 +245,7 @@ async function carryOut(
   const applied = await apply(home, proposal, { at: input.at, run, by, scope });
   const kind = proposal.change.kind;
   if (kind !== PROPOSAL_KIND.WORK && kind !== PROPOSAL_KIND.ACCOUNT) return applied;
-  const said = applied.ok ? applied.outcome : applied.error;
-  await proposals.ran(proposal.id, { ok: applied.ok, said, at: input.at });
+  await proposals.ran(proposal.id, ranOf(proposal.change, applied, input.at));
   return applied;
 }
 
@@ -257,7 +296,11 @@ async function apply(
     await mergeRules(file, rules, home);
     // Every seam loads only registered files, so a rule written anywhere else would be in force nowhere.
     await registerPolicyFile(home, file);
-    return { ok: true, outcome: PROPOSAL_ANSWER.CONFIRMED };
+    if (change.offerTeam !== true || scope?.kind === RULE_SCOPE.REPOSITORY)
+      return { ok: true, outcome: PROPOSAL_ANSWER.CONFIRMED };
+    // The rule as said, never narrowed to a folder here, since a team rule holds on every machine.
+    const offered = await recordLocalDecisions(home, decisionsOfRules(change.rules, at));
+    return { ok: true, outcome: offered === 0 ? PROPOSAL_ANSWER.CONFIRMED : OFFERED_TOO };
   }
   if (change.kind === PROPOSAL_KIND.RESUME) {
     const lifted = await new SessionPauses(home).resume(change.sessionId, by, at);
@@ -297,14 +340,7 @@ async function offerToTeam(
   rules: readonly Policy[],
   at: string,
 ): Promise<ConfirmResult> {
-  const decided = rules.flatMap((rule) =>
-    rule.match.actions.map((operation) => ({
-      operation,
-      effect: rule.decision.effect,
-      decidedAt: at,
-      ...(rule.match.agents?.[0] === undefined ? {} : { agent: rule.match.agents[0] }),
-    })),
-  );
+  const decided = decisionsOfRules(rules, at);
   if ((await readAccount(home)) === null) {
     return {
       ok: false,
@@ -430,61 +466,6 @@ function writesOnlyAPolicyFile(
   return isAbsolute(file) && basename(file) === WRITTEN_POLICY_FILE;
 }
 
-/** What an answer needs before it counts. */
-interface Needs {
-  refusing: boolean;
-  /** Null when nothing but the Mac may answer it. */
-  capability: RemoteCapability | null;
-  /** A held call inside its session's repository, which the Mac may allow without Touch ID. */
-  withinSession: boolean;
-  /** A Mac proposal from the device driving the Mac now, which runs without Face ID. */
-  driven: boolean;
-}
-
-/** Who answered, in the ledger's words, or why the answer does not count. */
-async function consentFor(
-  home: string,
-  input: ConfirmInput,
-  needs: Needs,
-): Promise<{ by: string } | { refused: string }> {
-  const principal = input.principal?.device;
-  if (
-    principal !== undefined &&
-    (needs.capability === null || !holds(principal, needs.capability))
-  ) {
-    return { refused: `${principal.name} may not answer that from afar` };
-  }
-  if (needs.refusing)
-    return { by: principal === undefined ? BY_VOICE : `person (${principal.name})` };
-  const signer = await signerOf(home, input);
-  if (signer !== null) {
-    const lacks = needs.capability !== null && !holds(signer, needs.capability);
-    return lacks
-      ? { refused: `${signer.name} may not allow that` }
-      : { by: answeredBy(signer) };
-  }
-  if (principal !== undefined) {
-    return needs.driven
-      ? { by: `person (driving from ${principal.name})` }
-      : {
-          refused: `allowing from ${principal.name} needs Face ID, and this answer carries no valid signature`,
-        };
-  }
-  return needs.withinSession ? { by: IN_SESSION } : { refused: UNSIGNED };
-}
-
-/** The device whose key signed this answer: only the phone it came from, or any trusted device at the Mac. */
-async function signerOf(home: string, input: ConfirmInput): Promise<DeviceRecord | null> {
-  if (input.signature === undefined) return null;
-  const message = confirmationMessage(input.subject, input.answer, input.edited);
-  const principal = input.principal?.device;
-  if (principal === undefined)
-    return new Devices(home).signerOf(message, input.signature);
-  return verifiesSigned(principal.signingPoint, message, input.signature)
-    ? principal
-    : null;
-}
-
 /** Only a yes to a held call, and only one that stays in its repository, goes without a fingerprint. */
 async function answersWithinSession(
   home: string,
@@ -494,6 +475,3 @@ async function answersWithinSession(
   const held = await new PendingApprovals(home).read(found.change.pendingId);
   return held?.request.withinSession === true;
 }
-
-const UNSIGNED =
-  'letting something happen needs Touch ID, and this answer carries no valid signature';

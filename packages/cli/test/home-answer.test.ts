@@ -61,6 +61,7 @@ const STATUS: HomeStatus = {
   waiting: 2,
   agents: 3,
   hooked: ['claude-code'],
+  unhooked: ['Codex', 'Cursor'],
   dormant: [{ name: 'aider' }],
 };
 

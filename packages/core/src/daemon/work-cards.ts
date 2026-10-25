@@ -49,6 +49,8 @@ export const WORK_DRAFT_KIND = {
   COMMENT: 'comment',
   EMAIL: 'email',
   ISSUE: 'issue',
+  EVENT: 'event',
+  PAGE: 'page',
   OTHER: 'other',
 } as const;
 
@@ -65,12 +67,19 @@ export interface WorkDraft {
   tool: string;
   kind: WorkDraftKind;
   account?: WorkAccount;
-  /** Who it goes to: people, addresses or a channel. */
+  /** Who it goes to: people, addresses or a channel. A mail always shows its real addresses here. */
   to?: string[];
+  /** On a mail, the name the voice found for whom it goes to, shown beside the address and never in its place. */
+  toName?: string;
+  /** On a mail, the person may rewrite its addresses on the card, which their Touch ID then covers. */
+  toEditable?: boolean;
   /** Where it lands: `owner/repo#412`, an issue, a page. */
   where?: string;
   subject?: string;
   body?: string;
+  /** On an event, when it starts and ends as the tool was given them, so the card shows the time it books. */
+  starts?: string;
+  ends?: string;
   /** Every other argument, as text, so nothing goes out that the card did not show. */
   fields: WorkField[];
 }
@@ -79,6 +88,8 @@ export interface WorkDraft {
 const KIND_WORDS: ReadonlyArray<[WorkDraftKind, readonly string[]]> = [
   [WORK_DRAFT_KIND.COMMENT, ['COMMENT', 'REVIEW', 'REACTION']],
   [WORK_DRAFT_KIND.EMAIL, ['EMAIL', 'MAIL', 'DRAFT']],
+  [WORK_DRAFT_KIND.EVENT, ['EVENT', 'MEETING']],
+  [WORK_DRAFT_KIND.PAGE, ['PAGE', 'DOCUMENT', 'DOC']],
   [WORK_DRAFT_KIND.ISSUE, ['ISSUE', 'TICKET', 'TASK']],
   [WORK_DRAFT_KIND.MESSAGE, ['MESSAGE', 'CHAT', 'POST', 'DM', 'REPLY']],
 ];
@@ -86,15 +97,19 @@ const KIND_WORDS: ReadonlyArray<[WorkDraftKind, readonly string[]]> = [
 const BODY_KEYS = [
   'text',
   'body',
+  // A Gmail reply carries its words here, and a card that missed it showed an empty box over them.
+  'message_body',
   'message',
   'markdown',
   'markdown_text',
   'content',
   'comment',
 ];
-const SUBJECT_KEYS = ['subject', 'title'];
+// A calendar event carries its title as a summary.
+const SUBJECT_KEYS = ['subject', 'title', 'summary'];
 const TO_KEYS = [
   'to',
+  'to_email',
   'recipient_email',
   'recipient',
   'recipients',
@@ -102,8 +117,13 @@ const TO_KEYS = [
   'channel_id',
   'user',
   'users',
+  'attendees',
   'cc',
 ];
+/** The arguments a mail holds its main addresses in, the only ones the person may rewrite on its card. */
+const ADDRESS_KEYS = ['to', 'to_email', 'recipient_email', 'recipients'];
+const STARTS_KEYS = ['start_datetime', 'start_time', 'start', 'start_date'];
+const ENDS_KEYS = ['end_datetime', 'end_time', 'end', 'end_date'];
 const REPO_KEYS = ['owner', 'repo'];
 const NUMBER_KEYS = ['pull_number', 'issue_number', 'number'];
 const PLACE_KEYS = [
@@ -134,25 +154,39 @@ export function workDraftOf(
   const used = new Set<string>();
   const body = firstOf(args, BODY_KEYS, used);
   const subject = firstOf(args, SUBJECT_KEYS, used);
-  const ids = TO_KEYS.flatMap((key) => {
+  const mail = MAIL_TOOLKITS.includes(toolkit);
+  // A mail's copies stay a field of their own, so the editable row holds only the addresses it rewrites.
+  const toKeys = mail ? TO_KEYS.filter((key) => key !== 'cc') : TO_KEYS;
+  const ids = toKeys.flatMap((key) => {
     const value = textOf(args[key]);
     if (value === undefined) return [];
     used.add(key);
     return value.split(', ');
   });
-  // The name alone where the brain found one, since a Slack id like U0B3QDB89Q9 tells a person nothing.
-  const to = toName === undefined || ids.length === 0 ? ids : [toName];
+  // A mail keeps its addresses, since a name alone hid a misheard one until it had gone out.
+  const named = !mail && toName !== undefined && ids.length > 0;
+  // Elsewhere the name alone, since a Slack id like U0B3QDB89Q9 tells a person nothing.
+  const to = named ? [toName] : ids;
   const where = placeOf(args, used);
+  const kind = kindOf(toolkit, tool);
+  // Only an event's times are lifted out, so a start argument elsewhere still shows among the fields.
+  const event = kind === WORK_DRAFT_KIND.EVENT;
+  const starts = event ? firstOf(args, STARTS_KEYS, used) : undefined;
+  const ends = event ? firstOf(args, ENDS_KEYS, used) : undefined;
   const fields = restOf(args, used);
   return {
     toolkit,
     tool,
-    kind: kindOf(tool),
+    kind,
     ...(account === undefined ? {} : { account }),
     ...(to.length === 0 ? {} : { to }),
+    ...(mail && toName !== undefined && ids.length > 0 ? { toName } : {}),
+    ...(mail && addressKeyOf(args) !== undefined ? { toEditable: true } : {}),
     ...(where === undefined ? {} : { where }),
     ...(subject === undefined ? {} : { subject }),
     ...(body === undefined ? {} : { body }),
+    ...(starts === undefined ? {} : { starts }),
+    ...(ends === undefined ? {} : { ends }),
     fields,
   };
 }
@@ -162,6 +196,60 @@ export function workDraftOf(
  * is not plain text or there is none, so an edit never lands in an argument the card did not draw as words.
  */
 export function editedArguments(argumentsText: string, edited: string): string | null {
+  const record = argumentsRecord(argumentsText);
+  if (record === null) return null;
+  const key = BODY_KEYS.find((each) => textOf(record[each]) !== undefined);
+  if (key === undefined || typeof record[key] !== 'string') return null;
+  return JSON.stringify({ ...record, [key]: edited });
+}
+
+/**
+ * The arguments of a mail with the addresses the person typed on its card in place of the proposed ones, in the
+ * shape the tool took them, or null where the toolkit is no mail, an address is malformed, or a single address
+ * argument would be handed several.
+ */
+export function editedRecipients(
+  toolkit: string,
+  argumentsText: string,
+  editedTo: string,
+): string | null {
+  if (!MAIL_TOOLKITS.includes(toolkit)) return null;
+  const addresses = editedTo.split(',');
+  if (!addresses.every(isAddress)) return null;
+  const record = argumentsRecord(argumentsText);
+  if (record === null) return null;
+  const key = addressKeyOf(record);
+  if (key === undefined) return null;
+  const was = record[key];
+  if (Array.isArray(was)) return JSON.stringify({ ...record, [key]: addresses });
+  // A tool that took one address as text is never handed a list it was not written for.
+  const several = typeof was === 'string' && was.includes(',');
+  if (addresses.length > 1 && !several) return null;
+  return JSON.stringify({ ...record, [key]: addresses.join(', ') });
+}
+
+/** Who a send in the person's name goes to, read off the arguments it went with, so "who did it go to" is fact. */
+export function recipientsOf(
+  toolkit: string,
+  tool: string,
+  argumentsText: string,
+  toName?: string,
+): string[] {
+  const extras = toName === undefined ? {} : { toName };
+  return workDraftFromText(toolkit, tool, argumentsText, extras).to ?? [];
+}
+
+/** The draft of one tool call from the arguments as proposed text; text that is no object draws only the tool. */
+export function workDraftFromText(
+  toolkit: string,
+  tool: string,
+  argumentsText: string,
+  extras: WorkDraftExtras = {},
+): WorkDraft {
+  return workDraftOf(toolkit, tool, argumentsRecord(argumentsText) ?? {}, extras);
+}
+
+function argumentsRecord(argumentsText: string): Record<string, unknown> | null {
   let args: unknown;
   try {
     args = JSON.parse(argumentsText);
@@ -170,10 +258,18 @@ export function editedArguments(argumentsText: string, edited: string): string |
     return null;
   }
   if (args === null || typeof args !== 'object' || Array.isArray(args)) return null;
-  const record = args as Record<string, unknown>; // narrowed to a plain object just above
-  const key = BODY_KEYS.find((each) => textOf(record[each]) !== undefined);
-  if (key === undefined || typeof record[key] !== 'string') return null;
-  return JSON.stringify({ ...record, [key]: edited });
+  return args as Record<string, unknown>; // narrowed to a plain object just above
+}
+
+/** One plain address, refusing the colon, comma and space that would make the signed text read two ways. */
+export function isAddress(text: string): boolean {
+  return /^[^\s:,@]+@[^\s:,@]+\.[^\s:,@]+$/.test(text);
+}
+
+/** The one argument holding a mail's addresses, or none where there is none or more than one to choose from. */
+function addressKeyOf(args: Record<string, unknown>): string | undefined {
+  const held = ADDRESS_KEYS.filter((key) => textOf(args[key]) !== undefined);
+  return held.length === 1 ? held[0] : undefined;
 }
 
 /** The first of these arguments that holds anything, marked as shown. */
@@ -202,7 +298,11 @@ function restOf(args: Record<string, unknown>, used: ReadonlySet<string>): WorkF
     });
 }
 
-function kindOf(tool: string): WorkDraftKind {
+/** Toolkits whose every send is a mail, since a slug like GMAIL_REPLY_TO_THREAD reads as a chat reply. */
+const MAIL_TOOLKITS = ['gmail', 'outlook'];
+
+function kindOf(toolkit: string, tool: string): WorkDraftKind {
+  if (MAIL_TOOLKITS.includes(toolkit)) return WORK_DRAFT_KIND.EMAIL;
   const words = tool.toUpperCase().split('_');
   for (const [kind, markers] of KIND_WORDS) {
     if (markers.some((marker) => words.includes(marker))) return kind;

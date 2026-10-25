@@ -16,6 +16,7 @@ import { askOnTerminal, type NameAsker } from '../agents/name-prompt';
 import { Flow } from '../flow';
 import { openBrowser } from './browser';
 import { insecureBaseUrl } from './client';
+import { claimDeviceSpace } from './device-space';
 import {
   accountFrom,
   approvalUrl,
@@ -37,8 +38,7 @@ import {
  * so there is one device flow and one check that refuses `http://`.
  */
 
-/** Where a workspace lives unless somebody says otherwise. */
-export const DEFAULT_BASE_URL = 'https://api.memnox.com';
+export { DEFAULT_BASE_URL } from './cloud-url';
 
 interface ConnectOptions {
   url: string;
@@ -120,6 +120,8 @@ export async function connectMachine(
 
   const account = accountFrom(enrolment, keys, collected, new Date().toISOString());
   await writeAccount(home, account);
+  // A space this Mac acted in before any account moves its paired phones onto this machine now.
+  await claimDeviceSpace(home).catch(() => null);
   if (options.enforce === true) await enforceHere(home);
   renderEnrolled({ flow, home, named, collected });
 

@@ -1,7 +1,9 @@
+import { stat } from 'node:fs/promises';
 import { basename } from 'node:path';
 import {
   shortDigest,
   AGENT_ID_PREFIX,
+  AgentsFirst,
   Clashes,
   concurrentWork,
   DAEMON_EVENT,
@@ -42,6 +44,7 @@ import { repositoriesWritten, touchesOf } from '../session-tools/session-writes'
 import { readTestRuns, sessionTranscript } from './transcript';
 import { commandResults, type CommandResult } from '../session-tools/voice-commands';
 import { SessionLives } from './session-lifecycle';
+import { WorkspaceStream } from './workspace-stream';
 import { SessionViews } from './session-view';
 import { SignInWatcher } from './sign-in-watch';
 import { personalAccounts } from '../sync/personal-work';
@@ -58,6 +61,13 @@ const MOST_AT_ONCE = 3;
 /** Long enough for the app to ask for the brief, short enough that the map never grows. */
 const KEEP_MS = 10 * 60 * 1_000;
 
+/** Said after a hold by another machine the agents could not settle, so the person knows its owner is one sentence away. */
+const ASK_THE_OWNER =
+  ' The agents could not settle it between them. You can ask its owner for it, and they will hear you now.';
+
+/** How often the clash folder is looked at: one stat, so the notch hears of a clash well inside a second. */
+const CLASH_LOOK_MS = 200;
+
 export class NoticeWatcher {
   private watch: NoticeWatch;
   private readonly told = new Map<string, DaemonEvent>();
@@ -69,6 +79,15 @@ export class NoticeWatcher {
   private readonly collided = new Set<string>();
   /** The newest clash told, so each held write is said once. */
   private clashSeen: string;
+  /** Every clash told, since the watch and the look can both read one before either moves `clashSeen`. */
+  private readonly clashTold = new Set<string>();
+  /** Holds by another machine wait for the two agents to settle them before anybody is told. */
+  private readonly agentsFirst = new AgentsFirst();
+  private clashTimer: ReturnType<typeof setInterval> | null = null;
+  /** What other people in the workspace say to this person, held open while somebody listens. */
+  private workspace: WorkspaceStream | null = null;
+  /** When the clash folder last changed, so a look that finds it unchanged reads nothing. */
+  private clashFolderAt = 0;
   /** Sign ins the person was offered, told once each finishes so the voice carries on. */
   private readonly signIns: SignInWatcher;
 
@@ -133,25 +152,72 @@ export class NoticeWatcher {
 
   /** A write held because another agent here or on another machine had it, each told once. */
   private async clashes(moment: string): Promise<DaemonEvent[]> {
-    const fresh = await new Clashes(this.home)
-      .since(this.clashSeen, moment)
-      .catch(() => []);
+    const fresh = (
+      await new Clashes(this.home).since(this.clashSeen, moment).catch(() => [])
+    ).filter((clash) => !this.clashTold.has(clash.id));
+    for (const clash of fresh) this.clashTold.add(clash.id);
     const last = fresh.at(-1);
     if (last !== undefined) this.clashSeen = last.at;
     const names = await readNames(this.home);
-    return fresh.slice(-MOST_AT_ONCE).map((clash) => {
-      const agentName = nameOf(names, clash.agent);
-      return {
-        kind: DAEMON_EVENT.NOTICE,
-        subject: `ntc_collision_${clash.id}`,
-        agent: clash.agent,
-        agentName,
-        notice: NOTICE_KIND.COLLISION,
-        sessionId: clash.sessionId,
-        summary: `${agentName} was held off ${basename(clash.what)} because another agent has it: ${clash.said}`,
-        at: clash.at,
-      };
-    });
+    return this.agentsFirst
+      .forPerson(fresh)
+      .slice(-MOST_AT_ONCE)
+      .map((clash) => {
+        const agentName = nameOf(names, clash.agent);
+        return {
+          kind: DAEMON_EVENT.NOTICE,
+          subject: `ntc_collision_${clash.id}`,
+          agent: clash.agent,
+          agentName,
+          notice: NOTICE_KIND.COLLISION,
+          sessionId: clash.sessionId,
+          summary: `${agentName} was held off ${basename(clash.what)} because another agent has it: ${clash.said}${clash.leaseId === undefined ? '' : ASK_THE_OWNER}`,
+          at: clash.at,
+        };
+      });
+  }
+
+  /**
+   * Each clash within a fraction of a second, and what other people ask through the workspace
+   * as they ask it, since the agent held off is choosing what to do right now. A folder stat,
+   * not a file watch, which some machines refuse and which throws out of band.
+   */
+  followCollisions(tell: (event: DaemonEvent) => void, now: () => string): void {
+    if (this.clashTimer !== null) return;
+    this.workspace = new WorkspaceStream({ home: this.home, tell, now });
+    this.workspace.start();
+    const dir = Clashes.directory(this.home);
+    this.clashTimer = setInterval(() => {
+      void this.clashFolderMoved(dir)
+        .then((moved) => (moved ? this.clashes(now()) : []))
+        .then((events) => {
+          for (const event of events) {
+            this.told.set(event.subject, event);
+            tell(event);
+          }
+        })
+        .catch(() => undefined);
+    }, CLASH_LOOK_MS);
+    // Looking is never a reason to keep a daemon alive that was asked to stop.
+    this.clashTimer.unref();
+  }
+
+  close(): void {
+    if (this.clashTimer !== null) clearInterval(this.clashTimer);
+    this.clashTimer = null;
+    this.workspace?.stop();
+    this.workspace = null;
+  }
+
+  /** Writing a clash renames a file into the folder, which moves the folder's own time. */
+  private async clashFolderMoved(dir: string): Promise<boolean> {
+    const at = await stat(dir).then(
+      (found) => found.mtimeMs,
+      () => 0,
+    );
+    if (at === this.clashFolderAt) return false;
+    this.clashFolderAt = at;
+    return true;
   }
 
   /** A login or onboarding that ran on its own after Touch ID and has now ended, each told once; only a failure needs the person. */

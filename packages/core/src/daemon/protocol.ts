@@ -4,6 +4,7 @@
  */
 import type { MachineStanding, PersonStanding } from './person-standing';
 import type { DecisionEffect } from '../constants/decision.constants';
+import type { CapabilityTally } from '../discovery/capabilities';
 import type { RunTally } from '../session/notices';
 import type { TurnTests } from '../session/turn-tests';
 import type { DeliveryProof, Sight, Witness } from './delivery';
@@ -17,6 +18,7 @@ import { HOME_METHOD } from './home';
 import { INTERCEPT_METHOD } from './intercept';
 import { REMOTE_METHOD } from './remote';
 import { SPEECH_METHOD } from './speech';
+import { SPOKEN_RULE_METHOD } from './spoken-rule';
 import type {
   CardExcerpt,
   CardFile,
@@ -81,6 +83,14 @@ export const DAEMON_METHOD = {
   PERSON_SIGN_IN: 'person-sign-in',
   /** The Mac app signing the daemon's person out, revoking this terminal on the control plane. */
   PERSON_SIGN_OUT: 'person-sign-out',
+  /** The apps the person connected through the workspace, Gmail or Slack say, for the Mac's menu bar and notch. */
+  CONNECTIONS_LIST: 'connections-list',
+  /** Connecting one tool as the person, any toolkit and any role: answers its sign in page, opened on the Mac when asked there. */
+  CONNECTIONS_SIGN_IN: 'connections-sign-in',
+  /** Undoing every sign in the person made to one tool, answering the list as it now stands. */
+  CONNECTIONS_SIGN_OUT: 'connections-sign-out',
+  /** The tools anybody can connect, from the cloud's catalogue, so a screen offers more than the ones already known. */
+  TOOLKITS_SEARCH: 'toolkits-search',
   /** Whether this machine is connected to a workspace, which is what carries rules, memory and phones to it. */
   MACHINE: 'machine',
   /** The Mac app connecting this machine to a workspace: the device flow `memnox login` runs, polled behind the answer. */
@@ -97,6 +107,7 @@ export const DAEMON_METHOD = {
   ...SPEECH_METHOD,
   ...HOME_METHOD,
   ...INTERCEPT_METHOD,
+  ...SPOKEN_RULE_METHOD,
 } as const;
 
 export type DaemonMethod = (typeof DAEMON_METHOD)[keyof typeof DAEMON_METHOD];
@@ -113,6 +124,8 @@ export interface DaemonRequest extends ExtensionRequestFields {
   agent?: string;
   action?: string;
   target?: string;
+  /** On EVALUATE: what the payload carries that is sensitive, as `classificationLabel` names it, for a rule's `dataClassifications`. */
+  dataClassification?: string;
   /** A digest. Arguments travel only on INTERCEPT, ruled on in memory and never kept. */
   argsDigest?: string;
   reason?: string;
@@ -188,10 +201,21 @@ export interface VoiceAgentStatus {
   works?: boolean;
   /** Why it did not, in words a person can act on. */
   because?: string;
+  /** Its own account's words when it answered something else, such as a spent plan or a missing model. */
+  reply?: string;
   checkedAt?: string;
   chosen: boolean;
   /** What to install, or set up, when it is missing or cannot answer. */
   install: string;
+}
+
+/** One app the person connected through the workspace, by the cloud's lowercase toolkit slug. */
+export interface ToolConnection {
+  toolkit: string;
+  /** Whether any of their sign ins to it is active and enabled, rather than pending, expired, failed or turned off. */
+  connected: boolean;
+  /** Reached on this machine itself, an MCP server or a signed in command line tool, so nothing is connected or disconnected here. */
+  local?: true;
 }
 
 /** A step the Mac timed, hung on the trace of the question it belongs to. */
@@ -297,6 +321,8 @@ export interface DaemonEvent extends ExtensionEventFields {
   pages?: WalkPage[];
   /** On AGENTS, every agent the scan found. */
   agents?: AgentNode[];
+  /** On AGENTS, what the machine can change outside itself; `total` is absent while still counting. */
+  capabilities?: CapabilityTally;
   /** On TRACE, the waterfall to draw. */
   trace?: TraceCard;
   /** On DRAFT, the message to put in front of the person before it is sent. */
@@ -343,6 +369,11 @@ export interface AgentNode {
   mcp?: AgentServer[];
   /** Command line tools signed in on this Mac that its shell can run, by name. */
   clis?: string[];
+  /**
+   * Each capability on the machine credited to the first agent that reaches it, so adding the
+   * agents up gives the machine's real count. No `total` means still counting, never zero.
+   */
+  capabilities?: CapabilityTally;
 }
 
 /** One MCP server as the scan screen names it; counts are absent where no scan has asked it. */
@@ -382,6 +413,8 @@ export interface DaemonResponse extends ExtensionResponseFields {
   words?: readonly string[];
   /** On SESSION_VIEW. */
   session?: SessionView;
+  /** On SESSION_VIEW with a path: that file's diff, its hunks with the lines around each change. */
+  diff?: CardExcerpt;
   /** On SESSIONS_LIST, the most recently active first. */
   sessions?: SessionCard[];
   /** On ASK, one per line; the turn ends with a chunk whose kind is in ASK_ENDS. */
@@ -392,6 +425,8 @@ export interface DaemonResponse extends ExtensionResponseFields {
   person?: PersonStanding;
   /** On MACHINE, MACHINE_SIGN_IN and MACHINE_SIGN_OUT: whether this machine is connected to a workspace. */
   machine?: MachineStanding;
+  /** On CONNECTIONS_LIST and CONNECTIONS_SIGN_OUT: one per app the person connected, by toolkit. */
+  connections?: ToolConnection[];
   /** On POLISH: the dictation as it should be typed. */
   polished?: string;
   /** On CONFIRM and REGISTER_KEY, what happened in a word or two; on PING, which memnox answered. */

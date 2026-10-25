@@ -1,5 +1,97 @@
 # @memnox/proxy
 
+## 0.14.2
+
+### Patch Changes
+
+- 011467d: Two agents on two machines meeting in one file now settle it between themselves first. A write held off by another machine's agent tells the agent it can ask that agent directly with `memnox_message_agent`, and a message from another agent reaches it at its next step with the address to answer. The person hears about the hold only if their agent is still held off a minute later, or when an agent asks them. People can speak to each other by voice too: "tell Ana I'm done with billing" or "ask them how long they need" is said on the teammate's Mac at once, and their spoken answer comes back. The workspace stream now picks up what it missed after a dropped connection, so nothing said during a network blink is lost. Memnox now also finds people working on one feature from their branches and tickets, including different tickets under one epic, introduces their agents to each other, keeps each told what the other is doing, and lets an agent ask the backend or frontend agent on its feature directly. A question from another agent reaches an agent whose turn has ended. `team_work` tells a person who they are working with and what each agent is doing.
+- 754e395: A write held off because another agent has the same lines now reaches the notch in about a fifth of a second, and where that agent is on another machine in the workspace the voice offers to ask its owner: say "ask Ana if I can have it" and her voice tells her at once, her spoken give, wait or keep comes straight back to yours, and a give hands the lines to your agent so its next write goes through. The daemon now holds the person's workspace stream open itself, so incidents, exception requests and calls still short of their approvals are said the moment they reach someone who can act on them, and an incident can be taken and an exception refused by voice.
+- 4abbc02: A follow up to Cursor goes into its agent chat through Cursor's own prompt link and is called sent only once the Mac reads it there and sees it go, rather than being typed wherever Cursor's focus was and called sent when an empty box read empty. A Cursor desktop session can now be stopped by voice, through its Stop button.
+
+  A message sent to a session reads in its steps as what became of it, such as "Your message went in", rather than as the ledger's own "voice delivered typed".
+
+- bf73f4e: `memnox protect` asks about databases on their own rather than as a CLI: a DELETE or UPDATE with no WHERE, a TRUNCATE, a DROP or a schema change is held on every database client, while a write bounded by a WHERE on a local database goes through, and any change to a database on another host still asks. The refusal names the table and the bounded way forward, such as only the test orders. A person who denies a held call from the console, the workspace or a phone can say why, and the agent is told their reason beside that way forward. Existing `cli-ask` rules are left as they were written; run `memnox protect` again to take the new database rules.
+- 8cd90e9: A calendar event or a Notion page about to go out in your name is drawn as one on its card: the event with its day, its hours and who is invited, the page with its title and its words.
+- feabcfa: A reply typed from the notch or the phone to an agent that is busy in a terminal is typed into its prompt, so it shows in the session as your message and the agent picks it up as its next one, rather than arriving as a note nobody saw.
+- e6009a1: `memnox run --for <person>` names who the agent works for, and a rule's `principals:` now fires on it, so an agent on a shared credential never does what its person may not. An agent setting its own identity variables, or running `memnox run --for` or `--role`, is refused. A database tool that has only ever read now asks before its first change, and one that has only made bounded changes asks before its first DELETE or UPDATE with no WHERE. `memnox why` now reads each decision against its context, person, agent, intent, tools, systems and history, and marks the part that decided, from what the gate found, which every row now keeps. The MCP proxy honours `--role` and `--for` and records the class a statement gave a call. An agent can no longer rewrite or delete its host's own session record.
+- 1bed4a4: The voice and the switcher order sessions by when you last wrote to each, read from the agent's own transcript, so "the last session" is the one you were working in rather than whichever agent last ran something on its own.
+- 87e88a5: Acting as yourself needs no Memnox account. The voice and a paired phone now reach the MCP servers your agents are configured with and the command line tools you are signed in to, such as gh, stripe or psql, straight from this Mac: reads run at once, anything that changes something waits on your Touch ID, and every call passes the same rules, pauses and limits an agent's call does. Connecting a tool from the catalogue opens only that tool's own sign in, because the Mac registers a private personal space of its own the first time it needs one, and pairing a phone works the same way. Signing in later moves what you connected and your paired phone into your account, so nothing is connected or paired twice.
+- 981a89a: A paired phone now answers every yes with Face ID. While a phone is paired, every held call and proposal it may answer names it as `answerOn`, so the Mac leaves a spoken yes to that phone rather than Touch ID and says where to answer it. Something a phone asked the Mac to do now names that phone as its origin, so it waits for that phone's Face ID whether or not the phone still holds the voice, and the Mac never declines it as unasked. A phone talking from the island with its app away is woken for what waits even while its tunnel is open for the turn, and a wake held back by the one a minute spacing is sent once the minute is up rather than never.
+- dfdfe98: A wrapped MCP server now reads the rules, the workspace bundle and the conditions in force again whenever one of them changed, so pausing an agent or pulling a new bundle decides its very next tool call rather than waiting for the agent to restart. The proxy knows the agent `memnox mcp wrap` wrote into its line, so a pause on that agent stops its servers too. A SQL statement handed to a database MCP tool is ruled like the same statement on `psql`: a DELETE or UPDATE with no WHERE is held with the bounded way forward on its table, while a bounded write goes through where the call shows the database is on this machine, and anything else still asks. Run `memnox protect` again to take the new MCP rule.
+- 963416d: An agent that asks several questions in one picker now keeps them on the notch step by step: each answer, spoken or tapped, moves the card and the voice on to the next question, the voice never asks one twice, and each answer gives the next its own time, up to four and a half minutes, so a long set no longer falls back to the terminal halfway through. Claude Code's hook is given five minutes before a tool runs for this, and an existing install is upgraded on its next setup.
+- f83fe63: The voice can search the web: "google flights to Oslo" opens the results in the browser on the phone that asked, else on the Mac. A new folder the person asked for is made and the session started in it at once, rather than being asked about twice.
+- 10490c2: When two agents need the same lines, the second now waits for the first to let go and goes ahead within a few hundred milliseconds of it doing so, on one machine and across machines, where it used to wait five seconds here and be refused at once by another machine. An editor's write waits up to forty five seconds where its host lets a hook run that long, then is refused naming the holder as before. Where the workspace cannot be asked, the write still goes ahead, but the agent is told a collision with another machine was not ruled out and the timeline keeps a row saying so. An editor working in a project folder that is not a git checkout now takes holds too, on this machine.
+- bf73f4e: A rule can now say sensitive data never leaves for a destination nobody approved. What a call sends is read by shape at every seam that sees it, the MCP proxy, agent hooks, `curl` and `wget` bodies, plain HTTP through the egress proxy and `@memnox/guard`, and named `secret`, `financial`, `health`, `government-id`, `personal-data`, `customer-record`, `confidential`, `source-code` or `bulk-records`, each also `sensitive`, which `dataClassifications` matches, with the recipient's domain or the URL's host as the target. A policy file or the workspace's bundle can add its own patterns under a named classification. `memnox protect` offers the rule as a question. A cloud agent wrapped by `@memnox/guard` that reads a tool answer written to steer it now asks a person before its next send, post or loss, as the gateway does.
+- cbc69a3: The live session window carries the whole recent conversation with every reply whole, and asking what happened in a session tells what the agent changed, why it said it did, and what was decided along the way.
+- ceda286: A session's card is now titled by what it is about now, as Claude Code titles the session itself and keeps that title current, rather than by the first message it was sent. A session with no such title keeps its first message as before.
+- fa0c28f: A rule can be said in plain words, on the Mac or from the phone, and is read back before anything is written: "never let an agent send customer records to an unapproved destination" asks which destinations are approved, "ask me before any agent pushes to main" and "Codex may not touch the payments database" are read by a fixed grammar, and on a machine in a team the workspace drafts it, with its model on Pro and Team, kept only when the runtime's validator accepts it. Once confirmed with Touch ID or Face ID it holds on this machine from the next action, offline and with no account, and on a machine in a team it is also offered to the team with its destinations, kinds of data and alternative, where a second admin approves it. A phone asks for it with the new `rule` daemon method.
+- Updated dependencies [011467d]
+- Updated dependencies [754e395]
+- Updated dependencies [4abbc02]
+- Updated dependencies [bf73f4e]
+- Updated dependencies [8cd90e9]
+- Updated dependencies [feabcfa]
+- Updated dependencies [e6009a1]
+- Updated dependencies [1bed4a4]
+- Updated dependencies [87e88a5]
+- Updated dependencies [981a89a]
+- Updated dependencies [dfdfe98]
+- Updated dependencies [963416d]
+- Updated dependencies [f83fe63]
+- Updated dependencies [10490c2]
+- Updated dependencies [bf73f4e]
+- Updated dependencies [cbc69a3]
+- Updated dependencies [ceda286]
+- Updated dependencies [fa0c28f]
+  - @memnox/core@0.14.2
+
+## 0.14.1
+
+### Patch Changes
+
+- 97039ac: When the Mac could type but found no message box in an app, the voice is told that reason and that typing is allowed, so asked what it needs it no longer sends the person to switch on a permission that was never the problem.
+- 7b2621d: An instruction that cannot reach a session yet is no longer typed into the agent's desktop app instead. A session waiting in a terminal or an editor is shown and sent again, and one just started that has not come up is offered another try in a moment, rather than landing in a different chat in the Claude or Codex app.
+- Updated dependencies [97039ac]
+- Updated dependencies [7b2621d]
+  - @memnox/core@0.14.1
+
+## 0.14.0
+
+### Patch Changes
+
+- 9a7a649: The autopilot acts once a person turns it on: an action an agent was approved for five times with no refusal is handed to that agent for seven days, and one refusal takes it back. `memnox autopilot` lists and revokes the grants, and an agent can no longer run `next --hand-over` itself.
+- 099b03f: Every person on every plan connects any tool as themselves. The daemon answers connections-sign-in with the tool's sign in page, opened on the Mac when asked there and handed to a paired phone to open, connections-sign-out with the list as it then stands, and toolkits-search with up to thirty tools from the cloud's catalogue. The voice calls sign_in the moment somebody says "connect my Notion", and no longer says an admin has to connect a tool first.
+- d706518: Agent hooks run the edit hook by its absolute path, because an agent started without the installer's PATH failed every tool call with `memnox-edit-hook: command not found`, and the daemon rewrites any hook still written by the bare name.
+- f46a903: Setup puts a Memnox plugin into Hermes, enabled without turning off the plugins Hermes already runs, so a Hermes session is ruled on, takes leases and reaches the ledger, and an ask goes to its person through Hermes's own approval. Shell hooks an earlier install wrote are taken out.
+- b1c309b: An agent the workspace plan has no room for is reported as governed on this machine rather than failed, since the plan caps workspace credentials and never the gates on the laptop.
+- cbfd421: GitHub Copilot CLI, Devin and OpenCode are hooked by setup and found by scan, as Gemini CLI and Windsurf now are too. Claude Code's hook stands down where Cursor, Devin or Copilot runs it, so no call is ruled twice or filed under the wrong agent, and doctor says when Codex no longer runs a Memnox hook it once trusted. Every agent's hook and plugin runs through one launcher at a fixed path, so an update to Memnox never sends Codex's hooks back for approval, and the launcher and the daemon run on a Node of the person's own before one another app bundles. Setup ends with what only the person can do, such as approving hooks in Codex or restarting an agent that loads a plugin, and doctor tells a terminal older than its PATH from one that is missing it. The daemon's home carries the same list as needsYou, each item kept until the ledger hears from that agent after the change, so the Mac app says what setup could not when it ran without a terminal. Doctor counts MCP servers the way mcp wrap acts on them, so Memnox's own servers and those declared by URL no longer read as unrouted.
+- f46a903: Setup writes a Memnox plugin into OpenClaw that hands every tool call and session to the policy hook, so OpenClaw is ruled on, takes leases and reaches the ledger. A relative path is resolved against the directory OpenClaw itself resolves it in, an ask goes to its person through OpenClaw's own approval and a no or a timeout there is recorded, and a config written as JSON5 is joined with marked insertions that keep every comment.
+- 3b2790a: The proxy and interceptors package descriptions read as sentences rather than around dashes.
+- 5427677: An email draft card shows the real address it goes to, with the name beside it, and the person can change that address on the card before Send. The new address goes out only under a fingerprint over it and the words together (`memnox-confirm:v3`), the voice reads the address back exactly, and `sent` names the address a mail really went to.
+- 2081eb8: A session that starts on a machine logged in to a workspace is told, before its first turn, who has a pull request or a pushed branch open on the files it is about to work on, which other open work touches them, and what was said about them in connected tools, asked once with a short timeout and said nothing about when the workspace cannot answer. The brief tool says the same lines first, and a note about other work on a file now reads as being about other work rather than about another agent.
+- e12626a: The Sessions overview no longer lists the voice's own Hermes conversations as Hermes working, shows a Hermes session as working only while Hermes is running, and no longer counts a terminal the voice typed into, such as iTerm, as an agent working now.
+- 2081eb8: What connected tools such as Slack, Notion and Linear said that nobody has approved yet now reaches the agent as context. The workspace memory keeps it in its own `unconfirmed` list, the `memory` and `brief` session tools answer it apart from the facts under a warning, and the session hook says at most one per call, each opening with that nobody approved it and naming where it was read and who said it, with the untrusted warning where its source was outside the workspace. No verdict reads it, and nothing in it is ever described as settled.
+- 11dc443: The voice takes the person's name out of a reply only where it calls them, at the end of a clause or the start of a sentence, so "assigned to Moise, and nothing matches" is said whole rather than as "assigned to and nothing matches". A resumed voice is told which drafts it put up were sent, failed, declined, withdrawn or ran out since the person last spoke, so a draft already sent is never called waiting on their screen. The `repository` tool finds a repository named out loud on the disk when no session touched it in the last day, rather than reporting it missing, and its description no longer offers a real project name as the example.
+- 11dc443: The voice signs the person in to Memnox Cloud itself with `memnox_sign_in`, the same sign in as the Account row, rather than sending them to a menu or a terminal. It counts the tools their workspace connected from the same list the Tools panel shows, never calls an unverified account one still to confirm, reads only their own pull requests when asked for theirs, keeps dictated words such as "gate status" as said, writes a draft's label for the screen, and says they for anyone whose pronouns it was not told.
+- Updated dependencies [9a7a649]
+- Updated dependencies [099b03f]
+- Updated dependencies [4c51627]
+- Updated dependencies [819f22d]
+- Updated dependencies [d706518]
+- Updated dependencies [f46a903]
+- Updated dependencies [b1c309b]
+- Updated dependencies [cbfd421]
+- Updated dependencies [f46a903]
+- Updated dependencies [3b2790a]
+- Updated dependencies [f2eb66a]
+- Updated dependencies [5427677]
+- Updated dependencies [2081eb8]
+- Updated dependencies [e12626a]
+- Updated dependencies [2081eb8]
+- Updated dependencies [11dc443]
+- Updated dependencies [11dc443]
+  - @memnox/core@0.14.0
+
 ## 0.13.15
 
 ### Patch Changes

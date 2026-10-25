@@ -17,12 +17,14 @@ import {
   type SessionCard,
 } from '@memnox/core';
 import { withEvents } from '../event-store';
+import { codexStandingLately, needsYouOf, readChanged } from '../needs-you';
 import { proposeRuleTool } from '../session-tools/propose-tools';
 import type { SessionViews } from './session-view';
 
 /**
  * The home every surface opens on, gathered here once so the Mac, the iPhone and the terminal
- * show the same five blocks from the same record: waiting, working, today, ready, not covered.
+ * show the same blocks from the same record: waiting, working, today, ready, not covered, and
+ * what needs the person.
  */
 
 const HOME_METHODS: readonly string[] = Object.values(HOME_METHOD);
@@ -44,6 +46,8 @@ export interface HomeStatus {
   waiting: number;
   agents: number;
   hooked: readonly string[];
+  /** Hookable agents found here and not hooked yet; an agent no hook exists for is never counted. */
+  unhooked: readonly string[];
   dormant: readonly unknown[];
 }
 
@@ -71,6 +75,11 @@ export async function readHome(home: string, input: HomeInput): Promise<HomeView
     eventsSince(home, new Date(now.getTime() - READY_WINDOW_MS)),
   ]);
   const ready = readyOf(events);
+  const needsYou = needsYouOf(
+    await readChanged(home),
+    events,
+    codexStandingLately(home, now.getTime()),
+  );
   return {
     machine: hostname(),
     mode: status.mode,
@@ -81,9 +90,10 @@ export async function readHome(home: string, input: HomeInput): Promise<HomeView
     today: todayOf(events, now),
     ...(ready === undefined ? {} : { ready: readyView(ready) }),
     notCovered: {
-      unprotected: Math.max(0, status.agents - status.hooked.length),
+      unprotected: status.unhooked.length,
       dormant: status.dormant.length,
     },
+    ...(needsYou.length === 0 ? {} : { needsYou }),
   };
 }
 

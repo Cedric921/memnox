@@ -11,6 +11,8 @@ fi
 case "$(uname -s)" in
   Darwin) lib="libmemnox_noise.dylib" ;;
   Linux) lib="libmemnox_noise.so" ;;
+  # Git Bash on Windows, where Rust names a cdylib with no lib prefix.
+  MINGW* | MSYS* | CYGWIN*) lib="memnox_noise.dll" ;;
   *) echo "unsupported platform $(uname -s)" >&2; exit 1 ;;
 esac
 triple="$(node -p 'process.platform + "-" + process.arch')"

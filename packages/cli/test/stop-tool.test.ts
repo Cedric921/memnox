@@ -107,4 +107,24 @@ describe('stopping an agent by voice', () => {
     expect(request).toMatchObject({ display: 'interrupt', sessionId: 'ses_a' });
     expect(request?.tty).toBeUndefined();
   });
+
+  it('stops a desktop app session such as Cursor by its own Stop, rather than saying it has no terminal', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'memnox-stop-app-'));
+    const deps = {
+      ...depsAt(home, 'typed'),
+      resolveApp: (agent: string) =>
+        agent === 'cursor' ? '/Applications/Cursor.app' : null,
+    };
+    expect(
+      await callOperatorTool(deps, SEAMS, 'show', {
+        session: 'app_cursor',
+        display: 'stop',
+      }),
+    ).toMatchObject({ stopped: true });
+    const [request] = await new DisplayRequests(home).open(NOW.toISOString());
+    expect(request).toMatchObject({
+      display: 'interrupt',
+      appPath: '/Applications/Cursor.app',
+    });
+  });
 });

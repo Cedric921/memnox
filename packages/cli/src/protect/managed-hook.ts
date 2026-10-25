@@ -20,6 +20,7 @@ import {
   withEditHook,
   withoutEditHook,
 } from './claude-hook';
+import { writeHookLauncher } from './hook-launcher';
 import { jsonText } from './json-config';
 
 /**
@@ -113,6 +114,7 @@ export async function runManagedHook(
     );
   }
   const home = seams.home();
+  await writeHookLauncher(home);
   const raw = await readOrNull(target);
   const current = parseManaged(target, raw);
   const next = options.reverting

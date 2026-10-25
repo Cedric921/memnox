@@ -1,4 +1,9 @@
-import { digest, hasInstructionShape, type DecisionEffect } from '@memnox/core';
+import {
+  digest,
+  hasInstructionShape,
+  type DecisionEffect,
+  type ToolClass,
+} from '@memnox/core';
 
 import type { JsonRpcMessage } from './json-rpc';
 
@@ -23,6 +28,12 @@ export interface McpCallRecord {
   rule?: string;
   decisionId?: string;
   result?: McpResultRecord;
+  /** What the call did, read from what it was handed, so a DELETE through `query` is no read. */
+  class?: ToolClass;
+  /** What the gate found, as ids, so the row can say which part of the context decided. */
+  signals?: readonly string[];
+  /** The person this was ruled for, as the run named them. */
+  principal?: string;
 }
 
 export interface McpResultRecord {

@@ -108,9 +108,9 @@ interface BeatState {
   asking: Budget[];
 }
 
-/** What one pass does. The daemon's early passes send, and leave the pulls to the minute. */
+/** What one pass does. The daemon's early passes send, and leave the pulls to the minute or a beat. */
 interface PassOptions {
-  /** Pull the rules and the memory. Only a beat due on the minute needs to. */
+  /** Pull the rules and the memory. Only a pass due on the minute, or one a relay beat brought, needs to. */
   pull: boolean;
 }
 
@@ -165,9 +165,12 @@ export async function syncLoop(
   // Counted in the time this loop waited rather than off a clock, so the minute is the
   // same minute however the waits are served.
   let sincePull: number | undefined;
+  // A beat means a rule, a condition or an answer changed, so the pass it brings pulls whatever the minute says.
+  let beaten = false;
   while (running()) {
     const passStarted = Date.now();
-    const pulling = sincePull === undefined || sincePull >= HEARTBEAT_MS;
+    const pulling = beaten || sincePull === undefined || sincePull >= HEARTBEAT_MS;
+    beaten = false;
     // Read before the pass, so a call raised during it still counts as not yet carried up.
     const carried = new Set(await holding(home));
     let result: Pass;
@@ -177,7 +180,8 @@ export async function syncLoop(
       // A pass that throws must not end the daemon; the gate is what matters.
       seams.log?.(err instanceof Error ? err.message : String(err));
       await sleep(BACKOFF_MS);
-      // A quarter of an hour away, so the pass after it pulls whatever changed meanwhile.
+      // A quarter of an hour away, so the pass after it pulls whatever changed meanwhile, a beat included.
+      beats?.take();
       sincePull = undefined;
       continue;
     }
@@ -188,11 +192,12 @@ export async function syncLoop(
     // Waited out whole, because polling fast for an answer with nowhere to come from changes nothing.
     if (result.unreachable === true) {
       await sleep(BACKOFF_MS);
+      beats?.take();
       sincePull = undefined;
       continue;
     }
     if (pulling) sincePull = 0;
-    const waited = await waitUntilDue({
+    const due = await waitUntilDue({
       home,
       idleMs: HEARTBEAT_MS - (sincePull ?? 0),
       since: passStarted,
@@ -204,7 +209,8 @@ export async function syncLoop(
         ? {}
         : { relayed: () => beats.linked(), beaten: () => beats.take() }),
     });
-    sincePull = (sincePull ?? 0) + waited;
+    sincePull = (sincePull ?? 0) + due.waited;
+    beaten = due.beaten;
   }
 }
 

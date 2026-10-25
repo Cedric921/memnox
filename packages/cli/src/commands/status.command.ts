@@ -32,6 +32,7 @@ import { defaultScanSeams } from '../machine-scan';
 import { policySetInForce } from '../policy-path';
 import { describeCount } from '../plural';
 import { readKept, type Kept } from '../keeper/kept';
+import { EDIT_HOOK_TARGETS } from '../protect/agent-hooks';
 import { describeProbations } from '../probation-view';
 import { readDormantHere } from '../keeper/keep-dormant';
 import { readHome } from '../daemon/home-answer';
@@ -53,6 +54,8 @@ interface MachineStatus {
   daemon: DaemonState;
   agents: number;
   hooked: string[];
+  /** Agents found here that setup can hook and has not, the only ones Protect my agents can still cover. */
+  unhooked: string[];
   mcpServers: number;
   mcpWrapped: number;
   rules: number;
@@ -134,6 +137,7 @@ export async function readStatus(home: string, project: string): Promise<Machine
     daemon: daemonOf(health),
     agents: snapshot === null ? 0 : snapshot.agents.length,
     hooked: hookedOf(kept),
+    unhooked: unhookedOf(snapshot === null ? [] : snapshot.agents, hookedOf(kept)),
     mcpServers: health.mcpServers,
     mcpWrapped: health.mcpWrapped,
     rules: rules.policies.length,
@@ -182,6 +186,17 @@ function daemonOf(health: HealthFacts): DaemonState {
 function hookedOf(kept: Kept | null): string[] {
   if (kept === null) return [];
   return kept.hooked.filter((agent) => !kept.declined.includes(agent));
+}
+
+/** By the name a screen prints, so an agent setup has no hook for, such as Claude Desktop, never counts as one it missed. */
+export function unhookedOf(
+  found: readonly { kind: string }[],
+  hooked: readonly string[],
+): string[] {
+  const kinds = new Set(found.map((agent) => agent.kind));
+  return EDIT_HOOK_TARGETS.filter(
+    (target) => kinds.has(target.agent) && !hooked.includes(target.name),
+  ).map((target) => target.name);
 }
 
 function workspaceOf(account: Account | null): string | null {

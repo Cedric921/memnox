@@ -42,6 +42,12 @@ export async function sessionViewAnswer(
   if (request.sessionId === undefined) {
     return { id: request.id, ok: false, error: 'session-view needs a session' };
   }
+  if (request.path !== undefined) {
+    const diff = await views.diff(request.sessionId, request.path);
+    return diff === null
+      ? { id: request.id, ok: false, error: `no changes to ${request.path} are known` }
+      : { id: request.id, ok: true, diff };
+  }
   const session = await views.view(request.sessionId);
   return session === null
     ? { id: request.id, ok: false, error: `nothing is known about ${request.sessionId}` }

@@ -10,6 +10,11 @@ export const DISCOVERED_AGENT_KIND = {
   HERMES: 'hermes',
   OPENCLAW: 'openclaw',
   RUFLO: 'ruflo',
+  GEMINI_CLI: 'gemini-cli',
+  WINDSURF: 'windsurf',
+  COPILOT_CLI: 'copilot-cli',
+  DEVIN: 'devin',
+  OPENCODE: 'opencode',
 } as const;
 
 export type DiscoveredAgentKind =

@@ -43,6 +43,28 @@ export async function openLinkTool(
   return { opened: page.href, ...openedAs(delivery) };
 }
 
+/** Where a search runs, so the person sees the results the way they would have searched themselves. */
+const SEARCH_PAGE = 'https://www.google.com/search';
+/** A sentence or two, never a pasted document. */
+const MOST_QUERY_CHARS = 300;
+
+/** Their words searched in their browser, as a results page opened the way open_link opens any page. */
+export async function searchWebTool(
+  deps: SessionToolDeps,
+  args: ToolArgs,
+): Promise<unknown> {
+  const query = (textArg(args, 'query') ?? '').trim().slice(0, MOST_QUERY_CHARS);
+  if (query === '') {
+    return {
+      opened: false,
+      said: 'Pass query: the words to search for, as they said them.',
+    };
+  }
+  const page = new URL(SEARCH_PAGE);
+  page.searchParams.set('q', query);
+  return openLinkTool(deps, { url: page.href });
+}
+
 /** Where the page opened, from whoever opened it, so the voice never says the Mac when it was the phone. */
 function openedAs(delivery: DisplayDelivery | null): Record<string, unknown> {
   if (delivery === null) {

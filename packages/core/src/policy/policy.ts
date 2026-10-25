@@ -2,6 +2,7 @@ import type { DecisionEffect } from '../constants/decision.constants';
 import type { Alternative, RateLimitSpec } from '../domain/decision';
 import type { ScopeMatch } from '../domain/task';
 import type { TimeWindow } from './time-window';
+import type { DataPattern } from '../domain/sensitive-data';
 
 /** All match fields are lists of wildcard patterns; omitted fields match anything. */
 export interface PolicyMatch {
@@ -124,6 +125,8 @@ export interface PolicyDocument {
   /** Repos declaring the same project share one policy and memory scope. */
   project?: string;
   policies: Policy[];
+  /** The team's own patterns for sensitive data, each under the classification it adds. */
+  classifications?: DataPattern[];
 }
 
 export const POLICY_DOCUMENT_VERSION = 1;

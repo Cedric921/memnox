@@ -417,6 +417,7 @@ does not go looking for something that is not there.
 | `16` agent budgets | `core/session/budget.ts`, `memnox budget`, enforced in the daemon. |
 | the daily report, which no section of the current vision names | `core/session/operations.ts`, `memnox report`. |
 | `14` autopilot, and blast radius | `core/session/autopilot.ts`, rendered by `cli/next/boundary-report.ts` under `memnox next --agent`. |
+| `14` autopilot that acts | `core/session/earned.ts`, run by the keeper in `cli/keeper/keep-autopilot.ts` when `autopilot = true`; grants per agent allowances in `~/.memnox/earned-allowances.json` for seven days, any refusal takes one back. `memnox autopilot` lists and revokes. |
 | `15` scope drift, and the task everything compares against | `core/session/session-task.ts`; `memnox run --task/--paths/--expect`. |
 | `15` circuit breaker, as narrowing rather than stopping | `core/session/strain.ts`, applied in `LocalGate`. Three failures nothing has got past and changes outside the machine, and deletes, ask first; local work goes on. |
 | `13` progressive autonomy, as a question kept for later | `PendingApprovals.park` and `RoutedHoldPrompt`. Unanswered is parked for sixteen hours, the agent carries on, and a later yes lets its retry through. |
@@ -635,6 +636,73 @@ as "force-pushing, and hard resets" and matched `git.push`, `git.reset`, `git.cl
 so it denied every ordinary push and permitted `git push --force`, which is the whole
 point inverted. `domains.ts` now names what the verb table actually produces, and
 `domains.test.ts` asserts every destructive git verb is covered.
+
+**One DELETE, two right answers.** The same statement is routine from an agent working
+for a DBA and a breach from a support assistant whose person may only read, and an agent
+on a shared credential holds whatever every workflow on it needed. Two fields closed that.
+`principal` was parsed, matched by `principals:` and set by nothing, the same gap `roles`
+had; `memnox run --for` sets it, `LocalGate` stamps it over whatever a call claims, and
+self-protection refuses an agent that sets or clears its own identity variables, because
+naming whose authority it holds is the one thing an agent must never do for itself. And
+novelty for an MCP call was keyed by the tool's name, so a thousand reads through `query`
+vouched for its first DELETE. `mcpNovelty` keys on what the call was handed where that
+differs from the name, so the first change asks, and the first DELETE with no WHERE asks
+again after any number of bounded ones. The plain key is kept, so nothing seen before is
+forgotten.
+
+**The context has to survive the decision.** The gate already knew which rules matched,
+whether the call sat inside the task and what noticing saw, and dropped all of it before
+the row, so `why` could quote a rule and never say which part of the context it was
+written about. Every row now keeps `signals`, the gate adds one per agreeing rule naming
+its part (`person:`, `agent:`, `intent:`, `systems:`) plus `scope:`, and
+`ledger/action-context.ts` reads a row back into person, agent, intent, tools, systems
+and history with the part that decided marked. Empty and absent differ on purpose: empty
+is a gate that found nothing, absent is a row older than the column. The proxy had its
+own copy of the old gap, classing a row by the tool's name after ruling on its statement,
+and taking neither `--role` nor `--for`. What it does not do is read the agent's
+reasoning: that takes a model on the enforcement path, and matching words in text the
+agent writes is a check the agent can steer.
+
+**A collision is a conversation between two people, so it travels like one.** A write held
+off by another machine's lease now reaches the notch in about a fifth of a second, because
+`NoticeWatcher.followCollisions` stats the clash folder every 200 ms rather than waiting for
+the ten second news look; a file watch was tried and refused by the sandbox, out of band,
+which in a daemon is a crash. The daemon, not the Mac app, holds the person's workspace
+stream (`daemon/workspace-stream.ts`), because the app polls its inbox every twenty seconds
+and the daemon already speaks to the app instantly. The cloud's `me/handovers` routes carry
+an ask to the holding machine's owner and the answer back, statelessly: only that owner may
+answer, so the fields the answer quotes back can move nobody's lines but their own. Both
+arrive as `collision` notices, which the Mac app already says whatever the speak up setting
+and listens after, so no Swift changed. `ask_for_lines` and `answer_ask_for_lines` act at
+once because a lease is coordination, never a rule. The same stream carries incidents,
+exception requests and calls short of their approvals to whoever can act on them;
+`acknowledge_incident` and `reject_exception` act by voice, and approving an exception stays
+in the console because it loosens a rule.
+
+**Two agents settle it first, and a person hears only what needs them.** A refusal for another
+machine's lease names `memnox_message_agent`, the cloud tool that queues one agent's word on
+the other session's own turn queue, which its hook reads at its next step. Every message
+carries the address its answer goes back to, so nothing is kept. `core/coordination/agents-first.ts`
+keeps the voice quiet about such a hold until the same session is still held off the same
+lease a minute later, because by then the agents could not settle it; a hold between two of
+the person's own agents is still said at once, since no other agent can be asked. People speak
+to each other through `message_person` and `answer_person`, carried as `person.message` on
+the stream, and the stream names its last event id when it comes back, so a blink of the
+network swallows nothing said in it.
+
+**People collaborating on one feature are found, not declared.** A frontend agent on one laptop
+and a backend agent on another rarely touch one file, so a lease never meets them.
+`coordination/work-refs.ts` reads the branch off the checkout, with any ticket key in it, and
+`CloudLeases` sends those refs with every take. The cloud joins two people's sessions when the
+refs are the same, or when the tracker linked their tickets to each other or to one epic,
+parent or spec; a thing linked to more than forty tickets is a list and links nothing, and
+titles that merely look alike link nothing either, because a guessed partner is a stranger
+told about your work. Both agents are introduced on their own turn queue, each is kept up to
+date on what the other is doing at most every quarter hour, and both people get one quiet
+`together` notice. An agent reaches the others by feature, part or person, an ask wakes an
+agent whose turn ended at most every two minutes so two agents can never keep each other
+running, what they said is kept per feature and read back by `memnox_work`, and every message
+an agent picks up is a ledger row.
 ---
 
 ## Sequencing and staffing

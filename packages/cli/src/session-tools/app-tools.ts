@@ -4,6 +4,7 @@ import { basename, join } from 'node:path';
 import {
   appLaunch,
   bundleOf,
+  cursorPromptLink,
   DELIVERY,
   wentIn,
   DESKTOP_APPS,
@@ -12,11 +13,14 @@ import {
   DISPLAY_VIA,
   DisplayRequests,
   isStartableAgent,
+  RunTerminals,
+  SessionHosts,
   type DisplayDelivery,
   type SessionStart,
   type StartableAgent,
 } from '@memnox/core';
 import { unlessMacTold } from './mac-told';
+import { processAlive } from './sessions-tool';
 import { witnessed } from './witnessed';
 import { textArg, type SessionToolDeps, type ToolArgs } from './read-tools';
 import {
@@ -106,18 +110,49 @@ export async function typeInAppTool(
   const appPath = resolve(agent);
   if (appPath === null) return { typed: false, ...noApp(agent, resolve) };
   const moment = deps.now().toISOString();
+  const words = message.split(/\r?\n/).join(' ').trim().slice(0, MOST_MESSAGE_CHARS);
+  if (agent === AGENT_ID.CURSOR) return promptedInCursor(deps, appPath, words, moment);
   const delivery = await shown(deps, {
     sessionId: `${APP_SESSION_PREFIX}${agent}`,
     agent,
     name: DESKTOP_APPS[agent].name,
     appPath,
     links: [],
-    typed: message.split(/\r?\n/).join(' ').trim().slice(0, MOST_MESSAGE_CHARS),
+    typed: words,
     ...(newChat ? { newChat } : {}),
     at: moment,
   });
   const result = openedAs(delivery, true);
   return { app: DESKTOP_APPS[agent].name, typed: result['started'], ...result };
+}
+
+/**
+ * Cursor's agent chat filled by Cursor's own prompt link, and sent by the Mac once it reads the words there. Typed
+ * instead, the words went wherever Cursor's focus was, its welcome page or a file, and an empty box read as sent.
+ */
+async function promptedInCursor(
+  deps: SessionToolDeps,
+  appPath: string,
+  words: string,
+  moment: string,
+): Promise<unknown> {
+  const name = DESKTOP_APPS[AGENT_ID.CURSOR].name;
+  const delivery = await shown(deps, {
+    sessionId: `${APP_SESSION_PREFIX}${AGENT_ID.CURSOR}`,
+    agent: AGENT_ID.CURSOR,
+    name,
+    appPath,
+    links: [cursorPromptLink(words)],
+    sendPrefilled: true,
+    at: moment,
+  });
+  const result = openedAs(delivery, false);
+  // Sent only when the Mac read the words in Cursor's chat and saw them go; otherwise they wait there for Return.
+  if (delivery?.outcome === DELIVERY.VERIFIED)
+    return { app: name, typed: true, ...result, said: APP_PREFILLED_SENT };
+  if (result['said'] === APP_OPENED)
+    return { app: name, typed: false, ...result, said: CURSOR_PREFILLED };
+  return { app: name, typed: false, ...result };
 }
 
 interface AppShow {
@@ -230,6 +265,8 @@ function outcomeOf(
   if (delivery === null) return { started: true, said: UNCONFIRMED };
   if (wentIn(delivery.outcome))
     return { started: true, said: hadWords ? APP_TYPED : APP_OPENED };
+  if (delivery.outcome === DELIVERY.CLIPBOARD && delivery.reason !== undefined)
+    return { started: true, why: delivery.reason, said: APP_CLIPBOARD_WHY };
   if (
     delivery.outcome === DELIVERY.CLIPBOARD ||
     delivery.outcome === DELIVERY.NOT_ALLOWED
@@ -255,9 +292,10 @@ async function typeInNamedApp(
   const appPath = (deps.findApp ?? installedAppNamed)(name);
   if (appPath === null) return { typed: false, said: noSuchApp(name) };
   const shownName = basename(appPath, APP_BUNDLE_SUFFIX);
+  const hosted = await sessionHostedIn(deps.home, appPath, shownName);
   const delivery = await shown(deps, {
-    sessionId: appSessionId(shownName),
-    agent: shownName,
+    sessionId: hosted?.sessionId ?? appSessionId(shownName),
+    agent: hosted?.agent ?? shownName,
     name: shownName,
     appPath,
     links: [],
@@ -267,6 +305,50 @@ async function typeInNamedApp(
   });
   const result = openedAs(delivery, true);
   return { app: shownName, typed: result['started'], ...result };
+}
+
+/** Terminal apps by their spoken names, where typing reaches the agent session running in the front tab. */
+const TERMINAL_APPS: ReadonlySet<string> = new Set([
+  'terminal',
+  'iterm',
+  'iterm2',
+  'ghostty',
+  'wezterm',
+  'warp',
+  'kitty',
+  'alacritty',
+  'hyper',
+  'tabby',
+]);
+
+/**
+ * The live agent session running in a terminal app, the newest where there are several, so words
+ * typed there are kept in that session rather than one invented for the app, which no agent is.
+ */
+async function sessionHostedIn(
+  home: string,
+  appPath: string,
+  name: string,
+): Promise<{ sessionId: string; agent: string } | null> {
+  if (!TERMINAL_APPS.has(spoken(name))) return null;
+  const inApp = (place: { app?: string; appPath?: string }): boolean =>
+    place.appPath === appPath || place.app === name;
+  const [hosts, runs] = await Promise.all([
+    new SessionHosts(home).all(),
+    new RunTerminals(home).all(),
+  ]);
+  const live = [
+    ...hosts
+      .filter((each) => each.endedAt === undefined && each.panel !== true)
+      .map((each) => ({ ...each, at: each.seenAt })),
+    ...runs.map((each) => ({ ...each, at: each.startedAt })),
+  ]
+    .filter((each) => inApp(each) && processAlive(each.pid))
+    .sort((a, b) => b.at.localeCompare(a.at));
+  const newest = live[0];
+  return newest === undefined
+    ? null
+    : { sessionId: newest.sessionId, agent: newest.agent };
 }
 
 /** Where apps are installed, the person's own folder after the shared one. */
@@ -345,10 +427,15 @@ const APP_OPENED_NO_FOLDER =
   'The app is open, on no folder since they named none. Say so in a few words, like "Claude is open.", and ask what they would like it to do; never name a repository.';
 const APP_PREFILLED =
   'The app opened on that repository with their words already in its chat, where it waits for them to press Return, since the app asks before running a prompt it was handed. Say that in one sentence, like "Cursor is open with your question in its chat; press Return there to send it." Never ask what it should do, and never offer to send it again.';
+const CURSOR_PREFILLED =
+  'Cursor has their words in its agent chat, but the Mac could not see them go, so they may be waiting there for Return. Say that in one sentence, like "It is in Cursor\'s chat; press Return there if it has not started." Never say it was sent, and never offer to type it again.';
 const APP_PREFILLED_SENT =
   'The app opened, its own link put their words in its chat, and the Mac read them there and sent them, so it is answering now. Say so in a few words, like "Sent to Cursor." Never say it is done, and never ask them to press Return.';
 const APP_CLIPBOARD =
   'The app is open, but the Mac could not type into it, and it already told them out loud the words are on the clipboard and how to paste them. Write nothing more.';
+// The Mac was allowed to type and found nowhere to, so a later "what do you need" is never answered with a permission.
+const APP_CLIPBOARD_WHY =
+  'The app is open, but the Mac found nowhere in it to type, and it already told them out loud the words are on the clipboard and how to paste them. Write nothing more now. Memnox is allowed to type, so if they ask why or what it needs, give the reason in why in plain words and never say it needs a permission or anything switched on.';
 const UNCONFIRMED =
   'Handed to the Mac to open, which has not confirmed yet. Say it is opening; never that it is working.';
 const NOT_OPENED =

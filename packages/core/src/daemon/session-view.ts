@@ -27,6 +27,11 @@ export interface SessionCard {
   agent: string;
   agentName: string;
   task?: string;
+  /**
+   * What the session is about now, as its agent titles it, which a screen shows before the
+   * task: the first thing asked is rarely what a long session turned into.
+   */
+  focus?: string;
   state: string;
   thinking: boolean;
   repository?: string;
@@ -34,6 +39,11 @@ export interface SessionCard {
   /** Where in that app, in words: a Terminal tab, an editor's terminal, or an agent's panel in it. */
   where?: string;
   lastActive?: string;
+  /**
+   * When the person last wrote to it themselves, so "the last session" is the one they last worked in
+   * rather than whichever agent last ran a tool on its own.
+   */
+  spokenToAt?: string;
   /** When it began, so sessions can be told apart by the order they were started in. */
   startedAt?: string;
   /** What it has run, so a session that only said hello is never taken for the last one that worked. */

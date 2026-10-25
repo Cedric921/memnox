@@ -2,10 +2,8 @@ import {
   DISPLAY,
   DisplayRequests,
   minutesToMs,
-  PROPOSAL_ANSWER,
   PROPOSAL_KIND,
   Proposals,
-  type Proposal,
   WORK_ACCOUNT_CHECK,
   type ToolSignIn,
   type WorkAccount,
@@ -13,13 +11,18 @@ import {
 import type { CheckedAccount, PersonalTools } from '../sync/personal-work';
 import { workAccountOf } from '../sync/personal-work';
 import { OPERATOR_AGENT } from './propose-tools';
+import { proposedReply } from './work-sent';
+
+export { sentTool } from './work-sent';
 import { PendingSignIns } from '../sync/sign-ins';
 import { foundTools, readBack } from './personal-fit';
 import { textArg, type SessionToolDeps, type ToolArgs } from './read-tools';
+import { notTiedNote } from './account-tools';
+import { isLocalSlug } from '../local-tools/local-run';
 
 /**
- * The person's own tools, in their own name: reads run at once, a tool still to sign in to shows its
- * icon in the notch, and anything sent is drawn as its tool draws it and waits on Touch ID.
+ * The person's own tools, in their own name: reads run at once, a tool still to sign in to opens its
+ * sign in in front of them, and anything sent is drawn as its tool draws it and waits on Touch ID.
  */
 
 /** Long enough to read the draft and reach for the key, short enough that nobody confirms a stale one. */
@@ -66,6 +69,8 @@ export async function findToolTool(
   return {
     ...foundTools(tools, saidAboutSignIns(found.value)),
     accounts: accounts.map((each) => ({ toolkit: each.toolkit, ...workAccountOf(each) })),
+    // Without it the voice told the person a connected GitHub was still waiting to be confirmed.
+    ...notTiedNote(accounts),
     ...(shown.length > 0 ? { signIn: shown } : {}),
   };
 }
@@ -84,7 +89,7 @@ async function carryingOnAlready(
   }
 }
 
-/** The notch shows the icon of each tool still to sign in to; a tap opens that tool's own sign in. */
+/** Each tool still to sign in to: the Mac opens its sign in in the browser at once, and the phone shows its icon. */
 async function showSignIns(
   deps: SessionToolDeps,
   { first, again, said }: SignInsWanted,
@@ -148,7 +153,7 @@ function saidAboutSignIns(found: PersonalTools): string | undefined {
   return parts.length === 0 ? undefined : parts.join(' ');
 }
 
-/** Toolkits an admin reads through what they connected for the workspace; only acting there waits on a sign in. */
+/** Toolkits read through what was connected for the workspace; only acting there waits on the person's own sign in. */
 function readableThrough(tools: PersonalTools['tools']): Set<string> {
   return new Set(
     tools.filter((tool) => tool.throughWorkspace === true).map((tool) => tool.toolkit),
@@ -159,7 +164,7 @@ function readableLines(readable: readonly string[]): string[] {
   return readable.length === 0
     ? []
     : [
-        `${namesOf(readable)} is connected to their workspace, so read what they asked there at once with run_tool and answer from it. Only sending or changing something there needs their own sign in, so it goes out in their name: when they ask for that, call sign_in for it with what they asked as said, and carry on once they finish. No icon was put in the notch for it.`,
+        `${namesOf(readable)} is connected to their workspace, so read what they asked there at once with run_tool and answer from it. Only sending or changing something there needs their own sign in, so it goes out in their name: when they ask for that, call sign_in for it with what they asked as said, and carry on once they finish. No sign in was opened for it.`,
       ];
 }
 
@@ -168,23 +173,24 @@ function signInLines(first: readonly string[], again: readonly string[]): string
     ...(first.length === 0
       ? []
       : [
-          `They have not signed in to ${namesOf(first)} yet, so nothing there can be done in their name. Its icon is in the notch: one tap signs them in, once, and you carry on with what they asked as soon as they have. Say that in a sentence and stop.`,
+          `They have not signed in to ${namesOf(first)} yet, so nothing there can be done in their name. Its sign in is now open in front of them, in the browser on the Mac or as an icon on the phone: they sign in once, and you carry on with what they asked as soon as they have. Say that in a sentence and stop.`,
         ]),
     ...(again.length === 0
       ? []
       : [
-          `Their ${namesOf(again)} sign in reached somebody else's account, so nothing runs there. Its icon is in the notch to sign in again with their own.`,
+          `Their ${namesOf(again)} sign in reached somebody else's account, so nothing runs there. Its sign in is open in front of them to sign in again with their own.`,
         ]),
   ];
 }
 
 /** The tool they named is used and no other, so where it cannot be, the voice says why rather than swap it. */
-function namedLines(needsAdmin: readonly string[], unknown: readonly string[]): string[] {
+function namedLines(refused: readonly string[], unknown: readonly string[]): string[] {
   return [
-    ...(needsAdmin.length === 0
+    // Anybody may connect any tool, so this is only an older cloud refusing, said as it is rather than as a rule.
+    ...(refused.length === 0
       ? []
       : [
-          `${namesOf(needsAdmin)} is a team tool nobody connected to this workspace yet, so only an admin can open it. Say so in a sentence, and that one tap signs them in once an admin has.`,
+          `${namesOf(refused)} could not be connected for them: Memnox Cloud refused it. Say so plainly in a sentence, and that calling sign_in for it again is the way to try; never tell them somebody else has to connect it first.`,
         ]),
     ...(unknown.length === 0
       ? []
@@ -225,7 +231,7 @@ export async function proposeToolTool(
       said: 'Pass label: what will happen, in plain words, so the person hears it first.',
     };
   }
-  const checked = await theirAccountFor(deps, call.tool);
+  const checked = await accountFor(deps, call.tool);
   if ('said' in checked) return checked;
   const account = workAccountOf(checked);
   const said = textArg(args, 'said') ?? '';
@@ -247,10 +253,10 @@ export async function proposeToolTool(
     at: deps.now().toISOString(),
     ttlMs: WORK_PROPOSAL_TTL_MS,
   });
-  return {
-    proposed: proposal.id,
-    said: `The draft is on their screen and waits there for them. Read this back: ${heard}. Then say in a few words that they can change the words on the card and press Send, which asks for Touch ID, and that nothing goes out before. Never offer to send it yourself.${unverifiedNote(account)}`,
-  };
+  return proposedReply(proposal.id, heard, account, {
+    ...call,
+    toolkit: checked.toolkit,
+  });
 }
 
 /**
@@ -315,51 +321,6 @@ export async function workspaceGithubTool(
   return readBack(found.value);
 }
 
-/** Far enough back for "did it go?" asked after a few more turns, and short enough to be about today's sends. */
-const SENT_LOOKBACK_MS = minutesToMs(60);
-
-/**
- * What they sent or were asked to send in their name lately, and whether each went out, so "did you send it?" is
- * answered from what happened rather than guessed. Newest first.
- */
-export async function sentTool(deps: SessionToolDeps): Promise<unknown> {
-  const since = new Date(deps.now().getTime() - SENT_LOOKBACK_MS).toISOString();
-  const raised = await new Proposals(deps.home).since(since);
-  const work = raised.filter((each) => each.change.kind === PROPOSAL_KIND.WORK);
-  if (work.length === 0) {
-    return {
-      sent: [],
-      said: 'Nothing was put up to send in their name in the last hour. Say so in a sentence.',
-    };
-  }
-  const now = deps.now().toISOString();
-  return {
-    sent: work.map((each) => ({
-      id: each.id,
-      what: each.change.kind === PROPOSAL_KIND.WORK ? each.change.label : each.rationale,
-      state: stateOf(each, now),
-      ...(each.ran === undefined ? {} : { result: each.ran.said }),
-    })),
-    said: 'Say what became of the one they mean, by its state: sent went out, failed did not and says why, waiting is still on their screen for Touch ID, declined they closed, expired ran out unanswered. When one failed or expired and they still want it, propose it again at once.',
-  };
-}
-
-function stateOf(proposal: Proposal, now: string): string {
-  if (proposal.answer === PROPOSAL_ANSWER.DECLINED) return 'declined';
-  if (proposal.answer === PROPOSAL_ANSWER.CONFIRMED) {
-    if (proposal.ran === undefined) return 'sending';
-    return proposal.ran.ok ? 'sent' : 'failed';
-  }
-  return proposal.expiresAt > now ? 'waiting' : 'expired';
-}
-
-/** The first send from an account is what ties it to them, so it is named rather than called a problem. */
-function unverifiedNote(account: WorkAccount): string {
-  return account.check === WORK_ACCOUNT_CHECK.MATCHED
-    ? ''
-    : ' Say the account name as you read it back; their Touch ID on this send ties it to them, so never tell them it needs anything else first.';
-}
-
 /** The account a tool goes out as, or what to say where it is not theirs or not signed in. */
 async function theirAccountFor(
   deps: SessionToolDeps,
@@ -373,15 +334,32 @@ async function theirAccountFor(
   if (checked === undefined) {
     return {
       done: false,
-      said: 'They have not signed in to that tool. Run find_tool for it, which puts its icon in the notch.',
+      said: 'They have not signed in to that tool. Run find_tool for it, which opens its sign in in front of them.',
     };
   }
   if (checked.check !== WORK_ACCOUNT_CHECK.MISMATCH) return checked;
   await showSignIns(deps, { first: [], again: [checked.toolkit] });
   return {
     done: false,
-    said: `Their ${nameOf(checked.toolkit)} sign in reached somebody else's account, so nothing was written down. Its icon is in the notch to sign in again.`,
+    said: `Their ${nameOf(checked.toolkit)} sign in reached somebody else's account, so nothing was written down. Its sign in is open in front of them to sign in again.`,
   };
+}
+
+/** The account a proposed run goes out as: a local tool's sign in on this Mac, else the cloud's check. */
+function accountFor(
+  deps: SessionToolDeps,
+  tool: string,
+): ReturnType<typeof theirAccountFor> | Promise<CheckedAccount> {
+  return isLocalSlug(tool)
+    ? Promise.resolve(localAccount(tool))
+    : theirAccountFor(deps, tool);
+}
+
+/** A tool on this Mac runs as however the person is signed in to it there, which no cloud checks. */
+function localAccount(tool: string): CheckedAccount {
+  const rest = tool.slice(tool.indexOf(':') + 1);
+  const toolkit = rest.split(':')[0] ?? rest;
+  return { toolkit, check: WORK_ACCOUNT_CHECK.UNKNOWN };
 }
 
 /** "As maya on GitHub", so the person hears whose name it goes out under. */
@@ -410,7 +388,7 @@ function namesOf(toolkits: readonly string[]): string {
   return toolkits.map(nameOf).join(', ');
 }
 
-/** The provider's own sign in for a tool an admin connected, opened on the Mac for the person. */
+/** The provider's own sign in for any tool, opened on the Mac for the person, whoever they are in the workspace. */
 export async function signInTool(
   deps: SessionToolDeps,
   args: ToolArgs,

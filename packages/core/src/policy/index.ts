@@ -11,5 +11,8 @@ export * from './overlay';
 export * from './overlay-store';
 export * from './org-bundle';
 export * from './agent-freeze';
+export * from './agent-pause';
 export * from './modes';
 export * from './relaxing';
+export * from './spoken-rule';
+export * from './rule-sentence';

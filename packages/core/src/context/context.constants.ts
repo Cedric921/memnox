@@ -59,6 +59,12 @@ export const MOST_DECISIONS_PER_WRITE = 8;
 /** Settled facts a session tool answers with, so one lookup never fills a window. */
 export const MOST_FACTS_ANSWERED = 12;
 
+/** Unapproved candidates a session tool answers with: context, so fewer than the facts. */
+export const MOST_CANDIDATES_ANSWERED = 5;
+
+/** Unapproved candidates said at one prompt or before one write, kept to one since none of them decides anything. */
+export const MOST_CANDIDATES_PER_CALL = 1;
+
 /** Under the context directory: one brief per piece of work the voice handed an agent. */
 export const WORK_BRIEFS_DIR = 'work';
 

@@ -14,8 +14,14 @@ export const AGENT_QUESTIONS_DIR = 'questions';
 /** Every agent question id starts with this, so a brief can tell one from any other subject. */
 export const AGENT_QUESTION_PREFIX = 'aqn_';
 
-/** Long enough to hear the question read and answer it, well inside a hook's own time limit. */
+/** Long enough to hear one question read and answer it; each answer earns the next one as long again. */
 export const AGENT_QUESTION_WAIT_MS = 45_000;
+
+/**
+ * The longest a set of questions is held however many steps it has, inside the five minutes
+ * the hook is given, so the agent's own picker still opens if the person walks away mid-way.
+ */
+export const AGENT_QUESTION_MOST_MS = 270_000;
 
 export interface AgentQuestionOption {
   label: string;
@@ -82,6 +88,14 @@ export function answerFor(item: AgentQuestionItem, said: string): string {
   return picked?.label ?? said.trim();
 }
 
+/** A step answered earns the next step its own wait, up to the longest a set is ever held. */
+function renewedUntil(question: AgentQuestion, moment: string): string {
+  const ceiling = Date.parse(question.askedAt) + AGENT_QUESTION_MOST_MS;
+  const renewed = Date.parse(moment) + AGENT_QUESTION_WAIT_MS;
+  const until = Math.min(ceiling, Math.max(Date.parse(question.expiresAt), renewed));
+  return new Date(until).toISOString();
+}
+
 export class AgentQuestions {
   private readonly records: JsonRecordDir<AgentQuestion>;
 
@@ -137,6 +151,7 @@ export class AgentQuestions {
       ...question,
       answers: { ...question.answers, [item.question]: answerFor(item, said) },
       answeredAt: moment,
+      expiresAt: renewedUntil(question, moment),
     };
     await this.records.write(id, answered);
     return answered;

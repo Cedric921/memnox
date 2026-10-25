@@ -5,9 +5,9 @@ import {
   type OpenRelay,
   type RelaySocket,
 } from '../src/remote/relay-link';
-import { HeartbeatBeats } from '../src/sync/beat';
+import { BEAT_FLOOR_MS, HeartbeatBeats } from '../src/sync/beat';
 import { syncLoop } from '../src/sync/heartbeat';
-import { RELAYED_HELD_POLL_MS } from '../src/sync/pace';
+import { HEARTBEAT_MS, RELAYED_HELD_POLL_MS } from '../src/sync/pace';
 
 /**
  * While a call is held, a machine with a live relay link waits for the control plane's beat
@@ -80,23 +80,30 @@ describe('the held poll with a relay link', () => {
     expect(slept).toEqual([2_000, 2_000, 2_000]);
   });
 
-  it('ignores a beat with nothing held, since no answer could be for this machine', async () => {
+  it('brings a pass at once with nothing held, and that pass pulls', async () => {
     const beats = linkedBeats(true);
+    const asked: boolean[] = [];
     const slept: number[] = [];
-    let left = 1;
+    let left = 2;
 
     await syncLoop('/home', () => left-- > 0, {
-      pass: async () => ({}),
+      pass: async (_home, options) => {
+        asked.push(options.pull);
+        return {};
+      },
       sleep: async (ms) => {
         slept.push(ms);
-        beats.beat();
+        // Ten seconds in, well before the minute would have pulled anyway.
+        if (slept.length === 5) beats.beat();
       },
       holding: async () => [],
       active: async () => false,
       beats,
     });
 
-    expect(slept.reduce((total, ms) => total + ms, 0)).toBe(60_000);
+    // Ten seconds to the beat, then the second pass's own minute before the loop is told to stop.
+    expect(slept.reduce((total, ms) => total + ms, 0)).toBe(10_000 + HEARTBEAT_MS);
+    expect(asked).toEqual([true, true]);
   });
 
   it('keeps the two second poll while the link is down', async () => {
@@ -134,7 +141,7 @@ describe('the beat signal', () => {
     expect(beats.take()).toBe(false);
   });
 
-  it('holds a burst to one wake a second, without losing the beat', async () => {
+  it('holds a burst to one wake a floor apart, without losing the beat', async () => {
     vi.useFakeTimers();
     const beats = new HeartbeatBeats(() => Date.now());
     beats.beat();
@@ -145,12 +152,63 @@ describe('the beat signal', () => {
     });
 
     beats.beat();
-    await vi.advanceTimersByTimeAsync(500);
+    await vi.advanceTimersByTimeAsync(BEAT_FLOOR_MS / 2);
     expect(woke).toBe(false);
-    await vi.advanceTimersByTimeAsync(500);
+    await vi.advanceTimersByTimeAsync(BEAT_FLOOR_MS / 2);
 
     expect(woke).toBe(true);
     expect(beats.take()).toBe(true);
+  });
+});
+
+describe('a rule or a freeze reaching the machine', () => {
+  /* Measured on the loop's own clock: a beat lands mid wait, and the pass after it must start,
+     pulling, well inside a second rather than on the minute. */
+  it('starts a pulling pass within the beat floor of the beat', async () => {
+    vi.useFakeTimers();
+    const beats = linkedBeats(true);
+    const passes: { at: number; pull: boolean }[] = [];
+    let left = 2;
+
+    const loop = syncLoop('/home', () => left-- > 0, {
+      pass: async (_home, options) => {
+        passes.push({ at: Date.now(), pull: options.pull });
+        return {};
+      },
+      holding: async () => [],
+      active: async () => false,
+      beats,
+    });
+
+    await vi.advanceTimersByTimeAsync(7_300);
+    const beatAt = Date.now();
+    beats.beat();
+    await vi.advanceTimersByTimeAsync(BEAT_FLOOR_MS);
+    // The second pass's own wait, so the loop sees it should stop.
+    await vi.advanceTimersByTimeAsync(HEARTBEAT_MS);
+    await loop;
+
+    expect(passes).toHaveLength(2);
+    const after = passes[1];
+    expect(after?.pull).toBe(true);
+    expect((after?.at ?? Number.POSITIVE_INFINITY) - beatAt).toBeLessThan(BEAT_FLOOR_MS);
+  });
+
+  it('acts on a single beat at once even right after another', async () => {
+    vi.useFakeTimers();
+    const beats = new HeartbeatBeats(() => Date.now());
+    beats.beat();
+    beats.take();
+    await vi.advanceTimersByTimeAsync(BEAT_FLOOR_MS);
+    let woke = false;
+    void beats.sleep(60_000).then(() => {
+      woke = true;
+    });
+
+    beats.beat();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(woke).toBe(true);
   });
 });
 
@@ -192,12 +250,13 @@ describe('the relay link hearing a beat', () => {
     await Promise.resolve();
 
     relay.text('{"type":"beat"}');
+    relay.text('{"type":"beat","pull":true}');
     relay.text('{"type":"something-newer"}');
     relay.text('not json');
     // The same bytes as binary are mailbox traffic, never a beat.
     relay.frame(Buffer.from('{"type":"beat"}'));
 
-    expect(onBeat).toHaveBeenCalledTimes(1);
+    expect(onBeat).toHaveBeenCalledTimes(2);
   });
 
   it('reads only the beat it knows', () => {

@@ -6,7 +6,10 @@ import type { RuleScope } from '../daemon/voice-cards';
 import type { Policy } from '../policy/policy';
 import { JsonRecordDir } from '../store/json-records';
 import type { HoldAnswer } from './hold';
+import { PROPOSAL_ANSWER, type ProposalAnswer } from './answers';
 import type { WorkAccount } from '../daemon/work-cards';
+
+export { PROPOSAL_ANSWER, type ProposalAnswer };
 
 /**
  * A change something other than a person suggested, written down and never applied until a
@@ -36,13 +39,6 @@ export const PROPOSAL_KIND = {
   ACCOUNT: 'account',
 } as const;
 
-export const PROPOSAL_ANSWER = {
-  CONFIRMED: 'confirmed',
-  DECLINED: 'declined',
-} as const;
-
-export type ProposalAnswer = (typeof PROPOSAL_ANSWER)[keyof typeof PROPOSAL_ANSWER];
-
 export type ProposedChange =
   | {
       kind: typeof PROPOSAL_KIND.RULES;
@@ -51,6 +47,8 @@ export type ProposedChange =
       rules: readonly Policy[];
       /** The places offered on the Mac; the one picked is the signed answer, and decides the file and the reach. */
       scopes?: readonly RuleScope[];
+      /** A spoken rule on an enrolled machine: in force here once signed, and offered to the team as well. */
+      offerTeam?: boolean;
     }
   | { kind: typeof PROPOSAL_KIND.ANSWER; pendingId: string; answer: HoldAnswer }
   | { kind: typeof PROPOSAL_KIND.RESUME; sessionId: string }
@@ -110,6 +108,8 @@ export interface ProposalRan {
   /** What went out, or why it did not, in the words the tool or the workspace gave. */
   said: string;
   at: string;
+  /** Who it went to, as sent, so a mail readdressed on its card is reported at the address it really went to. */
+  to?: string[];
 }
 
 export type ProposalOutcome =

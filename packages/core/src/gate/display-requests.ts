@@ -12,6 +12,7 @@ import type {
 import type { Delivery, DeliveryProof, Sight, Witness } from '../daemon/delivery';
 import { DISPLAY } from '../daemon/protocol';
 import type { ToolSignIn } from '../daemon/work-cards';
+import type { CapabilityTally } from '../discovery/capabilities';
 import { shortDigest } from '../domain/digest';
 import { JsonRecordDir } from '../store/json-records';
 
@@ -60,6 +61,8 @@ export interface DisplayRequest {
   excerpt?: CardExcerpt;
   pages?: WalkPage[];
   agents?: AgentNode[];
+  /** On AGENTS, the machine's count of what can change something outside it. */
+  capabilities?: CapabilityTally;
   trace?: TraceCard;
   /** On APP, the app opened first, its links opened in order after, and what it reads as it opens. */
   appPath?: string;
@@ -109,6 +112,7 @@ export interface DisplayInput {
   excerpt?: CardExcerpt;
   pages?: WalkPage[];
   agents?: AgentNode[];
+  capabilities?: CapabilityTally;
   trace?: TraceCard;
   appPath?: string;
   links?: string[];
@@ -180,6 +184,7 @@ export class DisplayRequests {
       ...(input.agents === undefined
         ? {}
         : { agents: input.agents.slice(0, SCAN_AGENTS) }),
+      ...(input.capabilities === undefined ? {} : { capabilities: input.capabilities }),
       ...(input.trace === undefined
         ? {}
         : { trace: { ...input.trace, rows: input.trace.rows.slice(0, TRACE_ROWS) } }),

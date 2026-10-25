@@ -8,6 +8,7 @@ import {
   holds,
   MAC_DISPLAYS,
   MAC_READS,
+  NOTICE_KIND,
   PHONE_OWN_DISPLAYS,
   PROPOSAL_KIND,
   Proposals,
@@ -117,6 +118,33 @@ interface WaitingRoutes {
   stamp: (event: DaemonEvent) => DaemonEvent;
 }
 
+/** Per listener, how far each question it was told had got, so a step answered is told again. */
+const toldAt = new WeakMap<Set<string>, Map<string, number>>();
+
+/** How many of an agent's questions are answered; undefined for anything that does not move on. */
+function stepOf(event: DaemonEvent): number | undefined {
+  if (event.notice !== NOTICE_KIND.QUESTION) return undefined;
+  return Object.keys(event.answers ?? {}).length;
+}
+
+/** Told, and where a question had got when it was, so the next step goes out once and only once. */
+export function noteTold(told: Set<string>, event: DaemonEvent): void {
+  told.add(event.subject);
+  const step = stepOf(event);
+  if (step === undefined) return;
+  const steps = toldAt.get(told) ?? new Map<string, number>();
+  steps.set(event.subject, step);
+  toldAt.set(told, steps);
+}
+
+/** A question answered further than when this listener was told it, by voice, tap or terminal. */
+function movedOn(told: Set<string>, event: DaemonEvent): boolean {
+  const step = stepOf(event);
+  if (step === undefined) return false;
+  const was = toldAt.get(told)?.get(event.subject);
+  return was !== undefined && step > was;
+}
+
 /** Each subscriber told what is new for it once, and what settled since, so nobody hears a thing twice or never. */
 export function sendWaiting(
   subscribers: ReadonlyMap<Peer, Set<string>>,
@@ -127,8 +155,8 @@ export function sendWaiting(
   for (const [socket, told] of subscribers) {
     const phone = routes.phoneOf(socket);
     for (const event of waiting) {
-      if (told.has(event.subject)) continue;
-      told.add(event.subject);
+      if (told.has(event.subject) && !movedOn(told, event)) continue;
+      noteTold(told, event);
       const origin = routes.originOf(event);
       const sent = waitingFor(event, {
         ...(phone === undefined ? {} : { phone }),
@@ -141,6 +169,7 @@ export function sendWaiting(
     for (const subject of [...told]) {
       if (still.has(subject)) continue;
       told.delete(subject);
+      toldAt.get(told)?.delete(subject);
       const done = settled(subject, routes.now);
       write(socket, { id: 0, ok: true, event: routes.stamp(done) });
     }

@@ -4,8 +4,11 @@ import {
   AgentQuestions,
   DAEMON_EVENT,
   describeHeldCall,
+  Devices,
   DisplayRequests,
   plainAsk,
+  proposalCapability,
+  REMOTE_CAPABILITY,
   PendingApprovals,
   Proposals,
   PROPOSAL_KIND,
@@ -25,6 +28,7 @@ import {
   type SessionPost,
   type AgentQuestion,
   type DaemonEvent,
+  type DeviceRecord,
   type Proposal,
   type DisplayHost,
   type DisplayRequest,
@@ -37,6 +41,7 @@ import { liveHost } from '../session-tools/live-host';
 import { processAlive } from '../session-tools/sessions-tool';
 import { displayName, readNames, type AgentNames } from '../agents/names';
 import { withEvents } from '../event-store';
+import { answerOnOf, answeringPhone } from '../remote/answer-on';
 import { NewsTold } from './news-told';
 
 /**
@@ -85,7 +90,7 @@ export class WaitingFeed {
       ...(request.files === undefined ? {} : { files: request.files }),
       ...(request.excerpt === undefined ? {} : { excerpt: request.excerpt }),
       ...(request.pages === undefined ? {} : { pages: request.pages }),
-      ...(request.agents === undefined ? {} : { agents: request.agents }),
+      ...scanOf(request),
       ...(request.trace === undefined ? {} : { trace: request.trace }),
       ...(request.signIn === undefined ? {} : { signIn: request.signIn }),
       ...appOf(request),
@@ -126,13 +131,17 @@ export class WaitingFeed {
   async current(moment: string): Promise<DaemonEvent[]> {
     const names = await readNames(this.home);
     const hosts = new SessionHosts(this.home);
+    // Read once per look, so every yes in it names the same phone.
+    const devices = await new Devices(this.home).all().catch((): DeviceRecord[] => []);
     const open = async (sessionId: string): Promise<boolean> =>
       !(await closed(hosts, sessionId));
     const waiting = await keepIf(
       (await this.pending.list(moment)).filter((each) => each.answer === undefined),
       (each) => open(each.request.sessionId),
     );
-    const held = await Promise.all(waiting.map((each) => this.heldEvent(each, names)));
+    const held = await Promise.all(
+      waiting.map((each) => this.heldEvent(each, names, devices)),
+    );
     const questions = await keepIf(
       await new AgentQuestions(this.home).open(moment),
       (each) => open(each.sessionId),
@@ -146,7 +155,7 @@ export class WaitingFeed {
         .map((each) => each.id),
     );
     const proposed = (await this.proposals.open(moment)).map((each) =>
-      proposalEvent(each, inside),
+      proposalEvent(each, inside, devices),
     );
     const posted = await this.posted(moment, names, open);
     return [...held, ...asking, ...posted, ...proposed];
@@ -257,6 +266,7 @@ export class WaitingFeed {
   private async heldEvent(
     held: PendingApproval,
     names: AgentNames,
+    devices: readonly DeviceRecord[] = [],
   ): Promise<DaemonEvent> {
     const { request } = held;
     const [task, host] = await Promise.all([
@@ -280,6 +290,7 @@ export class WaitingFeed {
       ...(task?.latestAsk === undefined ? {} : { lastAsk: task.latestAsk }),
       ...(host?.cwd === undefined ? {} : { place: basename(host.cwd) }),
       ...(request.withinSession === true ? { withinSession: true } : {}),
+      ...answerOnOf(answeringPhone(devices, REMOTE_CAPABILITY.ANSWER)),
     };
   }
 }
@@ -389,7 +400,11 @@ export function settled(subject: string, at: string): DaemonEvent {
 }
 
 /** One open proposal as the event every surface shows; `inside` holds the held calls within a session. */
-function proposalEvent(each: Proposal, inside: ReadonlySet<string>): DaemonEvent {
+function proposalEvent(
+  each: Proposal,
+  inside: ReadonlySet<string>,
+  devices: readonly DeviceRecord[],
+): DaemonEvent {
   // A rule carries itself and where it could hold, so the Mac asks where before Touch ID.
   const rule = ruleDraftOf(each);
   // A yes to a held call that stays in its repository needs no fingerprint, by voice as by hand.
@@ -406,6 +421,23 @@ function proposalEvent(each: Proposal, inside: ReadonlySet<string>): DaemonEvent
     ...(within ? { withinSession: true } : {}),
     ...teamAnswerOf(each),
     ...workDraftFor(each),
+    ...phoneOf(each, devices),
+  };
+}
+
+/**
+ * The phone a proposal waits on. A Mac proposal belongs to the phone whose ask raised it, named as its
+ * origin so that phone signs it whether or not it still holds the voice; any other goes to a paired phone.
+ */
+function phoneOf(
+  proposal: Proposal,
+  devices: readonly DeviceRecord[],
+): Pick<DaemonEvent, 'origin' | 'answerOn'> {
+  const change = proposal.change;
+  const asker = change.kind === PROPOSAL_KIND.MAC ? change.deviceId : undefined;
+  return {
+    ...(asker === undefined ? {} : { origin: { deviceId: asker } }),
+    ...answerOnOf(answeringPhone(devices, proposalCapability(change), asker)),
   };
 }
 
@@ -443,5 +475,13 @@ function teamAnswerOf(proposal: Proposal): Pick<DaemonEvent, 'teamAnswer'> {
   if (change.kind !== PROPOSAL_KIND.TEAM) return {};
   return {
     teamAnswer: { callId: change.callId, answer: change.answer, label: change.label },
+  };
+}
+
+/** On AGENTS, the agents and the machine's count of what they can change. */
+function scanOf(request: DisplayRequest): Pick<DaemonEvent, 'agents' | 'capabilities'> {
+  return {
+    ...(request.agents === undefined ? {} : { agents: request.agents }),
+    ...(request.capabilities === undefined ? {} : { capabilities: request.capabilities }),
   };
 }

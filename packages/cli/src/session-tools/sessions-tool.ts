@@ -1,4 +1,5 @@
 import {
+  DELIVERY_OPERATION,
   describeHost,
   HOUR_MS,
   LEDGER_SCAN_LIMIT,
@@ -21,6 +22,7 @@ import {
   type SessionHost,
 } from '@memnox/core';
 import { readTurnOver, sessionTranscript } from '../daemon/transcript';
+import { sessionSpokenToAt } from '../daemon/spoken-to';
 import { withEvents } from '../event-store';
 import {
   DESKTOP_APP_SPOKEN,
@@ -40,8 +42,12 @@ import { textArg, type SessionToolDeps, type ToolArgs } from './read-tools';
 const LOCAL_WORK =
   'commands run on this Mac outside any agent session, such as an editor or a terminal checking git';
 
+/** Said of a session holding only what the voice typed into an app, which no agent session is behind. */
+const VOICE_TYPING =
+  'only the voice typing into an app on this Mac for the person, with no agent session behind it';
+
 /** Something recorded this recently is work happening now, which is what "which one is working" means. */
-const WORKING_WITHIN_MS = 3 * 60 * 1_000;
+export const WORKING_WITHIN_MS = 3 * 60 * 1_000;
 /** A turn unanswered this long is an agent that crashed or was closed, not one still thinking. */
 const STALE_TURN_MS = 2 * 60 * 60 * 1_000;
 
@@ -59,7 +65,7 @@ const TURN = {
 } as const;
 
 /** Quiet this long with no live process known is a session somebody walked away from. */
-const IDLE_WITHIN_MS = 15 * 60 * 1_000;
+export const IDLE_WITHIN_MS = 15 * 60 * 1_000;
 
 export const SESSION_STATE = {
   /** Something recorded in the last few minutes. */
@@ -206,6 +212,8 @@ function desktopRows(
           handedBack: !each.working,
         }),
         turn: each.working ? TURN.IN_PROGRESS : TURN.HANDED_BACK,
+        // No hook runs in the apps, so nothing of theirs is ever held for the person; the view still names the count.
+        waitingOnYou: 0,
         runningIn: DESKTOP_APP_SPOKEN[each.app],
         desktop: true,
       };
@@ -268,17 +276,29 @@ async function describe(
   deps: SessionToolDeps,
   { sessionId, events, waiting, moment, turn, run }: OneSession,
 ): Promise<{ lastActive: string; state: SessionState } & Record<string, unknown>> {
-  const summary = summarizeSession(events);
+  // What the voice typed in is the person's word reported back, never the agent doing anything.
+  const work = events.filter((each) => !isVoiceDelivery(each));
+  const summary = summarizeSession(work);
   const [task, pause, host, helpers] = await Promise.all([
     new SessionTasks(deps.home).read(sessionId),
     new SessionPauses(deps.home).inForce(sessionId),
     new SessionHosts(deps.home).read(sessionId),
     new SessionSubagents(deps.home).of(sessionId),
   ]);
-  const last = events[events.length - 1]?.at;
+  const last = work[work.length - 1]?.at;
+  const spokenToAt = await sessionSpokenToAt(deps.home, sessionId, turn?.promptAt);
   const activeAt = latestOf([summary?.ended, last, turn?.promptAt, turn?.endedAt]);
   // Being opened is not work, so it dates the session without making it look busy.
-  const lastActive = activeAt === '' ? (host?.seenAt ?? run?.startedAt ?? '') : activeAt;
+  const lastActive =
+    activeAt === ''
+      ? (host?.seenAt ?? run?.startedAt ?? events[events.length - 1]?.at ?? '')
+      : activeAt;
+  const voiceOnly =
+    work.length === 0 &&
+    events.length > 0 &&
+    host === null &&
+    turn === undefined &&
+    run === undefined;
   const subagents = summarizeSubagents(helpers, moment);
   const thinking =
     turn !== undefined &&
@@ -291,13 +311,28 @@ async function describe(
   const repositories = repositoriesOf(events);
   return {
     session: sessionId,
-    agent: namedAgent(events) ?? summary?.agent ?? turn?.agent ?? run?.agent ?? 'unknown',
+    agent:
+      namedAgent(work) ??
+      summary?.agent ??
+      turn?.agent ??
+      run?.agent ??
+      namedAgent(events) ??
+      'unknown',
     ...(task === null ? {} : { task: task.statement }),
     // The mission stays the task; what the person asked last sits beside it.
     ...(task?.latestAsk === undefined ? {} : { lastAsk: task.latestAsk }),
     repositories: repositories.length > 0 || run === undefined ? repositories : [run.cwd],
-    started: summary?.started ?? events[0]?.at ?? turn?.promptAt ?? run?.startedAt ?? '',
+    started:
+      summary?.started ??
+      work[0]?.at ??
+      turn?.promptAt ??
+      run?.startedAt ??
+      events[0]?.at ??
+      '',
     lastActive,
+    // The hook's word for when they last prompted, for an agent whose transcript Memnox cannot read.
+    ...(turn?.promptAt === undefined ? {} : { promptedAt: turn.promptAt }),
+    ...(spokenToAt === undefined ? {} : { spokenToAt }),
     quietForMinutes: msToMinutes(moment.getTime() - Date.parse(lastActive)),
     state: stateOf({
       closed: host?.endedAt !== undefined,
@@ -310,7 +345,7 @@ async function describe(
     ...(turn === undefined
       ? {}
       : { turn: thinking ? TURN.IN_PROGRESS : TURN.HANDED_BACK }),
-    ...countsOf(summary, events.length),
+    ...countsOf(summary, work.length),
     waitingOnYou: waiting.filter((each) => each.request.sessionId === sessionId).length,
     ...(pause === null ? {} : { paused: pause.reason }),
     ...runningIn(host),
@@ -318,6 +353,7 @@ async function describe(
     ...(host === null && run?.app !== undefined ? { runningIn: run.app } : {}),
     ...(helpers.length === 0 ? {} : { subagents }),
     ...(sessionId === UNNAMED_SESSION ? { notAnAgent: LOCAL_WORK } : {}),
+    ...(voiceOnly ? { notAnAgent: VOICE_TYPING } : {}),
   };
 }
 
@@ -383,6 +419,10 @@ async function addJustLaunched(
  */
 function namedAgent(events: readonly MemnoxEvent[]): string | undefined {
   return events.find((each) => each.agent !== UNNAMED_AGENT && each.agent !== '')?.agent;
+}
+
+function isVoiceDelivery(event: MemnoxEvent): boolean {
+  return event.operation === DELIVERY_OPERATION;
 }
 
 /** How much it did, from the ledger's own summary of the session. */

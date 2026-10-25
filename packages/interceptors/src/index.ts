@@ -23,6 +23,8 @@ export * from './edit-hook';
 export * from './hook-payload';
 export * from './codex-patch';
 export * from './agent-edits';
+export * from './openclaw-payload';
+export * from './named-hosts';
 export * from './session-events';
 export * from './tool-calls';
 export * from './tool-policy';

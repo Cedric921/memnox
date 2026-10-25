@@ -79,6 +79,7 @@ export async function loadHookGate(
     {
       agentName: config.agentName ?? DEFAULT_AGENT_NAME,
       ...(config.agentRole === undefined ? {} : { agentRole: config.agentRole }),
+      ...(config.principal === undefined ? {} : { principal: config.principal }),
       task,
       stateFacts: stateLabelsOf(overlays, now()),
       ...(containment === null ? {} : { containment }),

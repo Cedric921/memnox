@@ -17,6 +17,7 @@ import {
   isCredentialRefused,
   type Account,
   type Alternative,
+  type DataPattern,
   type MachineClass,
   type OrgCondition,
   type PolicyCarveOut,
@@ -26,6 +27,7 @@ import {
 } from '@memnox/core';
 
 import { registerPolicyFile } from '../policy-registry';
+import { loadablePatterns } from './bundle-patterns';
 import { callCloud } from './client';
 
 /**
@@ -86,6 +88,8 @@ export interface Bundle {
   rules: BundleRule[];
   conditions: BundleCondition[];
   tags: unknown[];
+  /** The team's own sensitive data patterns, each under the classification it adds. */
+  classifications?: DataPattern[];
 }
 
 export const PULL_OUTCOME = {
@@ -218,10 +222,13 @@ interface BundleMachine {
 
 /** The bundle's rules as the policy document the gate already reads. */
 export function documentFrom(bundle: Bundle, machineClass?: MachineClass): unknown {
+  const classifications = loadablePatterns(bundle.classifications);
   return {
     version: 1,
     // Carried here so the next pull sends it as `If-None-Match` with no second copy.
     bundleHash: bundle.hash,
+    // The gate registers a policy file's patterns as it loads it, so every seam classifies with them.
+    ...(classifications.length === 0 ? {} : { classifications }),
     policies: bundle.rules
       .filter(canHonour)
       .filter((rule) => holdsOn(rule, machineClass))

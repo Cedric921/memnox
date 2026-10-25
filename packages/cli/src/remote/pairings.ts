@@ -37,7 +37,7 @@ const ANSWERED_TTL_MS = 5 * 60_000;
 
 // Names no command, since the Mac app shows these words and connects the machine from its Account page.
 const NOT_ENROLLED =
-  'This machine is not connected to Memnox Cloud, which carries the device to it. Connect it first, then pair again.';
+  'Memnox Cloud, which carries the device to this machine, could not be reached just now. Try again in a moment.';
 
 /** Wrong digits a pairing takes before it closes, so the code cannot be guessed. */
 const DIGIT_TRIES = 3;

@@ -4,12 +4,21 @@ import {
   HTTP,
   readAccount,
   secondsToMs,
+  type ToolConnection,
   type WorkAccount,
   type WorkAccountCheck,
 } from '@memnox/core';
 import { callCloud, CloudUnreachable } from './client';
 import { openBrowser, OPEN_BROWSER_VAR } from './browser';
-import { readPerson, type PersonCredential } from './person';
+import { readPerson } from './person';
+import { defaultBaseUrl } from './cloud-url';
+import {
+  ensureDeviceSpace,
+  readDeviceSpace,
+  spaceAsCaller,
+  spaceBaseUrl,
+  type PersonalCaller,
+} from './device-space';
 
 /**
  * The person's own tools through their own sign ins, so the voice reads and replies as them, never a
@@ -30,8 +39,10 @@ export interface PersonalTool {
   toolkit: string;
   inputParameters?: Record<string, unknown>;
   workClass: WorkClass;
-  /** Read through the workspace's own connection, which an admin made and has not signed in to themselves. */
+  /** Read through the workspace's own connection, which somebody else made and the person has not signed in to. */
   throughWorkspace?: true;
+  /** Reached on this Mac itself, an MCP server or a signed in command line tool, with no Memnox service between. */
+  local?: true;
 }
 
 /** The account one of the person's sign ins reached, as the tool itself named it. */
@@ -45,11 +56,11 @@ export interface CheckedAccount {
 export interface PersonalTools {
   tools: PersonalTool[];
   accounts: CheckedAccount[];
-  /** Tools an admin connected that the person has not signed in to yet. */
+  /** Tools the person named and has not signed in to yet, which any person may connect themselves. */
   signInFirst: string[];
   /** Signed in as somebody else's account, so nothing runs there until they sign in again. */
   signInAgain: string[];
-  /** The tool they named is a team's that no admin connected yet. */
+  /** Tools the cloud would not let them connect, which it no longer does for anybody; kept so an old cloud is said plainly. */
   needsAdmin: string[];
   /** No tool by the name they gave can be reached. */
   unknown: string[];
@@ -69,8 +80,9 @@ export interface PersonalRun {
   data: Record<string, unknown>;
 }
 
+/** Only when this Mac could not set itself up to act for them, since acting for themselves needs no Memnox account. */
 const NOT_SIGNED_IN =
-  'This Mac is not signed in as a person, so nothing can be done in their name. Say they can sign in once under Account in the Memnox app, the row for the voice and the terminal, or with memnox signin in a terminal.';
+  'Memnox Cloud could not be reached to set this Mac up to act in their own tools just now. Say so in a sentence and offer to try again; they need no Memnox account for their own tools, so never ask them to sign in to Memnox for this.';
 const NOT_REACHABLE =
   'The workspace could not be asked just now. Say so in a sentence; never say there is nothing there.';
 
@@ -148,8 +160,8 @@ export async function runPersonalTool(
 }
 
 /**
- * The provider's own sign in for one tool an admin connected, opened on this Mac. A member never
- * connects a tool; this is the tool asking them, once, whether Memnox may act in their name.
+ * The provider's own sign in for any tool, opened on this Mac. Every person connects their own tools,
+ * whatever their role or plan, and this is the tool asking them once whether Memnox may act in their name.
  */
 export async function signInPersonal(
   home: string,
@@ -330,6 +342,60 @@ export async function signOutOf(
   });
 }
 
+/** One of the person's sign ins as the workspace lists it under `me/grants`. */
+interface PersonGrant {
+  id: string;
+  toolkit: string;
+  status?: string;
+  enabled?: boolean;
+}
+
+/** The cloud's word for a sign in that works right now. */
+const GRANT_ACTIVE = 'active';
+
+/** Said by the Mac's menu bar as it stands, so these are words for the person rather than for the voice. */
+export const CONNECTIONS_NOT_SIGNED_IN =
+  'This Mac could not reach Memnox Cloud to connect your apps just now. Try again in a moment; you need no Memnox account for your own apps.';
+const CONNECTIONS_NOT_REACHABLE =
+  'Memnox Cloud could not be reached just now, so your connected apps cannot be shown.';
+
+/** The apps the person connected, one per toolkit, for the Mac to show. */
+export async function connectionsOf(
+  home: string,
+): Promise<PersonalAnswer<ToolConnection[]>> {
+  const person = await existingCaller(home);
+  // Nothing registered yet is nothing connected yet, so a list never registers a space on its own.
+  if (person === null) return { ok: true, value: [] };
+  try {
+    const grants = await callCloud<PersonGrant[]>({
+      baseUrl: person.baseUrl,
+      path: workPath(person, 'grants'),
+      token: person.token,
+      timeoutMs: READ_TIMEOUT_MS,
+    });
+    if (grants.status !== HTTP.OK) return refusal(grants);
+    return { ok: true, value: connectionsFrom(listOf(grants.body)) };
+  } catch (err) {
+    if (err instanceof CloudUnreachable)
+      return { ok: false, said: CONNECTIONS_NOT_REACHABLE };
+    throw err;
+  }
+}
+
+/** One entry per toolkit, connected when any of its sign ins is active and enabled, sorted by toolkit. */
+export function connectionsFrom(grants: readonly PersonGrant[]): ToolConnection[] {
+  const byToolkit = new Map<string, boolean>();
+  for (const grant of grants) {
+    if (typeof grant.toolkit !== 'string' || grant.toolkit === '') continue;
+    const toolkit = grant.toolkit.toLowerCase();
+    const live = grant.status?.toLowerCase() === GRANT_ACTIVE && grant.enabled === true;
+    byToolkit.set(toolkit, (byToolkit.get(toolkit) ?? false) || live);
+  }
+  return [...byToolkit.entries()]
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .map(([toolkit, connected]) => ({ toolkit, connected }));
+}
+
 /** The account as a card names it, and the key a run is checked against. */
 export function workAccountOf(checked: CheckedAccount): WorkAccount {
   const account = checked.account;
@@ -343,7 +409,7 @@ export function workAccountOf(checked: CheckedAccount): WorkAccount {
 }
 
 function signWork(
-  person: PersonCredential,
+  person: PersonalCaller,
   proposalId: string,
   tool: string,
   argumentsText: string,
@@ -360,9 +426,9 @@ function signWork(
 
 async function asPerson<T>(
   home: string,
-  call: (person: PersonCredential) => Promise<PersonalAnswer<T>>,
+  call: (person: PersonalCaller) => Promise<PersonalAnswer<T>>,
 ): Promise<PersonalAnswer<T>> {
-  const person = await readPerson(home);
+  const person = await personalCaller(home);
   if (person === null) return { ok: false, said: NOT_SIGNED_IN };
   try {
     return await call(person);
@@ -377,14 +443,36 @@ function listOf<T>(value: T[] | undefined): T[] {
 }
 
 /** Whoever a read goes out as: the person, or for workspace names alone this Mac. */
-type CloudReader = Pick<PersonCredential, 'baseUrl' | 'workspaceId' | 'token'>;
+type CloudReader = Pick<PersonalCaller, 'baseUrl' | 'workspaceId' | 'token'>;
+
+/** The signed in person, else this Mac's own personal space, without registering one. */
+export async function existingCaller(home: string): Promise<PersonalCaller | null> {
+  const person = await readPerson(home);
+  if (person !== null) return person;
+  const space = await readDeviceSpace(home);
+  return space === null ? null : spaceAsCaller(space);
+}
+
+/**
+ * Who acts in the person's own tools: the person where they signed in, else this Mac's personal space,
+ * registered the first time it is needed so nobody needs a Memnox account to act as themselves.
+ */
+export async function personalCaller(home: string): Promise<PersonalCaller | null> {
+  const found = await existingCaller(home);
+  if (found !== null) return found;
+  const space = await ensureDeviceSpace(home, await spaceBaseUrl(home, defaultBaseUrl()));
+  return space === null ? null : spaceAsCaller(space);
+}
 
 function workPath(person: CloudReader, route: string): string {
   return `/v1/workspaces/${encodeURIComponent(person.workspaceId)}/me/${route}`;
 }
 
 /** The control plane's own sentence where it gave one, so the voice says what actually stopped it. */
-function refusal<T>(answer: { status: number; body?: unknown }): PersonalAnswer<T> {
+export function refusal<T>(answer: {
+  status: number;
+  body?: unknown;
+}): PersonalAnswer<T> {
   const body = answer.body;
   const message =
     typeof body === 'object' && body !== null && 'message' in body

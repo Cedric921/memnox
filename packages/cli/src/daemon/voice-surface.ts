@@ -37,6 +37,7 @@ import type { RemotePrincipal } from './confirm';
 import { answerWaiting } from './confirm-question';
 import { followUpAnswer, followUpDeps } from './follow-up';
 import { answerMachine, isMachineMethod, type MachineSignIns } from './machine-calls';
+import { answerConnectionCall, isConnectionsMethod } from './connection-calls';
 import { answerPerson, isPersonMethod, type PersonSignIns } from './person-calls';
 export { isVoiceMethod } from './voice-methods';
 import { NoticeWatcher } from './notice-watch';
@@ -47,6 +48,7 @@ import { momentContext } from './ask-context';
 import {
   heardRemotely,
   markNeedsMac,
+  noteTold,
   OriginRouter,
   sendWaiting,
   type RouterDeps,
@@ -60,8 +62,10 @@ import { askAgain } from './news-told';
 import { VoiceHold, voiceOnNotice } from '../remote/voice-hold';
 import { SessionViews } from './session-view';
 import { answerPolish, isPolishMethod } from './polish-calls';
+import { answerRule, isRuleMethod } from './rule-calls';
 import { write, type Peer } from './socket-write';
 import { askingIn, WaitingFeed } from './waiting-feed';
+import { BRAIN_IDLE_MS, FEED_INTERVAL_MS, NOTICE_INTERVAL_MS } from './voice.constants';
 import {
   locateAnswer,
   macSpansAnswer,
@@ -74,15 +78,6 @@ import {
  * answers, and their questions to their own brain. Kept apart from the hot path that rules
  * on every command, since none of it has that latency budget.
  */
-
-/** Half an hour of quiet before the brain's process is let go, since starting it again costs the next answer ten seconds. */
-const BRAIN_IDLE_MS = 30 * 60 * 1_000;
-
-/** Often enough that a held call is spoken while the agent is still waiting on it. */
-const FEED_INTERVAL_MS = 500;
-
-/** A finished session is news for minutes, so the ledger is read for it far less often. */
-const NOTICE_INTERVAL_MS = 10_000;
 
 interface VoiceDeps {
   home: string;
@@ -225,6 +220,7 @@ export class VoiceSurface {
     this.feedTimer = null;
     if (this.noticeTimer !== null) clearInterval(this.noticeTimer);
     this.noticeTimer = null;
+    this.notices.close();
     this.hold.close();
     for (const socket of this.subscribers.keys()) socket.destroy();
     this.subscribers.clear();
@@ -238,6 +234,8 @@ export class VoiceSurface {
   ): Promise<DaemonResponse> {
     const feed = this.feed;
     if (isPolishMethod(request.method)) return answerPolish(this.deps.home, request);
+    if (isRuleMethod(request.method))
+      return answerRule(this.deps.home, request, this.deps.now());
     if (request.method === DAEMON_METHOD.LOCATE)
       return locateAnswer(this.deps.home, request);
     if (request.method === DAEMON_METHOD.SESSION_VIEW)
@@ -249,6 +247,8 @@ export class VoiceSurface {
     }
     if (isPersonMethod(request.method)) return answerPerson(request, this.deps.person);
     if (isMachineMethod(request.method)) return answerMachine(request, this.deps.machine);
+    if (isConnectionsMethod(request.method))
+      return answerConnectionCall(request, this.deps.home, principal !== undefined);
     if (isWordsMethod(request.method)) {
       return wordsAnswer(this.deps.home, request, this.deps.now());
     }
@@ -440,7 +440,7 @@ export class VoiceSurface {
     // The Mac app is listening, so the first question should meet a brain that is already up.
     void this.turns?.warm();
     const waiting = await this.feed.everything(this.deps.now());
-    waiting.forEach((event) => told.add(event.subject));
+    waiting.forEach((event) => noteTold(told, event));
     for (const event of await this.feed.told.firstHeard(waiting, principal !== undefined))
       write(socket, { id, ok: true, event: this.hold.stamp(markNeedsMac(event)) });
     this.watchNotices();
@@ -461,6 +461,7 @@ export class VoiceSurface {
   /** Reads the ledger for news every few seconds while somebody is listening. */
   private watchNotices(): void {
     if (this.noticeTimer !== null) return;
+    this.notices.followCollisions((event) => this.broadcast(event), this.deps.now);
     this.noticeTimer = setInterval(() => {
       if (this.subscribers.size === 0) return;
       this.notices

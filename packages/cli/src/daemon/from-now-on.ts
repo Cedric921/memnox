@@ -22,6 +22,9 @@ import { rulesInForce } from '../protect/written-rules';
 /** The answer word a device signs for it, beside once, session and deny. */
 export const FROM_NOW_ON = 'always';
 
+/** "Deny from now on": refused now, unsigned as any no, and a deny rule for the next one put on a card to sign. */
+export const NEVER_FROM_NOW_ON = 'never';
+
 /** As long as any other rule card waits for its signature. */
 const CARD_TTL_MS = minutesToMs(5);
 
@@ -69,6 +72,60 @@ export async function proposeFromNowOn(
   return { proposed: proposal.id };
 }
 
+/**
+ * The deny for the next identical call, carrying the person's reason as the rule's own, so an agent refused by it
+ * later hears why. Tightening needs no rule to relax, so it is offered wherever a call was held.
+ */
+export async function proposeNeverFromNowOn(
+  home: string,
+  request: HoldRequest,
+  at: string,
+  reason?: string,
+): Promise<FromNowOn> {
+  const scopes = await placesOf(home);
+  const proposal = await new Proposals(home).propose({
+    change: {
+      kind: PROPOSAL_KIND.RULES,
+      file: fileForScope(home, machineScope(true)),
+      rules: [denyRuleFor(request, reason)],
+      scopes,
+    },
+    rationale: `deny ${request.operation}${request.target === undefined ? '' : ` on ${request.target}`} for ${request.agent} from now on${reason === undefined ? '' : `: ${reason}`}`,
+    proposedBy: PROPOSED_BY,
+    at,
+    ttlMs: CARD_TTL_MS,
+  });
+  return { proposed: proposal.id };
+}
+
+function denyRuleFor(request: HoldRequest, reason: string | undefined): Policy {
+  return {
+    name: ruleName('never', request),
+    description: `Denied from now on, from the held call on ${request.operation}.`,
+    match: matchOf(request),
+    decision: {
+      effect: DECISION_EFFECT.DENY,
+      reason: reason ?? `a person denied ${request.operation} from now on`,
+    },
+  };
+}
+
+function ruleName(prefix: string, request: HoldRequest): string {
+  return [prefix, request.agent, request.operation, request.target ?? '']
+    .join('-')
+    .replace(/[^a-z0-9]+/gi, '-')
+    .replace(/^-|-$/g, '')
+    .toLowerCase();
+}
+
+function matchOf(request: HoldRequest): Policy['match'] {
+  return {
+    actions: [request.operation],
+    agents: [request.agent],
+    ...(request.target === undefined ? {} : { targets: [request.target] }),
+  };
+}
+
 /** The whole Mac, suggested, and the team where this Mac belongs to one. */
 async function placesOf(home: string): Promise<RuleScope[]> {
   return [
@@ -79,17 +136,9 @@ async function placesOf(home: string): Promise<RuleScope[]> {
 
 function ruleFor(request: HoldRequest, relaxes: readonly string[]): Policy {
   return {
-    name: ['always', request.agent, request.operation, request.target ?? '']
-      .join('-')
-      .replace(/[^a-z0-9]+/gi, '-')
-      .replace(/^-|-$/g, '')
-      .toLowerCase(),
+    name: ruleName('always', request),
     description: `Allowed from now on, from the held call on ${request.operation}.`,
-    match: {
-      actions: [request.operation],
-      agents: [request.agent],
-      ...(request.target === undefined ? {} : { targets: [request.target] }),
-    },
+    match: matchOf(request),
     decision: {
       effect: DECISION_EFFECT.ALLOW,
       reason: `a person allowed ${request.operation} from now on`,

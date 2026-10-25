@@ -176,6 +176,7 @@ describe('the capability table', () => {
     expect(remoteCapabilityFor(DAEMON_METHOD.DELIVERED)).toBe('see');
     expect(remoteCapabilityFor(DAEMON_METHOD.FOLLOW_UP)).toBe('steer');
     expect(remoteCapabilityFor(DAEMON_METHOD.VOICE_RELEASE)).toBe('see');
+    expect(remoteCapabilityFor(DAEMON_METHOD.CONNECTIONS_LIST)).toBe('see');
     for (const local of [
       DAEMON_METHOD.PAIR_BEGIN,
       DAEMON_METHOD.PAIR_ACCEPT,

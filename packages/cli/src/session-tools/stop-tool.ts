@@ -13,7 +13,13 @@ import { witnessed } from './witnessed';
 import { paneOn, pressEscapeIn, type Pane } from './multiplexer';
 import type { SessionToolDeps } from './read-tools';
 import type { SessionScope } from './session-scope';
-import { FINDS_ITS_TAB } from './session-tools.constants';
+import { controlAppTool } from './app-tools';
+import {
+  APP_ACTION,
+  APP_SESSION_PREFIX,
+  FINDS_ITS_TAB,
+  TOOL_ARG,
+} from './session-tools.constants';
 
 /**
  * Stopping an agent where it is, as a person does at the keyboard: Escape in the terminal it runs
@@ -28,9 +34,12 @@ export async function stopSession(
   const live = recorded === null ? null : liveHost(recorded);
   const inPanel = live?.panel === true;
   const tty = inPanel ? undefined : live?.tty;
-  // An editor's agent panel is stopped by the Mac in its conversation; nothing else without a terminal can be.
+  // An editor's agent panel is stopped by the Mac in its conversation, and a desktop app's own agent, such as
+  // Cursor's, by the app's Stop button; anything else without a terminal cannot be.
   if (tty === undefined && !inPanel)
-    return { ...scope, stopped: false, said: NO_TERMINAL };
+    return sessionId.startsWith(APP_SESSION_PREFIX)
+      ? stoppedInApp(deps, scope, sessionId)
+      : { ...scope, stopped: false, said: NO_TERMINAL };
   const pane =
     tty === undefined || FINDS_ITS_TAB.test(live?.app ?? '')
       ? null
@@ -50,6 +59,21 @@ export async function stopSession(
   if (delivery !== null && wentIn(delivery.outcome))
     await turnOver(deps, scope, sessionId);
   return { ...scope, ...stoppedAs(delivery), ...witnessed(delivery) };
+}
+
+/** The app's own Stop, pressed by the Mac the way control_app stops a reply in progress. */
+async function stoppedInApp(
+  deps: SessionToolDeps,
+  scope: SessionScope,
+  sessionId: string,
+): Promise<Record<string, unknown>> {
+  const done = (await controlAppTool(deps, {
+    [TOOL_ARG.ACTION]: APP_ACTION.STOP,
+    [TOOL_ARG.AGENT]: sessionId.slice(APP_SESSION_PREFIX.length),
+  })) as Record<string, unknown>;
+  const stopped = done['done'] === true;
+  if (stopped) await turnOver(deps, scope, sessionId);
+  return { ...scope, ...done, stopped };
 }
 
 /** No hook says a turn ended when it was interrupted, so it is recorded here or it would look busy for hours. */

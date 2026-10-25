@@ -79,6 +79,7 @@ export const EVENT_SCHEMA = {
     bundleHash: { type: 'string' },
     conditionsInForce: { type: 'array', items: { type: 'string' } },
     decisionIds: { type: 'array', items: { type: 'string' } },
+    signals: { type: 'array', items: { type: 'string' } },
     argsDigest: { type: 'string' },
     execution: { enum: Object.values(EXECUTION) },
     exitCode: { type: 'integer' },

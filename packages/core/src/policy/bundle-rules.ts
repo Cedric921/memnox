@@ -4,6 +4,7 @@
  */
 import { validatePolicyDocument } from './policy-validator';
 import type { Policy, PolicyCarveOut, PolicyMatch } from './policy';
+import type { DataPattern } from '../domain/sensitive-data';
 
 /** One rule as the control plane publishes it in its bundle. */
 export interface PublishedRule {
@@ -33,6 +34,8 @@ export interface PublishedRule {
 export interface PublishedBundle {
   hash: string;
   rules: PublishedRule[];
+  /** The workspace's own sensitive data patterns, each under the classification it adds. */
+  classifications?: DataPattern[];
 }
 
 const MACHINE_CLASSES = 'machineClasses';

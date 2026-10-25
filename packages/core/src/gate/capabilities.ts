@@ -2,26 +2,11 @@ import { DISPLAY, DISPLAY_VIA, type DisplayKind } from '../daemon/display';
 import { DAEMON_METHOD, type DaemonEvent } from '../daemon/protocol';
 import { START_ID_PREFIX } from '../coordination/session-starts';
 import { PROPOSAL_KIND, type ProposedChange } from './proposals';
+import { REMOTE_CAPABILITY, type RemoteCapability } from './remote-capability';
 
-/**
- * What a paired device may do, as data the runtime decides and the apps only display. A remote
- * request is looked up here by the device the Noise handshake proved, never by a token or a header.
- */
+export { REMOTE_CAPABILITY, type RemoteCapability };
 
-export const REMOTE_CAPABILITY = {
-  SEE: 'see',
-  ASK: 'ask',
-  /** A held call, or a proposal answering one. */
-  ANSWER: 'answer',
-  /** Stopping, freezing or resuming, and the person's own follow up typed into a session. */
-  STEER: 'steer',
-  RULES: 'rules',
-  REWIND: 'rewind',
-  /** Driving, and a proposal for something only the Mac can do. */
-  MAC: 'mac',
-} as const;
-
-export type RemoteCapability = (typeof REMOTE_CAPABILITY)[keyof typeof REMOTE_CAPABILITY];
+/** Which capability each remote method needs, and what a phone holds the moment it pairs. */
 
 export const ALL_REMOTE_CAPABILITIES: readonly RemoteCapability[] =
   Object.values(REMOTE_CAPABILITY);
@@ -46,8 +31,17 @@ const REMOTE_METHODS: Readonly<Record<string, RemoteCapability>> = {
   [DAEMON_METHOD.VOICE_CHOICE]: REMOTE_CAPABILITY.SEE,
   [DAEMON_METHOD.FILES_LIST]: REMOTE_CAPABILITY.SEE,
   [DAEMON_METHOD.HOME]: REMOTE_CAPABILITY.SEE,
+  // Which app accounts the person connected and whether each sign in still works; acting in one is a separate signed proposal.
+  [DAEMON_METHOD.CONNECTIONS_LIST]: REMOTE_CAPABILITY.SEE,
+  // Only names from the cloud's catalogue, which tells the phone no more than the list does.
+  [DAEMON_METHOD.TOOLKITS_SEARCH]: REMOTE_CAPABILITY.SEE,
+  // Signing in or out changes what may be done in the person's name, so it takes what answering for them takes.
+  [DAEMON_METHOD.CONNECTIONS_SIGN_IN]: REMOTE_CAPABILITY.ANSWER,
+  [DAEMON_METHOD.CONNECTIONS_SIGN_OUT]: REMOTE_CAPABILITY.ANSWER,
   // Only writes a proposal; the rule holds once the person signs it with the rules capability.
   [DAEMON_METHOD.HAND_OVER]: REMOTE_CAPABILITY.ASK,
+  // Drafts and proposes a spoken rule; it holds only once the person signs it with the rules capability.
+  [DAEMON_METHOD.RULE]: REMOTE_CAPABILITY.ASK,
   [DAEMON_METHOD.ASK]: REMOTE_CAPABILITY.ASK,
   [DAEMON_METHOD.CANCEL]: REMOTE_CAPABILITY.ASK,
   [DAEMON_METHOD.WARM]: REMOTE_CAPABILITY.ASK,

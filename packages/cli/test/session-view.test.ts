@@ -12,6 +12,7 @@ import {
   type MemnoxEvent,
 } from '@memnox/core';
 import { SessionViews } from '../src/daemon/session-view';
+import { deliveredAs } from '../src/daemon/session-view-steps';
 
 const NOW = new Date('2026-10-02T12:00:00.000Z');
 
@@ -135,6 +136,16 @@ describe('the live window on a session', () => {
         '+export const total = 0;',
       ],
     });
+    const diff = await new SessionViews(home, () => NOW).diff(
+      'ses_live',
+      'src/invoice.ts',
+    );
+    expect(diff?.path).toBe('src/invoice.ts');
+    expect(diff?.lines[0]).toMatch(/^@@/);
+    expect(diff?.lines).toContain('+export const total = 0;');
+    expect(
+      await new SessionViews(home, () => NOW).diff('ses_live', 'src/none.ts'),
+    ).toBeNull();
   });
 
   it('says what a session is about from its first request, with its branch, where it runs and where it stands', async () => {
@@ -198,5 +209,52 @@ describe('the live window on a session', () => {
       lastSaid: 'Done The cancel button is in Cart.tsx.',
     });
     expect(view?.repository).toBe(basename(repo));
+  });
+
+  it('orders the cards by when the person last wrote to each, not by which agent last ran something', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'memnox-live-'));
+    const line = (value: unknown): string => JSON.stringify(value);
+    await mkdir(join(home, '.claude', 'projects', 'repo'), { recursive: true });
+    const said = async (id: string, at: string): Promise<void> => {
+      await writeFile(
+        join(home, '.claude', 'projects', 'repo', `${id}.jsonl`),
+        [
+          line({ type: 'user', timestamp: at, message: { content: 'fix the relay' } }),
+          line({
+            type: 'assistant',
+            timestamp: '2026-10-02T11:59:00.000Z',
+            message: { content: [{ type: 'text', text: 'Working on it.' }] },
+          }),
+        ].join('\n'),
+      );
+    };
+    const busy = 'b0000000-0000-4000-8000-000000000001';
+    const mine = 'b0000000-0000-4000-8000-000000000002';
+    await said(busy, '2026-10-02T10:00:00.000Z');
+    await said(mine, '2026-10-02T11:40:00.000Z');
+    const store = SqliteEventStore.forHome(home);
+    await store.append(row({ sessionId: busy, at: '2026-10-02T11:59:00.000Z' }));
+    await store.append(row({ sessionId: mine, at: '2026-10-02T11:41:00.000Z' }));
+    store.close();
+
+    const cards = await new SessionViews(home, () => NOW).list();
+    expect(cards.map((each) => [each.sessionId, each.spokenToAt])).toEqual([
+      [mine, '2026-10-02T11:40:00.000Z'],
+      [busy, '2026-10-02T10:00:00.000Z'],
+    ]);
+  });
+});
+
+describe('what became of a message, as a step reads', () => {
+  it("says it in the person's words rather than as the ledger row", () => {
+    expect(deliveredAs('verified')).toBe('Your message went in');
+    expect(deliveredAs('typed')).toBe('Your message was typed in');
+    expect(deliveredAs('clipboard')).toBe('Your message was left on the clipboard');
+    expect(deliveredAs('failed')).toBe('Your message did not go in');
+  });
+
+  it('never prints a raw outcome it does not know', () => {
+    expect(deliveredAs('something-new')).toBe('You sent it a message');
+    expect(deliveredAs(undefined)).toBe('You sent it a message');
   });
 });

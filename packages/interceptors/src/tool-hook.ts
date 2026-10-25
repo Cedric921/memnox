@@ -7,6 +7,7 @@ import {
   DECISION_EFFECT,
   ENFORCEMENT_MODE,
   FIRST_RUN_MODE,
+  describeAlternative,
   MEMNOX_HOME,
   NodeSnapshotStore,
   openLedger,
@@ -325,10 +326,12 @@ async function withChatAnswer(
       reason: `${by} allowed this (${held.id})`,
     };
   }
+  // Their reason beside the rule's way forward, which `reasonFor` adds, so a no reads as narrow it rather than stop.
+  const said = held.answerReason === undefined ? '' : `, and said: ${held.answerReason}`;
   return {
     ...ruling,
     effect: DECISION_EFFECT.DENY,
-    reason: `${by} said no to this (${held.id})`,
+    reason: `${by} said no to this (${held.id})${said}`,
   };
 }
 
@@ -369,6 +372,9 @@ function questionOf(ruling: ToolRuling, sessionId: string, agent: string): ChatQ
     class: ruling.class,
     reason: ruling.reason,
     ...(ruling.rule === undefined ? {} : { rule: ruling.rule }),
+    ...(ruling.alternative === undefined
+      ? {}
+      : { alternative: describeAlternative(ruling.alternative) }),
   };
 }
 

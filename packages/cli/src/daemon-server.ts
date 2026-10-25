@@ -462,7 +462,8 @@ export class MemnoxDaemon {
       };
     }
     const target = request.target === undefined ? {} : { target: request.target };
-    const verdict = gate.evaluate({ action, ...target });
+    const { dataClassification } = request;
+    const verdict = gate.evaluate({ action, ...target, dataClassification });
     if (verdict.effect === DECISION_EFFECT.ALLOW) {
       return { id: request.id, ok: true, effect: verdict.effect, reason: verdict.reason };
     }

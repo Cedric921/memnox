@@ -141,11 +141,11 @@ async function stamp(path: string, moment: string): Promise<void> {
 }
 
 describe('what the operator is offered', () => {
-  it("reads, and writes nothing but a proposal, a pause, a watch, the person's answer to their agent's question in its picker or its terminal, their words typed into an agent's app, an app they named stopped or closed, a word they were misheard saying, what they told it about themselves, its own screenshots forgotten, a folder to open or make, a draft it put up withdrawn, a page opened, a list put on screen, or a request to show or start what the person said yes to", () => {
+  it("reads, and writes nothing but a proposal, a pause, a watch, the person's answer to their agent's question in its picker or its terminal, their words typed into an agent's app, an app they named stopped or closed, a word they were misheard saying, what they told it about themselves, its own screenshots forgotten, a folder to open or make, a draft it put up withdrawn, a page opened, a list put on screen, an ask to another owner for their agent's lines or the answer to one, an incident taken, an exception refused, or a request to show or start what the person said yes to", () => {
     for (const tool of OPERATOR_TOOLS) {
       if (tool.annotations.readOnlyHint) continue;
       expect(tool.name).toMatch(
-        /^(propose_|show$|pause_session$|send_instruction$|type_in_app$|control_app$|answer_question$|answer_agent$|watch_for$|walk_through$|start_session$|show_agents$|memnox_command$|traces$|remember_word$|forget_word$|remember_about_me$|forget_about_me$|forget_screen$|open_folder$|create_folder$|withdraw$|open_link$|show_list$)/,
+        /^(propose_|show$|pause_session$|pause_agent$|send_instruction$|type_in_app$|control_app$|answer_question$|answer_agent$|watch_for$|walk_through$|start_session$|show_agents$|memnox_command$|traces$|remember_word$|forget_word$|remember_about_me$|forget_about_me$|forget_screen$|open_folder$|create_folder$|withdraw$|open_link$|search_web$|show_list$|ask_for_lines$|answer_ask_for_lines$|message_person$|answer_person$|acknowledge_incident$|reject_exception$)/,
       );
     }
   });
@@ -779,6 +779,21 @@ describe('telling an agent what the person said', () => {
     });
   });
 
+  it('still hands a typed follow up over at the next step where there is no terminal prompt to type it into', async () => {
+    const deps = await depsAt();
+    await new SessionTurns(deps.home).prompted(
+      'ses_work',
+      'claude-code',
+      '2026-09-30T11:50:00.000Z',
+    );
+    const id = await proposed(deps);
+    expect(
+      await sendInstructionTool(deps, { instruction: id }, () => true, undefined, {
+        typedWhileWorking: true,
+      }),
+    ).toMatchObject({ sent: true, how: 'queued' });
+  });
+
   it('puts it in the input of a session waiting in an editor, for the person to send', async () => {
     const deps = await depsAt();
     const turns = new SessionTurns(deps.home);
@@ -820,6 +835,8 @@ describe('telling an agent what the person said', () => {
       agent: 'claude-code',
       pid: process.pid,
       app: 'Visual Studio Code',
+      // In its chat panel, or a run from a terminal reads that terminal as where it waits.
+      panel: true,
       seenAt: '2026-09-30T11:00:00.000Z',
       cwd: deps.home,
     });
